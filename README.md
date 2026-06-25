@@ -11,6 +11,10 @@ GPON path, its boot-fixup scripts, monitoring daemons, and incident post-mortems
 - `scripts/` — scripts deployed to Route10 under `/cfg/...`. `post-cfg.sh` runs after every
   Alta cloud-config reapply (idempotent boot-fixup + daemon launcher; the cloud master
   overwrites local `uci`/`config.json` on boot, so persistent fixes live here).
+- `tools/` — local dev tooling (not deployed). `deploy-preflight.sh` validates a script
+  against Route10's busybox **ash** before you copy it to `/cfg` — the authoritative check
+  runs `sh -n` on the router itself (macOS `/bin/sh` accepts bashisms ash rejects).
+  Run: `tools/deploy-preflight.sh scripts/post-cfg.sh`.
 - `docs/postmortems/` — incident write-ups.
 
 ## Quick facts
