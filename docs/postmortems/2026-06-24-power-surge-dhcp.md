@@ -207,7 +207,7 @@ separate step.) Follow-ups, in priority:
 
 | # | Action | Why | Status |
 |---|---|---|---|
-| 0 | **post-cfg.sh: `dnsmasq restart` after LAN churn** | Directly prevents the mute (§6) | ✅ committed (fix PR); **deploy to `/cfg` pending** |
+| 0 | **post-cfg.sh: `dnsmasq restart` after LAN churn** | Directly prevents the mute (§6) | ✅ PR #1 merged + **deployed to `/cfg/post-cfg.sh` 2026-06-24** (backup `post-cfg.sh.bak-20260624-230615`); engages on next boot/reapply |
 | 1 | **Route10 + Living Room gear on a proven surge-rated UPS** | Gateway dropped from a 45 h run; it's the one box that must never lose power | TODO |
 | 2 | **Office PDU → "last state = ON"**; office gear on real UPS | It came back OFF → 1.5 h extra outage needing a human | TODO |
 | 3 | **DHCP self-test watchdog** (fits flap-hunt/odi-health daemon pattern): periodically DHCP-probe br-lan; if no OFFER, `/etc/init.d/dnsmasq restart` | Defense-in-depth for any *other* mute cause | TODO (next) |
