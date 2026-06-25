@@ -2,8 +2,8 @@
 
 **Status:** service restored; **dnsmasq-mute fix deployed** (`scripts/post-cfg.sh` → `/cfg`) plus a
 **DHCP-mute watchdog deployed** (`scripts/dhcp-watchdog.sh`); the mute mechanism is **CONFIRMED**
-(§6: `ifup lan` mutes dnsmasq's DHCP until restart) and the deployed fix is **validated
-end-to-end**; network **re-converged** (Wi-Fi via TP-Link restart, wired/switch clients via
+(§6: a full `ifup lan` mutes dnsmasq's DHCP) and **fixed at the source** — post-cfg re-pulls
+IPv6 via `network reload` (no mute, no restart; validated); network **re-converged** (Wi-Fi via TP-Link restart, wired/switch clients via
 manual renew — §8).
 
 **One-line:** A mains power surge rebooted Route10 (both UPSs failed). On the way back
@@ -183,23 +183,20 @@ ifup-lan cycle 2:  NO_REPLY   +3s NO_REPLY
 dnsmasq restart →  ANSWERED
 ```
 
-**The deployed fix, validated end-to-end:** set a stale `ip6class=wan6` (as the cloud does on
-boot), ran the deployed `post-cfg.sh` → it did `ifup lan` (mute) then its `DNSMASQ_REBIND`
-restart → `ip6class` cleared, br-lan IPv6 re-pulled (`…9a50::1/64`), probe **ANSWERED**. The
-outage is prevented.
+### THE FIX — two steps, both deployed
 
-### THE FIX — implemented
+1. **PR #1 (2026-06-24):** restart dnsmasq at the end of post-cfg.sh whenever it churned the LAN
+   — recovers *from* the mute. Validated, but a mute window still existed during boot.
+2. **PR #4 (2026-06-25) — the clean fix:** swap the ip6class `ifup lan` for
+   `/etc/init.d/network reload`, which re-pulls the IPv6 PD **without muting dnsmasq** (3/3) and
+   without bouncing wan3/PPP — `ifup lan` (full interface restart) was the *only* mute trigger.
+   The PR #1 restart was then no longer needed and was dropped. **Validated end-to-end:** stale
+   `ip6class=wan6` → run the deployed post-cfg.sh → `ip6class` cleared, IPv6 re-pulled
+   (`…9a50::1/64`), probe **ANSWERED** throughout, **dnsmasq pid unchanged** (no restart, no
+   mute). DHCP no longer dies during boot at all.
 
-`scripts/post-cfg.sh` now runs `/etc/init.d/dnsmasq restart` at the end **only when it actually
-churned the LAN** (the eth4-MAC `network reload` or the ip6class `ifup lan` fired), after a
-short settle. This guarantees dnsmasq ends each boot cleanly bound to the final br-lan — it
-would have prevented the entire outage. **Deployed to `/cfg/post-cfg.sh` 2026-06-24** (§7 #0).
-Follow-ups, in priority:
-- **DHCP self-test watchdog** — ✅ deployed (`scripts/dhcp-watchdog.sh`, §7 #3): defense-in-depth
-  for any *other* mute cause. Could be upgraded to actively probe with `tools/dhcp-probe.py`.
-- **ip6class refresh without the mute** — OPEN (§7 #5): the `ifup lan` is what mutes dnsmasq;
-  re-pulling IPv6 without it would obviate the restart, but `renew` is a no-op for config changes.
-- **Alta Syslog Host → Loki** — deferred (§7 #7).
+Remaining defense-in-depth: the DHCP watchdog (§7 #3, could be upgraded to actively probe with
+`tools/dhcp-probe.py`); observability: Syslog→Loki (§7 #7).
 
 ---
 
@@ -207,12 +204,12 @@ Follow-ups, in priority:
 
 | # | Action | Why | Status |
 |---|---|---|---|
-| 0 | **post-cfg.sh: `dnsmasq restart` after LAN churn** | Directly prevents the mute (§6) | ✅ PR #1 merged + **deployed to `/cfg/post-cfg.sh` 2026-06-24** (backup `post-cfg.sh.bak-20260624-230615`); engages on next boot/reapply |
+| 0 | **post-cfg.sh: `dnsmasq restart` after LAN churn** | Recover *from* the mute (§6) | ✅ PR #1 deployed 2026-06-24 — then **superseded by #5** (PR #4): restart removed once `network reload` eliminated the mute at the source |
 | 1 | **Route10 + Living Room gear on a proven surge-rated UPS** | Gateway dropped from a 45 h run; it's the one box that must never lose power | TODO |
 | 2 | **Office PDU → "last state = ON"**; office gear on real UPS | It came back OFF → 1.5 h extra outage needing a human | TODO |
 | 3 | **DHCP self-test watchdog** (`scripts/dhcp-watchdog.sh`): passively watches br-lan for the "many requests, zero replies" mute signature; `/etc/init.d/dnsmasq restart` on confirmed mute (debounced + cooldown) | Defense-in-depth for any *other* mute cause | ✅ PR #3 + **deployed & running 2026-06-24** |
 | 4 | **TP-Link DHCP = OFF** (not Auto), stays AP mode | Disarms the failsafe-rogue landmine (§4) | ✅ done — set OFF (not Auto), AP mode |
-| 5 | **Re-pull IPv6 without the mute** (avoid the `ifup lan` that triggers it) | The ip6class `ifup lan` **deterministically mutes dnsmasq's DHCP** (§6, confirmed 5/5) — #0 recovers it, but not causing the mute is cleaner. `ifup lan` is gentle on L2 (~0.3 s) but kills dnsmasq; `renew` is gentle AND a no-op for config; `network reload` untested (WAN risk). | OPEN — mitigated by #0 |
+| 5 | **Re-pull IPv6 via `network reload`, not `ifup lan`** | `ifup lan` mutes dnsmasq (§6, 5/5); `network reload` re-pulls the /64 without muting (3/3) and without a WAN bounce — eliminates the mute at the source (replaces #0's restart). (`renew` was gentle too but a no-op for config changes.) | ✅ **PR #4 deployed + validated 2026-06-25** — post-cfg run: IPv6 re-pulled, probe ANSWERED, dnsmasq pid unchanged |
 | 6 | **DHCP snooping on the office/managed switch** if supported | Drops rogue DHCP server packets from untrusted ports | TODO |
 | 7 | **Alta Syslog Host → Loki** + `log-dhcp` on Route10 | So the next event is diagnosable (§6); kills the volatile-logread blind spot | TODO (deferred) |
 
