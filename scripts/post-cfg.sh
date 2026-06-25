@@ -21,6 +21,10 @@
 
 set -e
 
+# Track whether we churned the LAN bridge (network reload / ifup lan) so we can
+# re-bind dnsmasq exactly once at the end — see the dnsmasq re-bind block below.
+DNSMASQ_REBIND=0
+
 # ── network ────────────────────────────────────────────────────────────────
 uci set network.ont_mgmt_dev=device
 uci set network.ont_mgmt_dev.type='macvlan'
@@ -89,6 +93,7 @@ if [ "$(echo "$CUR_ETH4_MAC" | tr 'A-Z' 'a-z')" != "$(echo "$WANT_ETH4_MAC" | tr
     # is restarted with the new source MAC. `ifup wan3` alone won't reset
     # eth4's hardware MAC.
     /etc/init.d/network reload >/dev/null 2>&1 || true
+    DNSMASQ_REBIND=1
 fi
 
 # ── pppd LCP echo tolerance (wan + wan3) ───────────────────────────────────
@@ -151,6 +156,7 @@ if [ -n "$(uci -q get network.lan.ip6class 2>/dev/null || true)" ]; then
     # touch wan3/PPP; dnsmasq (enable-ra, constructor:br-lan) then picks up the
     # new global address on br-lan and advertises it via SLAAC.
     ifup lan >/dev/null 2>&1 || true
+    DNSMASQ_REBIND=1
 fi
 
 # ── mwan3 flush_conntrack — drop 'connected' / 'disconnected' ──────────────
@@ -240,6 +246,26 @@ if ! ip link show ont_mgmt0 >/dev/null 2>&1; then
     /etc/init.d/firewall reload >/dev/null 2>&1 || true
 elif ! ip -4 addr show ont_mgmt0 | grep -q "192.168.1.2"; then
     ifup ont_mgmt
+fi
+
+# ── dnsmasq re-bind after LAN churn ────────────────────────────────────────
+# The eth4-MAC `network reload` and the ip6class `ifup lan` above both
+# reconfigure br-lan while dnsmasq is already running. dnsmasq's only
+# auto-recovery is a SIGHUP (init reload_service → procd_send_signal), which
+# does NOT reliably re-bind its DHCP listener after a mid-bounce — it can be
+# left LISTENING on udp/67 but answering nothing (the 2026-06-24 surge outage:
+# every device lost its lease, the rogue TP-Link DHCP-Auto filled the gap, and
+# a remote reboot did NOT fix it — only a full dnsmasq restart did). A full
+# restart re-inits cleanly.
+#
+# Only do it when we actually churned the LAN, so a no-op cloud reapply doesn't
+# needlessly blip DNS for every client. The short sleep lets br-lan settle so
+# dnsmasq binds to the final bridge state.
+#
+# See docs/postmortems/2026-06-24-power-surge-dhcp.md.
+if [ "$DNSMASQ_REBIND" = "1" ]; then
+    sleep 3
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 fi
 
 # ── daemons ────────────────────────────────────────────────────────────────
