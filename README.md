@@ -8,9 +8,12 @@ GPON path, its boot-fixup scripts, monitoring daemons, and incident post-mortems
 > as they're migrated in.
 
 ## Layout
-- `scripts/` — scripts deployed to Route10 under `/cfg/...`. `post-cfg.sh` runs after every
-  Alta cloud-config reapply (idempotent boot-fixup + daemon launcher; the cloud master
-  overwrites local `uci`/`config.json` on boot, so persistent fixes live here).
+- `scripts/` — scripts deployed to Route10 under `/cfg/...`. `post-cfg.sh` (→ `/cfg/`) runs
+  after every Alta cloud-config reapply (idempotent boot-fixup + daemon launcher; the cloud
+  master overwrites local `uci`/`config.json` on boot, so persistent fixes live here).
+  `dhcp-watchdog.sh` (→ `/cfg/scripts/`) detects & auto-restarts a mute dnsmasq (the
+  2026-06-24 surge failure mode) by watching `br-lan` for the "many requests, zero replies"
+  signature; launched by `post-cfg.sh`.
 - `tools/` — local dev tooling (not deployed). `deploy-preflight.sh` validates a script
   against Route10's busybox **ash** before you copy it to `/cfg` — the authoritative check
   runs `sh -n` on the router itself (macOS `/bin/sh` accepts bashisms ash rejects).
