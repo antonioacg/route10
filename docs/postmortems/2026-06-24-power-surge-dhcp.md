@@ -1,8 +1,9 @@
 # Post-mortem — 2026-06-24 power-surge LAN outage (Route10 DHCP failure)
 
-**Status:** service restored; **dnsmasq-mute fix implemented** (`scripts/post-cfg.sh`, see the
-fix commit/PR); the exact mute mechanism is **not yet confirmed on-demand** (§6 repro was
-confounded); network **not fully re-converged** at write time (some devices on stale leases, §8).
+**Status:** service restored; **dnsmasq-mute fix deployed** (`scripts/post-cfg.sh` → `/cfg`) plus a
+**DHCP-mute watchdog deployed** (`scripts/dhcp-watchdog.sh`); the exact mute mechanism is **not yet
+confirmed on-demand** (§6 repro was confounded); network **not fully re-converged** at write time
+(some devices on stale leases, §8).
 
 **One-line:** A mains power surge rebooted Route10 (both UPSs failed). On the way back
 up, Route10's `dnsmasq` came up **listening but mute on DHCP** — it answered *zero*
@@ -152,10 +153,13 @@ still went mute — so it is not simple `bind-interfaces` staleness.
   all. Either way (no trigger, or SIGHUP-mid-bounce), dnsmasq keeps a **stale binding → mute
   on the new br-lan**. A **full restart** re-inits cleanly — which is exactly what fixed it.
 
-**Why this boot and not every boot:** a timing race. The messy surge boot (slow, eth5 joining
-br-lan ~87 min late, multiple netifd reloads) widened the window where dnsmasq got
-signalled/bounced into the stale state and stayed there. On clean boots the timing usually
-lands fine — but it is latent on *every* boot.
+**Why this boot and not every reboot:** genuinely unresolved — `logread` is volatile and was empty
+by the time we looked (no `log-dhcp`). The mechanism above is latent on *every* boot (post-cfg
+churns br-lan each time); this incident it stuck on **both** reboots, and we can't prove why it
+manifested fully here and not on routine reboots. (Note: eth5 joining br-lan ~87 min late was the
+**office coming back on power** — its PDU was off — NOT a Route10 boot delay; and dnsmasq was
+already mute at reboot #1, ~87 min *before* eth5 joined, so eth5's lateness is not part of the
+cause.) The fix below makes the question moot.
 
 ### Reproduction attempt 2026-06-24 — CONFOUNDED, but informative
 
@@ -193,13 +197,14 @@ capturing it) or a raw-socket DHCP probe injected locally on br-lan.
 `scripts/post-cfg.sh` now runs `/etc/init.d/dnsmasq restart` at the end **only when it actually
 churned the LAN** (the eth4-MAC `network reload` or the ip6class `ifup lan` fired), after a
 short settle. This guarantees dnsmasq ends each boot cleanly bound to the final br-lan — it
-would have prevented the entire outage. (Deployment to `/cfg/post-cfg.sh` on Route10 is a
-separate step.) Follow-ups, in priority:
-- **Make the ip6class refresh less disruptive** than a full `ifup lan` (it's an ~85 s LAN
-  outage every boot).
-- **DHCP self-test watchdog** (§7) — defense-in-depth for any *other* mute cause.
-- **Alta Syslog Host → Loki** (§7) — so the next event has real data (the volatile-`logread`
-  blind spot is why this stays "not 100% proven").
+would have prevented the entire outage. **Deployed to `/cfg/post-cfg.sh` 2026-06-24** (§7 #0).
+Follow-ups, in priority:
+- **DHCP self-test watchdog** — ✅ deployed (`scripts/dhcp-watchdog.sh`, §7 #3): defense-in-depth
+  for any *other* mute cause.
+- **Make the ip6class refresh less disruptive** than a full `ifup lan` (it's an ~85 s LAN outage
+  every boot) — TODO (§7 #5).
+- **Alta Syslog Host → Loki** — deferred (§7 #8): so the next event has real data (the
+  volatile-`logread` blind spot is why this stays "not 100% proven").
 
 ---
 
