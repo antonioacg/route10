@@ -2,8 +2,8 @@
 
 **Status:** service restored; **dnsmasq-mute fix deployed** (`scripts/post-cfg.sh` → `/cfg`) plus a
 **DHCP-mute watchdog deployed** (`scripts/dhcp-watchdog.sh`); the exact mute mechanism is **not yet
-confirmed on-demand** (§6 repro was confounded); network **not fully re-converged** at write time
-(some devices on stale leases, §8).
+confirmed on-demand** (§6 repro was confounded); network **re-converged** (Wi-Fi via
+TP-Link restart, wired/switch clients via manual renew — §8).
 
 **One-line:** A mains power surge rebooted Route10 (both UPSs failed). On the way back
 up, Route10's `dnsmasq` came up **listening but mute on DHCP** — it answered *zero*
@@ -38,7 +38,7 @@ The WAN/ISP path was healthy throughout.
   │  LAN 192.168.10.0/24   gateway+DNS handed by DHCP = 192.168.10.1 (dnsmasq)            │
   │  DHCP pool .10–.252 (86400s)   leasefile = /cfg/dhcp.leases (persistent ext4)         │
   └───────┬──────────────────────────────────────────────────┬──────────────────────────┘
-          │ eth2 (1G, Living Room LAN)                        │ eth5 (10G FIBER, marginal -16.3 dBm)
+          │ eth2 (1G, Living Room LAN)                        │ eth5 (10G FIBER uplink to office)
           ▼                                                   ▼
    TP-Link AP  ◄── AP/bridge mode, L2 only.            Office switch
    DHCP = "AUTO"  ⚠ LANDMINE (see §4)                        │ en13 (USB 2.5G)
@@ -51,8 +51,8 @@ The WAN/ISP path was healthy throughout.
 ```
 
 Key facts that bite during incidents:
-- **eth5 (10G fiber) is the single LAN uplink** carrying every client→gateway flow. It is
-  also the marginal `-16.3 dBm` dirty-connector link from the 2026-06-xx CRC incident.
+- **eth5 (10G fiber) is the single LAN uplink** carrying every client→gateway flow — when it
+  is down (e.g. the office end loses power), every office client is cut off from the gateway.
 - **TP-Link is in the Living Room, on Route10's L2 LAN** (not the office), AP/bridge mode.
 - **Two independent power domains**; the office holds one end of the critical fiber AND
   is on the weaker UPS — backwards from where protection should be.
@@ -104,7 +104,8 @@ Route10's UPS held.
 
 What it was **NOT**: not the ISP (WAN/PPP healthy throughout, Alta portal showed Route10
 online), not AdGuard/DNS (user's `1.1.1.1` test failed too), not the USB adapter, not a
-broadcast storm, not the eth5 connector this time.
+broadcast storm, and not an eth5 fiber fault (its link was down only because the office end
+lost power).
 
 ---
 
@@ -203,7 +204,7 @@ Follow-ups, in priority:
   for any *other* mute cause.
 - **Make the ip6class refresh less disruptive** than a full `ifup lan` (it's an ~85 s LAN outage
   every boot) — TODO (§7 #5).
-- **Alta Syslog Host → Loki** — deferred (§7 #8): so the next event has real data (the
+- **Alta Syslog Host → Loki** — deferred (§7 #7): so the next event has real data (the
   volatile-`logread` blind spot is why this stays "not 100% proven").
 
 ---
@@ -216,25 +217,31 @@ Follow-ups, in priority:
 | 1 | **Route10 + Living Room gear on a proven surge-rated UPS** | Gateway dropped from a 45 h run; it's the one box that must never lose power | TODO |
 | 2 | **Office PDU → "last state = ON"**; office gear on real UPS | It came back OFF → 1.5 h extra outage needing a human | TODO |
 | 3 | **DHCP self-test watchdog** (`scripts/dhcp-watchdog.sh`): passively watches br-lan for the "many requests, zero replies" mute signature; `/etc/init.d/dnsmasq restart` on confirmed mute (debounced + cooldown) | Defense-in-depth for any *other* mute cause | ✅ PR #3 + **deployed & running 2026-06-24** |
-| 4 | **TP-Link DHCP = OFF** (not Auto), stays AP mode | Disarms the failsafe-rogue landmine (§4) | user disabled DHCP this session; **confirm it's OFF not Auto** |
-| 5 | **Make the ip6class refresh non-disruptive** (avoid full `ifup lan`) | `ifup lan` = ~85 s LAN outage every boot (repro) | TODO |
+| 4 | **TP-Link DHCP = OFF** (not Auto), stays AP mode | Disarms the failsafe-rogue landmine (§4) | ✅ done — set OFF (not Auto), AP mode |
+| 5 | **Make the ip6class refresh non-disruptive** (avoid full `ifup lan`) | Distinct from #0: the dnsmasq restart recovers DHCP *after* the bounce, but the `ifup lan` still drops br-lan forwarding (~85 s in the repro, needs a clean re-measure) every boot | TODO (lower priority — boot-only blip) |
 | 6 | **DHCP snooping on the office/managed switch** if supported | Drops rogue DHCP server packets from untrusted ports | TODO |
-| 7 | **Clean the eth5 fiber connector** (one-click/IPA), recheck Rx | Latent marginal `-16.3 dBm` link, has bitten before | TODO |
-| 8 | **Alta Syslog Host → Loki** + `log-dhcp` on Route10 | So the next event is diagnosable (§6); kills the volatile-logread blind spot | TODO |
+| 7 | **Alta Syslog Host → Loki** + `log-dhcp` on Route10 | So the next event is diagnosable (§6); kills the volatile-logread blind spot | TODO (deferred) |
 
 ---
 
-## 8. Restoration status — NOT fully converged (at write time)
+## 8. Restoration — converged
 
 - Route10 dnsmasq **healthy** (writing leases; `/cfg/dhcp.leases` populated).
 - This Mac: back on `192.168.10.10`, internet 0% loss, DNS OK.
-- **Not all devices have re-acquired** a `192.168.10.x` lease — some still held stale
-  `192.168.0.x` (rogue) or expired leases. They need a renew: **toggle Wi-Fi off/on or
-  replug**. Devices seen on the rogue island earlier: `70:89:76:22:bc:26`,
-  `70:89:76:22:ab:df`, `84:e3:42:5b:7c:e8`, `ee:18:13:dd:ac:fc`.
+- **Other devices came off the rogue `192.168.0.x` (2 h) leases — but the path depended on
+  how each was attached:**
+  - **Wi-Fi clients on the TP-Link** re-DHCP'd when it was restarted (its WLAN bounce forces a
+    renew).
+  - **Wired / switch clients (and other-AP Wi-Fi)** are NOT bounced by a TP-Link restart —
+    they kept the stale lease until T1 (~1 h) and were fixed by a **manual adapter reset / DHCP
+    renew** (done by hand; minor).
+  Rogue-island MACs seen earlier: `70:89:76:22:bc:26`, `70:89:76:22:ab:df`,
+  `84:e3:42:5b:7c:e8`, `ee:18:13:dd:ac:fc`.
 - **Work Mac DNS** was manually set to `1.1.1.1` during triage — set back to Automatic (or
-  `192.168.10.241` AdGuard) once it's on the right subnet.
-- TODO: sweep the LAN and confirm every device is on `192.168.10.x` with internet.
+  `192.168.10.241` AdGuard).
+
+**Recovery lesson:** restarting the rogue AP only re-converges *its own* Wi-Fi clients;
+everything wired or behind the switch needs an explicit renew (or waits out the lease).
 
 ---
 
