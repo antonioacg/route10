@@ -162,36 +162,31 @@ manifested fully here and not on routine reboots. (Note: eth5 joining br-lan ~87
 already mute at reboot #1, ~87 min *before* eth5 joined, so eth5's lateness is not part of the
 cause.) The fix below makes the question moot.
 
-### Reproduction attempt 2026-06-24 — CONFOUNDED, but informative
+### Reproduction attempt 2026-06-24 — CONFOUNDED (and the confound theory was itself wrong)
 
-Ran `ifup lan` on Route10 (exactly what post-cfg.sh does), then probed DHCP from a client,
-inside a self-healing harness (dnsmasq restart at the end + a 100 s watchdog) so the LAN
-always recovered.
+Ran `ifup lan` on Route10 (what post-cfg.sh does), then probed DHCP from a client, in a
+self-healing harness (dnsmasq restart + 100 s watchdog) so the LAN always recovered.
 
-**Could NOT cleanly confirm the dnsmasq-mute** — the test is confounded on this NSS-offloaded
-hardware:
-- **`ifup lan` itself severs client→br-lan forwarding for ~85 s.** Reproduced twice: in both
-  runs the Route10-side `tcpdump -i br-lan` saw **zero** DHCP packets from any client during
-  the window (`requests=0 replies=0`). So the bounce drops the client's path, and a request
-  never reached dnsmasq for me to observe whether it would reply.
-- My only test client (this Mac) sits **behind the eth5 uplink** — exactly the port the bounce
-  disrupts.
-- The clean isolation tool — a local **veth** client on br-lan — **isn't supported on this
-  kernel** (`RTNETLINK: Not supported`). A macvlan won't work either (dnsmasq serves only
-  `interface=br-lan`, not a child interface).
+**Could NOT cleanly confirm the dnsmasq-mute.** At the time I blamed it on `ifup lan` severing
+client→br-lan forwarding for ~85 s (two runs saw ~zero client DHCP reach br-lan). **Follow-up
+testing 2026-06-24 (while scoping action #5) disproved that:** a *single* clean `ifup lan` blips
+br-lan for only **~0.3 s** (130/130 client pings, 1 drop), IPv6 intact. The "~85 s" was an
+artifact of the harness bouncing br-lan **4× in quick succession** (NSS-bridge confusion),
+compounded by a Mac-side issue — rapidly cycling the adapter `NONE→DHCP` left it on `169.254`
+and not reliably emitting DISCOVERs, so the requests mostly never left the client. `ifup lan`
+did **not** sever the path. (The clean isolation tool — a local **veth** on br-lan — also isn't
+supported on this kernel: `RTNETLINK: Not supported`.)
 
-**But the original incident still points to a broad dnsmasq-mute, by inference:**
-- It lasted **minutes-to-hours**, far longer than the ~85 s forwarding blip.
-- It was cleared **only by a dnsmasq restart**.
-- The TP-Link's DHCP-Auto failsafe fired — and the TP-Link is on **eth2**, a *different*
-  bridge port than eth5. If only eth5 forwarding had broken, the eth2-side TP-Link would still
-  have seen Route10's DHCP and stayed quiet. It going rogue means DHCP was unavailable
-  **network-wide** → dnsmasq was mute, not just an eth5 forwarding glitch.
+**The dnsmasq-mute is still inferred from the original incident, not directly reproduced:**
+- It lasted **minutes-to-hours** and cleared **only on a dnsmasq restart**.
+- The TP-Link's DHCP-Auto failsafe fired — and it's on **eth2**, a *different* bridge port than
+  eth5. If only eth5 had glitched, the eth2-side TP-Link would still have seen Route10's DHCP.
+  It going rogue means DHCP was unavailable **network-wide** → dnsmasq was mute.
 
-**Net:** the repro surfaced a SECOND, distinct problem — **`ifup lan` is itself LAN-disruptive
-(~85 s) on this hardware, on every boot** — and reinforced that the original outage was a broad
-dnsmasq-mute. A direct, isolated confirmation needs either a real recurrence (with Syslog→Loki
-capturing it) or a raw-socket DHCP probe injected locally on br-lan.
+**Net:** my earlier "`ifup lan` is an ~85 s disruptor" claim was wrong — it's ~0.3 s (§7 #5). A
+direct, isolated confirmation of the mute still needs a real recurrence (Syslog→Loki, §7 #7) or
+a raw-socket DHCP probe on br-lan — and now that `ifup lan` is known-gentle, a clean
+single-bounce repro is also feasible.
 
 ### THE FIX — implemented
 
@@ -202,8 +197,8 @@ would have prevented the entire outage. **Deployed to `/cfg/post-cfg.sh` 2026-06
 Follow-ups, in priority:
 - **DHCP self-test watchdog** — ✅ deployed (`scripts/dhcp-watchdog.sh`, §7 #3): defense-in-depth
   for any *other* mute cause.
-- **Make the ip6class refresh less disruptive** than a full `ifup lan` (it's an ~85 s LAN outage
-  every boot) — TODO (§7 #5).
+- **ip6class refresh** — ✅ checked (§7 #5): a single `ifup lan` is a ~0.3 s blip, not the ~85 s
+  I first claimed; no change needed.
 - **Alta Syslog Host → Loki** — deferred (§7 #7): so the next event has real data (the
   volatile-`logread` blind spot is why this stays "not 100% proven").
 
@@ -218,7 +213,7 @@ Follow-ups, in priority:
 | 2 | **Office PDU → "last state = ON"**; office gear on real UPS | It came back OFF → 1.5 h extra outage needing a human | TODO |
 | 3 | **DHCP self-test watchdog** (`scripts/dhcp-watchdog.sh`): passively watches br-lan for the "many requests, zero replies" mute signature; `/etc/init.d/dnsmasq restart` on confirmed mute (debounced + cooldown) | Defense-in-depth for any *other* mute cause | ✅ PR #3 + **deployed & running 2026-06-24** |
 | 4 | **TP-Link DHCP = OFF** (not Auto), stays AP mode | Disarms the failsafe-rogue landmine (§4) | ✅ done — set OFF (not Auto), AP mode |
-| 5 | **Make the ip6class refresh non-disruptive** (avoid full `ifup lan`) | Distinct from #0: the dnsmasq restart recovers DHCP *after* the bounce, but the `ifup lan` still drops br-lan forwarding (~85 s in the repro, needs a clean re-measure) every boot | TODO (lower priority — boot-only blip) |
+| 5 | ~~Make the ip6class refresh non-disruptive~~ | Investigated 2026-06-24: a single clean `ifup lan` is a **~0.3 s** blip (130/130 pings; the "~85 s" was a repro artifact of 4 rapid bounces). `renew` is gentler still but is a no-op for config changes, so it can't replace `ifup lan`. | ✅ closed — not a real problem |
 | 6 | **DHCP snooping on the office/managed switch** if supported | Drops rogue DHCP server packets from untrusted ports | TODO |
 | 7 | **Alta Syslog Host → Loki** + `log-dhcp` on Route10 | So the next event is diagnosable (§6); kills the volatile-logread blind spot | TODO (deferred) |
 
