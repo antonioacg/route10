@@ -303,5 +303,8 @@ launch_if_absent /cfg/scripts/lcp-watch.sh
 # Catches mwan3 track-loss windows, PPP reconnects, eth4 carrier flaps, CRC
 # growth, stick Boa liveness fails, LCP miss streaks. See CLAUDE.md.
 launch_if_absent /cfg/scripts/flap-hunt.sh
+# dhcp-watchdog.sh — detect & auto-recover a MUTE dnsmasq (the 2026-06-24 surge
+# failure mode). Defense-in-depth behind the dnsmasq re-bind above.
+launch_if_absent /cfg/scripts/dhcp-watchdog.sh
 
 exit 0
