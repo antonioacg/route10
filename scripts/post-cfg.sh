@@ -245,6 +245,23 @@ elif ! ip -4 addr show ont_mgmt0 | grep -q "192.168.1.2"; then
     ifup ont_mgmt
 fi
 
+# ── WAN default-route hook (netifd proto_set_keep reconnect bug) ─────────────
+# netifd drops the WAN default route on PPP reconnect: its cache still believes
+# the route is installed, so it never reprograms the kernel (confirmed in netifd
+# source). `/` is tmpfs, so on every boot install our fix two ways — no daemon:
+#   1. symlink the ip-up.d hook so pppd re-asserts the v4+v6 default route on
+#      every link-up (instant recovery);
+#   2. a 1-minute cron backstop running the SAME hook (idempotent, silent when
+#      healthy). See the 2026-07-08 wan3-route-loss post-mortem.
+HOOK=/cfg/scripts/route-defaultroute-hook.sh
+if [ -x "$HOOK" ]; then
+    ln -sfn "$HOOK" /etc/ppp/ip-up.d/50-route10-defaultroute
+    if ! grep -qF "$HOOK" /etc/crontabs/root 2>/dev/null; then
+        echo "* * * * * $HOOK" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── daemons ────────────────────────────────────────────────────────────────
 # Idempotent launchers — only start each daemon if not already running.
 # pgrep -f matches the full command line, including the script path, so the
@@ -283,5 +300,4 @@ launch_if_absent /cfg/scripts/flap-hunt.sh
 # dhcp-watchdog.sh — detect & auto-recover a MUTE dnsmasq (the 2026-06-24 surge
 # failure mode). Safety net for ANY dnsmasq DHCP mute, whatever the cause.
 launch_if_absent /cfg/scripts/dhcp-watchdog.sh
-
 exit 0

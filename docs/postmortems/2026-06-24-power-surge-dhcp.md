@@ -12,6 +12,9 @@ requests until manually restarted. Every LAN device lost its lease; a TP-Link AP
 "DHCP=Auto" failsafe then self-enabled and handed out dead-end `192.168.0.x` leases.
 The WAN/ISP path was healthy throughout.
 
+**Related:** [`2026-07-08-wan3-route-loss.md`](2026-07-08-wan3-route-loss.md) — a different
+failure mode on the same box (netifd drops the default route on a PPPoE reconnect).
+
 ---
 
 ## 1. Topology (as built, 2026-06-24)
