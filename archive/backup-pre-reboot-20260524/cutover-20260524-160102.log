@@ -1,0 +1,102 @@
+==================================================================
+ODI stick cutover monitor (W2) — started 2026-05-24T16:01:02-03:00
+Log: /tmp/cutover-20260524-160102.log
+Stick: ODI DFP-34X-2C3 in W2 (eth4), mgmt UI at http://192.168.1.1
+L4 (eth5) is office switch BiDi — NOT POLLED.
+==================================================================
+[2026-05-24T16:01:02-03:00] INITIAL SNAPSHOT
+  W2/eth4 link:    DOWN  speed: Unknown!
+  ssdk port 5 (W2): DISABLE / sgmii_fiber / txmac=ENABLE / rxmac=ENABLE
+  LOS W2 gpio25:   in
+  Default route:   default via 168.195.103.5 dev pppoe-wan proto static metric 100 
+  WAN1 (eth3):      UP fe80::beb9:23ff:fe81:9715/64
+  WAN3 (eth4):      DOWN
+  PPPoE ifaces:    pppoe-wan        UNKNOWN        <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> 
+  Stick MAC seen:  
+
+[2026-05-24T16:01:02-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[pppoe-wan:UNKNOWN ] gw[168.195.103.5 via pppoe-wan]
+[2026-05-24T16:01:02-03:00] >>> PHASE TRANSITION:  -> PHASE_0_NO_FIBER
+[2026-05-24T16:01:43-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[pppoe-wan:DOWN ] gw[]
+[2026-05-24T16:01:49-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:02:03-03:00] W2[los=in link=DISABLE mode= tx=DISABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:03:08-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:03:10-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=10000Mb/s] stick[FAILED ] wan3_ip[fe80::beb9:23ff:fe81:9716/64] ppp[] gw[]
+[2026-05-24T16:03:10-03:00] >>> PHASE TRANSITION: PHASE_0_NO_FIBER -> PHASE_2_W2_LINK_UP
+[2026-05-24T16:03:10-03:00] >>> W2 link up — PPPoE on WAN3 should authenticate shortly
+[2026-05-24T16:03:30-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:03:30-03:00] >>> PHASE TRANSITION: PHASE_2_W2_LINK_UP -> PHASE_0_NO_FIBER
+[2026-05-24T16:04:32-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:04:36-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=10000Mb/s] stick[FAILED ] wan3_ip[fe80::beb9:23ff:fe81:9716/64] ppp[] gw[]
+[2026-05-24T16:04:36-03:00] >>> PHASE TRANSITION: PHASE_0_NO_FIBER -> PHASE_2_W2_LINK_UP
+[2026-05-24T16:04:36-03:00] >>> W2 link up — PPPoE on WAN3 should authenticate shortly
+[2026-05-24T16:04:55-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:04:55-03:00] >>> PHASE TRANSITION: PHASE_2_W2_LINK_UP -> PHASE_0_NO_FIBER
+[2026-05-24T16:05:41-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:06:39-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:06:42-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[fe80::beb9:23ff:fe81:9716/64] ppp[] gw[]
+[2026-05-24T16:06:42-03:00] >>> PHASE TRANSITION: PHASE_0_NO_FIBER -> PHASE_2_W2_LINK_UP
+[2026-05-24T16:06:42-03:00] >>> W2 link up — PPPoE on WAN3 should authenticate shortly
+[2026-05-24T16:08:10-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[lladdr e0:da:90:c4:f8:85] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:08:12-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:08:16-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[lladdr e0:da:90:c4:f8:85] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:08:28-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:09:35-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:09:47-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:09:53-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:17-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:24-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:32-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:44-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:50-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:54-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:56-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:10:58-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:00-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:02-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:04-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:06-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:08-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:20-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:26-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:44-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:44-03:00] >>> PHASE TRANSITION: PHASE_2_W2_LINK_UP -> PHASE_0_NO_FIBER
+[2026-05-24T16:11:46-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:11:46-03:00] >>> PHASE TRANSITION: PHASE_0_NO_FIBER -> PHASE_2_W2_LINK_UP
+[2026-05-24T16:11:46-03:00] >>> W2 link up — PPPoE on WAN3 should authenticate shortly
+[2026-05-24T16:12:25-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:12:33-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:13:11-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:13:13-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:13:13-03:00] >>> PHASE TRANSITION: PHASE_2_W2_LINK_UP -> PHASE_0_NO_FIBER
+[2026-05-24T16:15:14-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:15:22-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:15:24-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:15:24-03:00] >>> PHASE TRANSITION: PHASE_0_NO_FIBER -> PHASE_2_W2_LINK_UP
+[2026-05-24T16:15:24-03:00] >>> W2 link up — PPPoE on WAN3 should authenticate shortly
+[2026-05-24T16:16:25-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:16:35-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:17:07-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[lladdr e0:da:90:c4:f8:85] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:17:09-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:17:11-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[lladdr e0:da:90:c4:f8:85] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:17:25-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:17:32-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:17:38-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.2/24] ppp[] gw[]
+[2026-05-24T16:17:52-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[lladdr e0:da:90:c4:f8:85] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:18:10-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:18:10-03:00] >>> PHASE TRANSITION: PHASE_2_W2_LINK_UP -> PHASE_0_NO_FIBER
+[2026-05-24T16:18:12-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:18:12-03:00] >>> PHASE TRANSITION: PHASE_0_NO_FIBER -> PHASE_2_W2_LINK_UP
+[2026-05-24T16:18:12-03:00] >>> W2 link up — PPPoE on WAN3 should authenticate shortly
+[2026-05-24T16:18:22-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[INCOMPLETE ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:18:44-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:19:10-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=DOWN spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:19:10-03:00] >>> PHASE TRANSITION: PHASE_2_W2_LINK_UP -> PHASE_0_NO_FIBER
+[2026-05-24T16:19:13-03:00] W2[los=in link=ENABLE mode= tx=ENABLE rx=ENABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:19:13-03:00] >>> PHASE TRANSITION: PHASE_0_NO_FIBER -> PHASE_2_W2_LINK_UP
+[2026-05-24T16:19:13-03:00] >>> W2 link up — PPPoE on WAN3 should authenticate shortly
+[2026-05-24T16:20:41-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=UP spd=1000Mb/s] stick[FAILED ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:20:43-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[192.168.1.3/24] ppp[] gw[]
+[2026-05-24T16:20:43-03:00] >>> PHASE TRANSITION: PHASE_2_W2_LINK_UP -> PHASE_0_NO_FIBER
+[2026-05-24T16:21:32-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[] gw[]
+[2026-05-24T16:21:36-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[pppoe-wan:DOWN ] gw[]
+[2026-05-24T16:21:40-03:00] W2[los=in link=DISABLE mode= tx=ENABLE rx=DISABLE car=DOWN spd=Unknown!] stick[FAILED ] wan3_ip[] ppp[pppoe-wan:UNKNOWN ] gw[168.195.103.5 via pppoe-wan]

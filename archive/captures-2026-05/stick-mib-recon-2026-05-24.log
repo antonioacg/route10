@@ -1,0 +1,28 @@
+--- omci_mib.cfg sizes ---
+-rwxrwxrwx    1 admin    0             431 Sep 21  2022 /var/config/omci_custom_opt.conf
+-rwxrwxrwx    1 admin    0            7920 Sep 21  2022 /var/config/omci_mib.cfg
+# 
+--- xxd-like via dd hex (first 4KB) ---
+/bin/sh: head: not found
+# 
+--- /proc/omci dir ---
+cf_map      dmMode      macFilter   uniQos      vgf
+debugInfo   f2dq        mb          usage       wanData
+devMode     l2          omciMirror  veip        wanInfo
+# 
+--- /proc/omci files ---
+
+--- /proc/fastbridge / /proc/rtk_smux / /proc/rtl8686gmac ---
+
+
+
+
+
+Traceback (most recent call last):
+  File "/tmp/stick-mib.py", line 36, in <module>
+    print(r("omcicli mib get all 2>&1 | head -200 ; true", 10))
+  File "/tmp/stick-mib.py", line 13, in r
+    time.sleep(0.4);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 366, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 526, in fill_rawq
+ConnectionResetError: [Errno 104] Connection reset by peer

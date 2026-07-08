@@ -1,0 +1,230 @@
+
+=== $ cat /tmp/register ===
+register get 0x00021a78 
+Register 0x21a78 : 0x00000111
+RTK.0> command:# 
+
+=== $ ls -la /tmp/ ===
+drwxrwxr-x    2 admin    0               0 Jan  1 00:01 .
+drwxr-xr-x   12 admin    0               0 Jan  1 00:01 ..
+-rw-r--r--    1 admin    0            6172 Jan  1 00:00 config.xml
+srwxr-xr-x    1 admin    0               0 Jan  1 00:00 igmp_socket
+-rw-r--r--    1 admin    0              70 Jan  1 00:03 register
+-rw-r--r--    1 admin    0               2 Jan  1 00:00 restoreDefaultEn
+# 
+
+=== $ ls -la /var/run/ ===
+drwxr-xr-x    2 admin    0               0 Jan  1 00:04 .
+drwxr-xr-x   12 admin    0               0 Jan  1 00:01 ..
+-rw-r--r--    1 admin    0               4 Jan  1 00:00 boa.pid
+-rw-r--r--    1 admin    0               4 Jan  1 00:00 configd.pid
+-rw-r--r--    1 admin    0               4 Jan  1 00:04 telnetd.pid
+----------    1 admin    0               0 Jan  1 00:00 xmlconfig.lock
+# 
+
+=== $ ls -la /var/log/ ===
+drwxr-xr-x    2 admin    0               0 Jan  1 00:00 .
+drwxr-xr-x   12 admin    0               0 Jan  1 00:01 ..
+# 
+
+=== $ ls -la /var/config/ ===
+drwxr-xr-x    3 admin    0               0 Jan  1 00:00 .
+drwxr-xr-x   12 admin    0               0 Jan  1 00:01 ..
+-rw-r--r--    1 admin    0               1 Jan  1 00:00 .cfgfs_ok_Linux_version_2.6.30.9_(lx_linux@ubuntu)_(linux_2.6.3)_#33_Fri_Aug_21_18:11:20_PDT_2020_[luna_SDK_V1.9.0]
+-rw-r--r--    1 admin    0           17646 Jan  1  1970 captcha.gif
+-rw-r--r--    1 admin    0            1552 Jan  1 00:00 europa.data
+-rw-r--r--    1 admin    0             763 Jan  1 00:00 igmp_gpon.conf
+-rw-r--r--    1 admin    0            6172 Jan  1  1970 lastgood.xml
+-rw-r--r--    1 admin    0            6194 Jan  1  1970 lastgood.xml_bak
+-rw-r--r--    1 admin    0            3388 Jan  1 00:15 lastgood_hs.xml
+-rw-r--r--    1 admin    0            3157 Jan  1 00:00 lastgood_hs.xml.check_failed
+-rw-r--r--    1 admin    0            3388 Jan  1 00:15 lastgood_hs.xml_bak
+-rw-r--r--    1 admin    0            3213 Jan  1 00:00 lastgood_mp_hs2.xml
+-rwxrwxrwx    1 admin    0             431 Sep 21  2022 omci_custom_opt.conf
+-rwxrwxrwx    1 admin    0            7920 Sep 21  2022 omci_mib.cfg
+-rw-r--r--    1 admin    0            1566 Jan  1 00:00 rtl8290b.data
+# 
+
+=== $ cat /var/log/messages 2>/dev/null ===
+# 
+
+=== $ cat /var/log/syslog 2>/dev/null ===
+# 
+
+=== $ cat /etc/rc.d/* 2>/dev/null ===
+# 
+
+=== $ cat /etc/init.d/rcS ===
+#!/bin/sh
+
+echo === Start to run rc0 ~ rc63 ===
+i=0
+while [ "$i" != "64" ]
+do
+	rc_file=/etc/init.d/rc$i
+	if [ -f "$rc_file" ]; then 
+		echo "----- do_rc [$rc_file] -----"	
+		sh $rc_file
+	fi	
+	i=$(($i+1))
+done
+# 
+
+=== $ cat /etc/init.d/rc2 ===
+/bin/mount -t proc proc /proc
+/bin/mount -t ramfs ramfs /var
+/bin/mount -t sysfs sysfs /sys
+/bin/echo /sbin/mdev > /proc/sys/kernel/hotplug
+/bin/mount -t tmpfs mdev /dev
+mdev -s
+mkdir /var/tmp
+mkdir /var/log
+mkdir /var/run
+mkdir /var/lock
+mkdir /var/ppp
+mkdir /var/config
+/etc/scripts/mnt_cfgfs.sh "-t jffs2" "config" "/var/config"
+mkdir /var/udhcpd
+mkdir /var/udhcpc
+mkdir /var/mnt
+mkdir /var/ct
+mkdir /var/ct/tmp
+echo 1 > /tmp/running_startup
+ifconfig lo 127.0.0.1
+route add -net 127.0.0.0 netmask 255.255.255.0 lo
+PATH=.:PATH
+cd /etc/scripts
+/bin/ifconfig nas0 up
+# 
+
+=== $ cat /etc/init.d/rc3 ===
+/etc/scripts/reset_default.sh
+configd&
+/bin/sh /etc/scripts/config_xmlconfig.sh -b
+/etc/scripts/chk_swver.sh
+/etc/scripts/chk_swver_2.sh
+/bin/checkomci
+/etc/insdrv.sh
+/etc/runsdk.sh
+/etc/runlansds.sh
+# 
+
+=== $ cat /etc/init.d/rc32 ===
+startup&
+rtkbosa -c /var/config/rtl-3320-backup.bin
+# 
+
+=== $ cat /etc/init.d/rc34 ===
+echo 1 > /proc/watchdog/watchdog_flag
+# 
+
+=== $ cat /etc/init.d/rc10 ===
+echo 200 > /proc/sys/net/core/netdev_max_backlog
+echo 600 > /proc/sys/net/ipv4/netfilter/ip_conntrack_tcp_timeout_established
+echo 10 > /proc/sys/net/ipv4/tcp_keepalive_intvl
+echo 3 > /proc/sys/net/ipv4/tcp_keepalive_probes
+echo 10 > /proc/sys/net/ipv4/tcp_keepalive_time
+echo 60 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait
+echo 1 > /proc/sys/net/ipv4/ip_forward
+# 
+
+=== $ omcicli ===
+
+Usage: omcicli [cmd]
+
+  set       : set series cmd
+  get       : get series cmd
+  mib       : mib series cmd
+  dump      : dump series cmd
+  debug     : debug series cmd
+
+# 
+
+=== $ omcicli help ===
+
+Usage: omcicli [cmd]
+
+  set       : set series cmd
+  get       : get series cmd
+  mib       : mib series cmd
+  dump      : dump series cmd
+  debug     : debug series cmd
+
+# 
+
+=== $ checkomci ===
+==== check omci mib
+checkOMCI_startup11checkOMCI_startup mode 0
+checkOMCImib is mode -1 
+checkOMCImib is mode 0 mode -1
+sw version 1 V5R022C00S265
+sw version 2 V5R022C00S265
+# 
+
+=== $ ShowStatus ===
+DSL Operational Status : 
+
+
+=== $ show ===
+DSL Operational Status : 
+
+
+=== $ show system ===
+DSL Operational Status : 
+
+
+=== $ ShowStatus help ===
+DSL Operational Status : 
+
+
+=== $ ShowStatus all ===
+DSL Operational Status : 
+
+
+=== $ pondetect ===
+DSL Operational Status : 
+
+
+=== $ qc ===
+DSL Operational Status : 
+
+
+=== $ ls /proc/kmsg 2>/dev/null && cat /proc/kmsg & sleep 1 && kill %1 ===
+DSL Operational Status : 
+
+
+=== $ cat /var/log/messages 2>/dev/null || logread 2>/dev/null ===
+DSL Operational Status : 
+
+
+=== $ cat /proc/rtl_pon_misc 2>/dev/null ===
+DSL Operational Status : 
+
+
+=== $ cat /proc/gpon_status 2>/dev/null ===
+DSL Operational Status : 
+
+
+=== $ ls /proc/ | grep -i pon ===
+DSL Operational Status : 
+
+
+=== $ ls /proc/ | grep -i omci ===
+DSL Operational Status : 
+
+
+=== $ ls /proc/sys/net 2>/dev/null ===
+DSL Operational Status : 
+
+
+=== $ cat /proc/interrupts | grep -i -E 'pon|gpon|sfp' ===
+DSL Operational Status : 
+
+
+=== $ cat /proc/net/igmp_gpon 2>/dev/null ===
+DSL Operational Status : 
+
+
+=== $ omci_app 2>&1 ; echo EXIT=$? ===
+DSL Operational Status : 
+

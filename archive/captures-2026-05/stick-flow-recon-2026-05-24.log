@@ -1,0 +1,81 @@
+192.168.1.1 dev eth4 src 192.168.1.3 uid 0 
+    cache 
+=== net/dev counters (pon0 RX/TX) ===
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0:   33704     423    0    0    0     0          0         0   213970     968    0    0    0     0       0          0
+eth0.2:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+eth0.3:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  nas0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  pon0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+   br0:   33704     423    0    0    0     0          0        52   185007     362    0    0    0     0       0          0
+# 
+=== bridge MAC table ===
+port no	mac addr		is local?	ageing timer
+  1	bc:b9:23:81:97:16	no		   0.00
+  1	e0:da:90:c4:f8:85	yes		   0.00
+# 
+=== omcicli mib (current OMCI MIB state) ===
+
+Usage: omcicli mib [cmd]
+
+  create    : create MIB ME
+    {classId, entityId, "value of all SBC attributes"}
+  delete    : delete MIB ME
+    {classId, entityId}
+  set       : set MIB ME attribute
+    {classId, entityId, attrName, attrValue}
+  get       : get all MIB or any single ME class
+    [all | classId | tableName[, entityId]]
+  getcurr   : get PM MIB current accumulations
+    {classId | tableName[, entityId]}
+  getalm    : get all alarm or any single ME class
+    [classId[, entityId]]
+  getattr   : get specefic attribute for any single ME class
+    [classId, entityId, attributeId]
+  reset     : trigger MIB reset
+
+# 
+=== omcicli get state ===
+
+Usage: omcicli get [cmd]
+
+  sn        : get serial number
+  log       : get runtime log level
+  logfile   : get omci msg log mode/action mask
+  tables    : get all registered MIB tables
+  devmode   : get omci device mode
+  dmmode    : get dual mgmt mode
+  loid      : get loid and password
+  loidauth  : get loid auth status
+  cflag     : get customized flag
+  authuptime    : get auth uptime
+
+# 
+=== omcicli get all 2>&1 (might overflow but try) ===
+
+Usage: omcicli get [cmd]
+
+  sn        : get serial number
+  log       : get runtime log level
+  logfile   : get omci msg log mode/action mask
+  tables    : get all registered MIB tables
+  devmode   : get omci device mode
+  dmmode    : get dual mgmt mode
+  loid      : get loid and password
+  loidauth  : get loid auth status
+  cflag     : get customized flag
+  authuptime    : get auth uptime
+
+# 
+=== ls /proc for service/flow data ===
+
+
+=== check the 'fastbridge' (RTL hardware bridge) ===
+
+
+=== /proc/rtl8686gmac (port mapping) ===
+
+
+

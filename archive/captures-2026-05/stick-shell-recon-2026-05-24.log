@@ -1,0 +1,259 @@
+
+========== $ show system version ==========
+Model Number: RTK_GW
+Build Date: Sep 23 2022 19:33:30
+Firmware Version: V1.0-220923
+MAC Address: E0:DA:90:C4:F8:85
+SysUpTime: 0 0:2:26
+HW Serial Number: XPON26020216
+ManufacturerOUI: E0DA90
+Manufacturer: Realtek Semiconductor Corp.
+# 
+
+========== $ uname -a ==========
+/bin/sh: uname: not found
+# 
+
+========== $ cat /proc/version ==========
+Linux version 2.6.30.9 (root@ubuntu) (gcc version 4.4.6 (Realtek RSDK-1.5.6p2) ) #141 Fri Sep 23 19:33:30 CST 2022 [V1.0-]
+# 
+
+========== $ cat /proc/mtd ==========
+dev:    size   erasesize  name
+mtd0: 00040000 00001000 "boot"
+mtd1: 00002000 00001000 "env"
+mtd2: 00002000 00001000 "env2"
+mtd3: 0003c000 00001000 "config"
+mtd4: 0014c000 00001000 "k0"
+mtd5: 00274000 00001000 "r0"
+mtd6: 0014c000 00001000 "k1"
+mtd7: 00274000 00001000 "r1"
+mtd8: 00001000 00001000 "Partition_008"
+mtd9: 00001000 00001000 "Partition_009"
+mtd10: 00001000 00001000 "Partition_010"
+mtd11: 00001000 00001000 "Partition_011"
+mtd12: 0014c000 00001000 "linux"
+mtd13: 00274000 00001000 "rootfs"
+# 
+
+========== $ ls /etc/init.d/ ==========
+rc10  rc2   rc3   rc32  rc34  rcS
+# 
+
+========== $ ls /etc/scripts/ 2>/dev/null ==========
+chk_swver.sh         fw_cp.sh             reset_default.sh
+chk_swver_2.sh       fwu_starter.sh       udhcpc.deconfig
+config_xmlconfig.sh  insert_europa.sh     udhcpc.sh
+flash                mnt_cfgfs.sh
+fs_test.sh           mp_default
+# 
+
+========== $ ls /etc/ | head -50 ==========
+/bin/sh: head: not found
+# 
+
+========== $ ls /bin/ ==========
+ShowStatus      diag            insmod          mknod           route
+arp             diff            ip              mount           rtkbosa
+ash             dropbear        iptables        mpctl           saveconfig
+awk             ebtables        iptables-batch  mv              sed
+boa             echo            kill            nc              sh
+brctl           egrep           killall         nv              show
+busybox         eponoamd        klogd           oamcli          sleep
+cat             ethctl          led             omci_app        startup
+checkomci       europacli       ledtest         omcicli         stty
+chmod           expr            linuxrc         pidof           tar
+cksum           flash_eraseall  ln              ping            telnetd
+cmp             fuser           loadconfig      ping6           tftp
+configd         grep            login           pondetect       tftpd
+consoleset      halt            ls              poweroff        top
+cp              ifconfig        lsmod           ps              traceroute
+cut             igmpcli         md5sum          qc              umount
+date            igmpd           mdev            reboot          vconfig
+dbg_tool        inetd           mib             rm              xmlconfig
+df              init            mkdir           rmmod
+# 
+
+========== $ ls /sbin/ ==========
+ShowStatus      diag            insmod          mknod           route
+arp             diff            ip              mount           rtkbosa
+ash             dropbear        iptables        mpctl           saveconfig
+awk             ebtables        iptables-batch  mv              sed
+boa             echo            kill            nc              sh
+brctl           egrep           killall         nv              show
+busybox         eponoamd        klogd           oamcli          sleep
+cat             ethctl          led             omci_app        startup
+checkomci       europacli       ledtest         omcicli         stty
+chmod           expr            linuxrc         pidof           tar
+cksum           flash_eraseall  ln              ping            telnetd
+cmp             fuser           loadconfig      ping6           tftp
+configd         grep            login           pondetect       tftpd
+consoleset      halt            ls              poweroff        top
+cp              ifconfig        lsmod           ps              traceroute
+cut             igmpcli         md5sum          qc              umount
+date            igmpd           mdev            reboot          vconfig
+dbg_tool        inetd           mib             rm              xmlconfig
+df              init            mkdir           rmmod
+# 
+
+========== $ ls /usr/bin/ | head -60 ==========
+ls: /usr/bin/: No such file or directory
+/bin/sh: head: not found
+# 
+
+========== $ ls /usr/sbin/ | head -60 ==========
+/bin/sh: head: not found
+ls: /usr/sbin/: No such file or directory
+# 
+
+========== $ ps ==========
+  PID USER       VSZ STAT COMMAND
+    1 admin      900 S    init       
+    2 admin        0 SW<  [kthreadd]
+    3 admin        0 SWN  [ksoftirqd/0]
+    4 admin        0 SW<  [events/0]
+    5 admin        0 SW<  [khelper]
+    8 admin        0 SW<  [async/mgr]
+   46 admin        0 SW<  [kblockd/0]
+   63 admin        0 SW   [pdflush]
+   64 admin        0 SW   [pdflush]
+   65 admin        0 SW<  [kswapd0]
+   81 admin        0 SW<  [mtdblockd]
+  158 admin        0 SWN  [jffs2_gcd_mtd3]
+  171 admin     2064 S    configd 
+  316 admin    13288 S    igmpd -f /var/config/igmp_gpon.conf -s luna 
+  329 admin     1704 S    /bin/pondetect 1 HWTC370F0BAE 1 
+  471 admin    13288 S    igmpd -f /var/config/igmp_gpon.conf -s luna 
+  472 admin    13288 S    igmpd -f /var/config/igmp_gpon.conf -s luna 
+  473 admin    13288 S    igmpd -f /var/config/igmp_gpon.conf -s luna 
+  474 admin    13288 S    igmpd -f /var/config/igmp_gpon.conf -s luna 
+  475 admin    13288 S    igmpd -f /var/config/igmp_gpon.conf -s luna 
+  476 admin    13288 S    igmpd -f /var/config/igmp_gpon.conf -s luna 
+  479 admin        0 DW<  [watchdog]
+  480 admin     2092 S    /bin/login -p 
+  481 admin      600 S    /bin/inetd 
+  490 admin     3020 S    /bin/boa 
+  492 admin        0 DW<  [led_swBlink]
+  590 admin      636 S    /bin/telnetd 
+  591 admin      904 S    /bin/sh 
+  605 admin      900 R    ps 
+# 
+
+========== $ cat /proc/cmdline ==========
+console=ttyS0,115200   mtdparts=physmap-flash:256K(boot),8K(env),8K(env2),240K(config),1328K(k0)ro,2512K(r0)ro,1328K(k1),2512K(r1),4K@0ro,4K@0ro,4K@0ro,4K@0ro,1328K@512K(linux),2512K@1840K(rootfs) root=31:5
+# 
+
+========== $ cat /proc/cpuinfo | head -10 ==========
+/bin/sh: head: not found
+# 
+
+========== $ dmesg | tail -80 ==========
+/bin/sh: dmesg: not found
+/bin/sh: tail: not found
+# 
+
+========== $ ls /var/log/ 2>/dev/null ==========
+# 
+
+========== $ cat /var/log/messages 2>/dev/null | tail -50 ==========
+/bin/sh: tail: not found
+# 
+
+========== $ ls /tmp/ ==========
+config.xml        igmp_socket       register          restoreDefaultEn
+# 
+
+========== $ ls /var/ ==========
+boaE8BD.passwd   ct               passwd           tmp
+boaSuper.passwd  lock             ppp              udhcpc
+boaUser.passwd   log              run              udhcpd
+config           mnt              telnetnum
+# 
+
+========== $ cat /etc/openrg/openrg_config.xml 2>/dev/null | head -10 ==========
+/bin/sh: head: not found
+# 
+
+========== $ cat /etc/config.xml 2>/dev/null | head -10 ==========
+/bin/sh: head: not found
+# 
+
+========== $ ls /etc/version 2>/dev/null && cat /etc/version ==========
+/etc/version
+V1.0-220923 --  Fri Sep 23 19:36:10 CST 2022
+# 
+
+========== $ find / -name 'fix_*.sh' 2>/dev/null ==========
+# 
+
+========== $ find /etc -name '*.sh' 2>/dev/null | head -30 ==========
+/bin/sh: head: not found
+# 
+
+========== $ ls /sbin/ | grep -i -E 'pon|gpon|omci|loid|ploam' ==========
+checkomci
+eponoamd
+omci_app
+omcicli
+pondetect
+# 
+
+========== $ ls /usr/sbin/ | grep -i -E 'pon|gpon|omci|loid|ploam' ==========
+ls: /usr/sbin/: No such file or directory
+# 
+
+========== $ which omcicli omci_app gponomci ploam ==========
+/bin/sh: which: not found
+# 
+
+========== $ ifconfig ==========
+br0       Link encap:Ethernet  HWaddr E0:DA:90:C4:F8:85  
+          inet addr:192.168.1.1  Bcast:192.168.1.255  Mask:255.255.255.0
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:569 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:553 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:41252 (40.2 KiB)  TX bytes:331454 (323.6 KiB)
+
+eth0      Link encap:Ethernet  HWaddr E0:DA:90:C4:F8:85  
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:569 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:552 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:41252 (40.2 KiB)  TX bytes:331398 (323.6 KiB)
+          Interrupt:26 Base address:0x2000 
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          UP LOOPBACK RUNNING  MTU:16436  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:0 (0.0 B)  TX bytes:0 (0.0 B)
+
+nas0      Link encap:Ethernet  HWaddr 00:00:00:01:00:02  
+          UP BROADCAST MULTICAST  MTU:1500  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:0 (0.0 B)  TX bytes:0 (0.0 B)
+          Interrupt:26 Base address:0x2000 
+
+# 
+
+========== $ brctl show 2>/dev/null ==========
+bridge name	bridge id		STP enabled	interfaces
+br0		8000.e0da90c4f885	no		eth0
+# 
+
+========== $ cat /proc/net/dev ==========
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0:   42341     592    0    0    0     0          0         0   334183     573    0    0    0     0       0          0
+eth0.2:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+eth0.3:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  nas0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  pon0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+   br0:   42341     592    0    0    0     0          0         1   334239     574    0    0    0     0       0          0
+# 

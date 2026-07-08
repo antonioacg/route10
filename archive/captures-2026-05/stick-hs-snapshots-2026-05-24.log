@@ -1,0 +1,537 @@
+
+========= /var/config/lastgood_hs.xml =========
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+  <Value Name="SUPER_NAME" Value="adsl"/>
+  <Value Name="SUPER_PASSWORD" Value="realtek"/>
+  <Value Name="TEST_MAC_ADDR" Value="realtek"/>
+  <Value Name="ELAN_MAC_ADDR" Value="e0da90c4f885"/>
+  <Value Name="WLAN_MAC_ADDR" Value="00e04c076802"/>
+  <Value Name="MAC_KEY" Value="0903625421575fc3fc86cc7565c35451"/>
+  <Value Name="RESTORE_DEFAULT_EN" Value="1"/>
+  <Value Name="WAN_PHY_PORT" Value="4"/>
+  <Value Name="LASER_POLARITY_TYPE" Value="0"/>
+  <Value Name="PON_DETECT_ENABLE" Value="1"/>
+  <Value Name="HW_RF_TYPE" Value="7"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT40_2S" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT20" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_OFDM" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_11N_TSSI1" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TSSI2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_PA_TYPE" Value="0"/>
+  <Value Name="HW_WLAN0_REG_DOMAIN" Value="1"/>
+  <Value Name="HW_WLAN0_11N_TRSWITCH" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_C9" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_CC" Value="0"/>
+  <Value Name="HW_ANT_DIVERSITY" Value="0"/>
+  <Value Name="HW_TX_ANT" Value="0"/>
+  <Value Name="HW_CS_THRESHOLD" Value="11"/>
+  <Value Name="HW_CCA_MODE" Value="1"/>
+  <Value Name="HW_PHY_TYPE" Value="0"/>
+  <Value Name="HW_WLAN_LED_TYPE" Value="7"/>
+  <Value Name="BYTE" Value="255"/>
+  <Value Name="WORD" Value="65535"/>
+  <Value Name="DWORD" Value="4294967295"/>
+  <Value Name="INT1" Value="2147483647"/>
+  <Value Name="INT2" Value="-2147483648"/>
+  <Value Name="WIFI_SUPPORT" Value="0"/>
+  <Value Name="HW_SERIAL_NO" Value="XPON26020216"/>
+  <Value Name="HW_FON_KEYWORD" Value="63,62,68,4a,75,3c,65,cd,7b,75,e5,2d,a9,80,72,8c,97,fc,bd,9b,37,51,d9,e3,82,92,68,a1,07,ae,a0,b5"/>
+  <Value Name="HW_WLAN0_11N_XCAP" Value="0"/>
+  <Value Name="HW_WLAN0_11N_XCAP_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TARGET_PWR" Value="0"/>
+  <Value Name="HW_WLAN0_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN1_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN0_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_WLAN1_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_CWMP_MANUFACTURER" Value="HWTC"/>
+  <Value Name="HW_CWMP_PRODUCTCLASS" Value="EG8145X6-10"/>
+  <Value Name="HW_HWVER" Value="343D.D"/>
+  <Value Name="GPON_ONU_MODEL" Value="EG8145X6-10"/>
+  <Value Name="LAN_SDS_MODE" Value="0"/>
+  <Value Name="PON_MODE" Value="1"/>
+  <Value Name="PON_LED_SPEC" Value="0"/>
+  <Value Name="OUI" Value="e0,da,90"/>
+  <Value Name="PORT_REMAPPING" Value="00,01,00,00"/>
+  <Value Name="PON_VENDOR_ID" Value="HWTC"/>
+  <Value Name="GPON_SN" Value="HWTC370F0BAE"/>
+  <Value Name="EPON_ONU_MODEL" Value="HWTC"/>
+  <Value Name="EPON_EXTONU_MODEL" Value="EG8145X6-10"/>
+  <Value Name="EPON_SILENT_MODE" Value="1"/>
+ </Dir>
+</Config>
+# 
+
+========= /var/config/lastgood_hs.xml_bak =========
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+  <Value Name="SUPER_NAME" Value="adsl"/>
+  <Value Name="SUPER_PASSWORD" Value="realtek"/>
+  <Value Name="TEST_MAC_ADDR" Value="realtek"/>
+  <Value Name="ELAN_MAC_ADDR" Value="e0da90c4f885"/>
+  <Value Name="WLAN_MAC_ADDR" Value="00e04c076802"/>
+  <Value Name="MAC_KEY" Value="0903625421575fc3fc86cc7565c35451"/>
+  <Value Name="RESTORE_DEFAULT_EN" Value="1"/>
+  <Value Name="WAN_PHY_PORT" Value="4"/>
+  <Value Name="LASER_POLARITY_TYPE" Value="0"/>
+  <Value Name="PON_DETECT_ENABLE" Value="1"/>
+  <Value Name="HW_RF_TYPE" Value="7"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT40_2S" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT20" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_OFDM" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_11N_TSSI1" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TSSI2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_PA_TYPE" Value="0"/>
+  <Value Name="HW_WLAN0_REG_DOMAIN" Value="1"/>
+  <Value Name="HW_WLAN0_11N_TRSWITCH" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_C9" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_CC" Value="0"/>
+  <Value Name="HW_ANT_DIVERSITY" Value="0"/>
+  <Value Name="HW_TX_ANT" Value="0"/>
+  <Value Name="HW_CS_THRESHOLD" Value="11"/>
+  <Value Name="HW_CCA_MODE" Value="1"/>
+  <Value Name="HW_PHY_TYPE" Value="0"/>
+  <Value Name="HW_WLAN_LED_TYPE" Value="7"/>
+  <Value Name="BYTE" Value="255"/>
+  <Value Name="WORD" Value="65535"/>
+  <Value Name="DWORD" Value="4294967295"/>
+  <Value Name="INT1" Value="2147483647"/>
+  <Value Name="INT2" Value="-2147483648"/>
+  <Value Name="WIFI_SUPPORT" Value="0"/>
+  <Value Name="HW_SERIAL_NO" Value="XPON26020216"/>
+  <Value Name="HW_FON_KEYWORD" Value="63,62,68,4a,75,3c,65,cd,7b,75,e5,2d,a9,80,72,8c,97,fc,bd,9b,37,51,d9,e3,82,92,68,a1,07,ae,a0,b5"/>
+  <Value Name="HW_WLAN0_11N_XCAP" Value="0"/>
+  <Value Name="HW_WLAN0_11N_XCAP_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TARGET_PWR" Value="0"/>
+  <Value Name="HW_WLAN0_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN1_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN0_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_WLAN1_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_CWMP_MANUFACTURER" Value="HWTC"/>
+  <Value Name="HW_CWMP_PRODUCTCLASS" Value="EG8145X6-10"/>
+  <Value Name="HW_HWVER" Value="343D.D"/>
+  <Value Name="GPON_ONU_MODEL" Value="EG8145X6-10"/>
+  <Value Name="LAN_SDS_MODE" Value="0"/>
+  <Value Name="PON_MODE" Value="1"/>
+  <Value Name="PON_LED_SPEC" Value="0"/>
+  <Value Name="OUI" Value="e0,da,90"/>
+  <Value Name="PORT_REMAPPING" Value="00,01,00,00"/>
+  <Value Name="PON_VENDOR_ID" Value="HWTC"/>
+  <Value Name="GPON_SN" Value="HWTC370F0BAE"/>
+  <Value Name="EPON_ONU_MODEL" Value="HWTC"/>
+  <Value Name="EPON_EXTONU_MODEL" Value="EG8145X6-10"/>
+  <Value Name="EPON_SILENT_MODE" Value="1"/>
+ </Dir>
+</Config>
+# 
+
+========= /var/config/lastgood_hs.xml.check_failed =========
+=Dpogjh!Obnf>#SPPU#?!=Ejs!Obnf>#IX`NJC`UBCMF#?!!=Wbmvf!Obnf>#TVQFS`OBNF#!Wbmvf>#betm#0?!!=Wbmvf!Obnf>#TVQFS`QBTTXPSE#!Wbmvf>#sfbmufl#0?!!=Wbmvf!Obnf>#FMBO`NBD`BEES#!Wbmvf>#11f15d978112#0?!!=Wbmvf!Obnf>#XMBO`NBD`BEES#!Wbmvf>#11f15d187913#0?!!=Wbmvf!Obnf>#XBO`QIZ`QPSU#!Wbmvf>#5#0?!!=Wbmvf!Obnf>#IX`SG`UZQF#!Wbmvf>#8#0?!!=Wbmvf!Obnf>#IX`XMBO1`UY`QPXFS`DDL`B#!Wbmvf>#11-11-11-11-11-11-11-11-11-11-11-11-11-11#0?!!=Wbmvf!Obnf>#IX`XMBO1`UY`QPXFS`DDL`C#!Wbmvf>#11-11-11-11-11-11-11-11-11-11-11-11-11-11#0?!!=Wbmvf!Obnf>#IX`XMBO1`UY`QPXFS`IU51`2T`B#!Wbmvf>#11-11-11-11-11-11-11-11-11-11-11-11-11-11#0?!!=Wbmvf!Obnf>#IX`XMBO1`UY`QPXFS`IU51`2T`C#!Wbmvf>#11-11-11-11-11-11-11-11-11-11-11-11-11-11#0?!!=Wbmvf!Obnf>#IX`XMBO1`UY`QPXFS`EJGG`IU51`3T#!Wbmvf>#11-11-11-11-11-11-11-11-11-11-11-11-11-11#0?!!=Wbmvf!Obnf>#IX`XMBO1`UY`QPXFS`EJGG`IU31#!Wbmvf>#11-11-11-11-11-11-11-11-11-11-11-11-11-11#0?!!=Wbmvf!Obnf>#IX`XMBO1`UY`QPXFS`EJGG`PGEN#!Wbmvf>#11-11-11-11-11-11-11-11-11-11-11-11-11-11#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`UTTJ2#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`UTTJ3#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`UIFS#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`UIFS`3#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`QB`UZQF#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`SFH`EPNBJO#!Wbmvf>#2#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`USTXJUDI#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`USTXQBQF`D:#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`USTXQBQF`DD#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`BOU`EJWFSTJUZ#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`UY`BOU#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`DT`UISFTIPME#!Wbmvf>#22#0?!!=Wbmvf!Obnf>#IX`DDB`NPEF#!Wbmvf>#2#0?!!=Wbmvf!Obnf>#IX`QIZ`UZQF#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO`MFE`UZQF#!Wbmvf>#8#0?!!=Wbmvf!Obnf>#CZUF#!Wbmvf>#366#0?!!=Wbmvf!Obnf>#XPSE#!Wbmvf>#76646#0?!!=Wbmvf!Obnf>#EXPSE#!Wbmvf>#53:5:783:6#0?!!=Wbmvf!Obnf>#JOU2#!Wbmvf>#3258594758#0?!!=Wbmvf!Obnf>#JOU3#!Wbmvf>#.3258594759#0?!!=Wbmvf!Obnf>#XJGJ`TVQQPSU#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`TFSJBM`OP#!Wbmvf>#111111111113#0?!!=Wbmvf!Obnf>#IX`GPO`LFZXPSE#!Wbmvf>#74-73-79-5b-86-4d-76-de-8c-86-f6-3e-b:-91-83-9d-:8-gd-ce-:c-48-62-e:-f4-93-:3-79-b2-18-bf-b1-c6#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`YDBQ#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`YDBQ`3#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`22O`UBSHFU`QXS#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#IX`XMBO1`DPVOUSZDPEF#!Wbmvf>#2#0?!!=Wbmvf!Obnf>#IX`XMBO2`DPVOUSZDPEF#!Wbmvf>#2#0?!!=Wbmvf!Obnf>#IX`XMBO1`DPVOUSZTUS#!Wbmvf>#VT#0?!!=Wbmvf!Obnf>#IX`XMBO2`DPVOUSZTUS#!Wbmvf>#VT#0?!!=Wbmvf!Obnf>#IX`DXNQ`NBOVGBDUVSFS#!Wbmvf>#Sfbmufl#0?!!=Wbmvf!Obnf>#IX`DXNQ`QSPEVDUDMBTT#!Wbmvf>#JHE#0?!!=Wbmvf!Obnf>#IX`IXWFS#!Wbmvf>#SUM:71y#0?!!=Wbmvf!Obnf>#HQPO`POV`NPEFM#!Wbmvf>#JHE#0?!!=Wbmvf!Obnf>#MBO`TET`NPEF#!Wbmvf>#2#0?!!=Wbmvf!Obnf>#QPO`NPEF#!Wbmvf>#2#0?!!=Wbmvf!Obnf>#QPO`MFE`TQFD#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#QPO`BVUP`TFMFDU#!Wbmvf>#1#0?!!=Wbmvf!Obnf>#PVJ#!Wbmvf>#22-22-22#0?!!=Wbmvf!Obnf>#QPSU`SFNBQQJOH#!Wbmvf>#11-12-11-11#0?!!=Wbmvf!Obnf>#QPO`WFOEPS`JE#!Wbmvf>#SULH#0?!!=Wbmvf!Obnf>#HQPO`TO#!Wbmvf>#SULH22222222#0?!!=Wbmvf!Obnf>#FQPO`POV`NPEFM#!Wbmvf>#1111#0?!!=Wbmvf!Obnf>#FQPO`FYUPOV`NPEFM#!Wbmvf>#SULH#0?!!=Wbmvf!Obnf>#FQPO`TJMFOU`NPEF#!Wbmvf>#2#0?!=0Ejs?=0Dpogjh?# 
+
+========= /var/config/lastgood_mp_hs2.xml =========
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+  <Value Name="SUPER_NAME" Value="adsl"/>
+  <Value Name="SUPER_PASSWORD" Value="realtek"/>
+  <Value Name="TEST_MAC_ADDR" Value="realtek"/>
+  <Value Name="ELAN_MAC_ADDR" Value="383a21280681"/>
+  <Value Name="WLAN_MAC_ADDR" Value="00e04c076802"/>
+  <Value Name="WAN_PHY_PORT" Value="4"/>
+  <Value Name="LASER_POLARITY_TYPE" Value="0"/>
+  <Value Name="PON_DETECT_ENABLE" Value="1"/>
+  <Value Name="HW_RF_TYPE" Value="7"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT40_2S" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT20" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_OFDM" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_11N_TSSI1" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TSSI2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_PA_TYPE" Value="0"/>
+  <Value Name="HW_WLAN0_REG_DOMAIN" Value="1"/>
+  <Value Name="HW_WLAN0_11N_TRSWITCH" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_C9" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_CC" Value="0"/>
+  <Value Name="HW_ANT_DIVERSITY" Value="0"/>
+  <Value Name="HW_TX_ANT" Value="0"/>
+  <Value Name="HW_CS_THRESHOLD" Value="11"/>
+  <Value Name="HW_CCA_MODE" Value="1"/>
+  <Value Name="HW_PHY_TYPE" Value="0"/>
+  <Value Name="HW_WLAN_LED_TYPE" Value="7"/>
+  <Value Name="BYTE" Value="255"/>
+  <Value Name="WORD" Value="65535"/>
+  <Value Name="DWORD" Value="4294967295"/>
+  <Value Name="INT1" Value="2147483647"/>
+  <Value Name="INT2" Value="-2147483648"/>
+  <Value Name="WIFI_SUPPORT" Value="0"/>
+  <Value Name="HW_SERIAL_NO" Value="XPON20200681"/>
+  <Value Name="HW_FON_KEYWORD" Value="63,62,68,4a,75,3c,65,cd,7b,75,e5,2d,a9,80,72,8c,97,fc,bd,9b,37,51,d9,e3,82,92,68,a1,07,ae,a0,b5"/>
+  <Value Name="HW_WLAN0_11N_XCAP" Value="0"/>
+  <Value Name="HW_WLAN0_11N_XCAP_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TARGET_PWR" Value="0"/>
+  <Value Name="HW_WLAN0_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN1_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN0_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_WLAN1_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_CWMP_MANUFACTURER" Value="HSGQ"/>
+  <Value Name="HW_CWMP_PRODUCTCLASS" Value="M111"/>
+  <Value Name="HW_HWVER" Value="RTL960x"/>
+  <Value Name="GPON_ONU_MODEL" Value="M111"/>
+  <Value Name="PON_MODE" Value="1"/>
+  <Value Name="PON_LED_SPEC" Value="0"/>
+  <Value Name="OUI" Value="11,11,11"/>
+  <Value Name="PORT_REMAPPING" Value="00,01,00,00"/>
+  <Value Name="PON_VENDOR_ID" Value="HSGQ"/>
+  <Value Name="GPON_SN" Value="XPON20200681"/>
+  <Value Name="EPON_ONU_MODEL" Value="0000"/>
+  <Value Name="EPON_EXTONU_MODEL" Value="RTKG"/>
+  <Value Name="EPON_SILENT_MODE" Value="1"/>
+ </Dir>
+</Config>
+# 
+
+========= /var/config/lastgood.xml =========
+<Config Name="ROOT">
+ <Dir Name="MIB_TABLE">
+  <Value Name="WAN_MODE" Value="7"/>
+  <Value Name="LAN_IP_ADDR" Value="192.168.1.1"/>
+  <Value Name="LAN_SUBNET" Value="255.255.255.0"/>
+  <Value Name="LAN_ENABLE_IP2" Value="0"/>
+  <Value Name="LAN_IP_ADDR2" Value="192.168.100.1"/>
+  <Value Name="LAN_SUBNET2" Value="255.255.255.0"/>
+  <Value Name="LAN_RIP" Value="0"/>
+  <Value Name="LAN_AUTOSEARCH" Value="0"/>
+  <Value Name="DNS_MODE" Value="0"/>
+  <Value Name="DNS1" Value="0.0.0.0"/>
+  <Value Name="DNS2" Value="0.0.0.0"/>
+  <Value Name="DNS3" Value="0.0.0.0"/>
+  <Value Name="ADSL_MODE" Value="83"/>
+  <Value Name="ADSL_OLR" Value="3"/>
+  <Value Name="USER_NAME" Value="user"/>
+  <Value Name="USER_PASSWORD" Value="user"/>
+  <Value Name="DEVICE_TYPE" Value="0"/>
+  <Value Name="INIT_LINE" Value="1"/>
+  <Value Name="INIT_SCRIPT" Value="1"/>
+  <Value Name="SNMP_SYS_NAME" Value="Modem/Router"/>
+  <Value Name="VC_AUTOSEARCH" Value="0"/>
+  <Value Name="BR_AGEING_TIME" Value="7200"/>
+  <Value Name="BR_STP_ENABLED" Value="0"/>
+  <Value Name="MP_MODE" Value="4"/>
+  <Value Name="SPC_ENABLED" Value="0"/>
+  <Value Name="SPC_IPTYPE" Value="0"/>
+  <Value Name="MP_FIN" Value="1"/>
+  <Value Name="MULTI_LINGUAL_STATE" Value="en"/>
+  <Value Name="TFTP_SERVER_ADDR" Value="tftp://0.0.0.0"/>
+  <Value Name="POSIX_TZ_STRING" Value=""/>
+  <Value Name="BOOT_FILENAME" Value=""/>
+  <Value Name="UPNP" Value="0"/>
+  <Value Name="UPNP_EXT_ITF" Value="255"/>
+  <Value Name="SYSLOG_LOG_LEVEL" Value="0"/>
+  <Value Name="SYSLOG_DISPLAY_LEVEL" Value="0"/>
+  <Value Name="SUSER_NAME" Value="admin"/>
+  <Value Name="SUSER_PASSWORD" Value="admin"/>
+  <Value Name="E8BDUSER_NAME" Value="administrator"/>
+  <Value Name="E8BDUSER_PASSWORD" Value="Stel$864"/>
+  <Value Name="ADSL_TONE" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="DIRECT_BRIDGE_MODE" Value="1"/>
+  <Value Name="ADSL_HIGH_INP" Value="0"/>
+  <Value Name="SYSLOG" Value="0"/>
+  <Value Name="MAXLOGLEN" Value="16384"/>
+  <Value Name="ADSLDBG" Value="0"/>
+  <Value Name="MIB_ETH_MAC_CTRL" Value="0"/>
+  <Value Name="MIB_WLAN_MAC_CTRL" Value="0"/>
+  <Value Name="SNOOPING_ENABLED" Value="0"/>
+  <Value Name="LOID" Value=""/>
+  <Value Name="LOID_PASSWD" Value=""/>
+  <Value Name="LOID_OLD" Value=""/>
+  <Value Name="LOID_PASSWD_OLD" Value=""/>
+  <Value Name="PROVINCE_TRAP_PPPOE_TRAFFIC" Value="0"/>
+  <Value Name="GPON_PLOAM_FORMAT" Value="1"/>
+  <Value Name="GPON_PLOAM_PASSWD" Value=""/>
+  <Value Name="OMCI_DBGLVL" Value="0"/>
+  <Value Name="OMCI_LOGFILE" Value="0"/>
+  <Value Name="OMCI_PORT_TYPE" Value="1"/>
+  <Value Name="DUAL_MGMT_MODE" Value="1"/>
+  <Value Name="OMCI_CUSTOM_BDP" Value="258"/>
+  <Value Name="OMCI_CUSTOM_RDP" Value="4"/>
+  <Value Name="OMCI_CUSTOM_MCAST" Value="0"/>
+  <Value Name="OMCI_CUSTOM_ME" Value="65536"/>
+  <Value Name="OMCI_VENDOR_PRODUCT_CODE" Value="15"/>
+  <Value Name="OMCI_FAKE_OK" Value="1"/>
+  <Value Name="OMCI_VEIP_SLOT_ID" Value="255"/>
+  <Value Name="OMCI_WAN_QOS_QUEUE_NUM" Value="1"/>
+  <Value Name="RTK_IGMP_DBGEN" Value="0"/>
+  <Value Name="RTK_IGMP_DROPV1" Value="0"/>
+  <Value Name="RTK_IGMP_VIDTYPE" Value="0"/>
+  <Value Name="RTK_IGMP_TAGDECISION" Value="0"/>
+  <Value Name="VLAN_CFG_TYPE" Value="1"/>
+  <Value Name="VLAN_MANU_MODE" Value="1"/>
+  <Value Name="VLAN_MANU_TAG_VID" Value="1011"/>
+  <Value Name="VLAN_MANU_TAG_PRI" Value="0"/>
+  <Value Name="OMCI_OLT_MODE" Value="0"/>
+  <Value Name="OMCI_SW_VER1" Value="V5R022C00S265"/>
+  <Value Name="OMCI_SW_VER2" Value="V5R022C00S265"/>
+  <Value Name="OMCC_VER" Value="128"/>
+  <Value Name="OMCI_TM_OPT" Value="2"/>
+  <Value Name="OMCI_LOGFILE_MASK" Value="0"/>
+  <Value Name="REBOOT_TIME" Value="0"/>
+  <Value Name="DHCP_PORT_FILTER" Value="1"/>
+  <Value Name="NTP_EXT_ITF" Value="65535"/>
+  <Value Name="FIBER_MODE" Value="0"/>
+  <Value Name="RTK_DEVID_MANUFACTURER" Value=""/>
+  <Value Name="RTK_DEVID_OUI" Value=""/>
+  <Value Name="RTK_DEVID_PRODUCTCLASS" Value=""/>
+  <Value Name="RTK_DEVINFO_SPECVER" Value=""/>
+  <Value Name="RTK_DEVINFO_SWVER" Value=""/>
+  <Value Name="RTK_DEVINFO_HWVER" Value=""/>
+  <Value Name="DEVICE_NAME" Value="RTK_GW"/>
+ </Dir>
+ <Dir Name="ATM_VC_TBL">
+ </Dir>
+ <Dir Name="SW_PORT_TBL"> <!--index=0-->
+  <Value Name="PVCInterface" Value="65535"/>
+  <Value Name="InterfaceGroup" Value="0"/>
+  <Value Name="PVID" Value="0"/>
+  <Value Name="LinkMode" Value="4"/>
+  <Value Name="VLAN on LAN Enabled" Value="0"/>
+  <Value Name="VLAN on LAN InterfaceGroup" Value="0"/>
+  <Value Name="VID" Value="0"/>
+ </Dir>
+ <Dir Name="SW_PORT_TBL"> <!--index=1-->
+  <Value Name="PVCInterface" Value="65535"/>
+  <Value Name="InterfaceGroup" Value="0"/>
+  <Value Name="PVID" Value="1"/>
+  <Value Name="LinkMode" Value="4"/>
+  <Value Name="VLAN on LAN Enabled" Value="0"/>
+  <Value Name="VLAN on LAN InterfaceGroup" Value="0"/>
+  <Value Name="VID" Value="0"/>
+ </Dir>
+ <Dir Name="MAC_BASE_DHCP_TBL">
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=0-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="35"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=1-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="35"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=2-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="43"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=3-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="51"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=4-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="59"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=5-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="43"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=6-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="51"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=7-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="59"/>
+ </Dir>
+ <Dir Name="PPPOE_SESSION_TBL">
+ </Dir>
+ <Dir Name="RIP_TBL">
+ </Dir>
+ <Dir Name="DHCP_RESERVED_IPADDR_TBL">
+ </Dir>
+ <Dir Name="EPON_LLID_TBL">
+ </Dir>
+</Config>
+# 
+
+========= /var/config/lastgood.xml_bak =========
+<Config Name="ROOT">
+ <Dir Name="MIB_TABLE">
+  <Value Name="WAN_MODE" Value="7"/>
+  <Value Name="LAN_IP_ADDR" Value="192.168.1.1"/>
+  <Value Name="LAN_SUBNET" Value="255.255.255.0"/>
+  <Value Name="LAN_ENABLE_IP2" Value="0"/>
+  <Value Name="LAN_IP_ADDR2" Value="192.168.100.1"/>
+  <Value Name="LAN_SUBNET2" Value="255.255.255.0"/>
+  <Value Name="LAN_RIP" Value="0"/>
+  <Value Name="LAN_AUTOSEARCH" Value="0"/>
+  <Value Name="DNS_MODE" Value="0"/>
+  <Value Name="DNS1" Value="0.0.0.0"/>
+  <Value Name="DNS2" Value="0.0.0.0"/>
+  <Value Name="DNS3" Value="0.0.0.0"/>
+  <Value Name="ADSL_MODE" Value="83"/>
+  <Value Name="ADSL_OLR" Value="3"/>
+  <Value Name="USER_NAME" Value="user"/>
+  <Value Name="USER_PASSWORD" Value="user"/>
+  <Value Name="DEVICE_TYPE" Value="0"/>
+  <Value Name="INIT_LINE" Value="1"/>
+  <Value Name="INIT_SCRIPT" Value="1"/>
+  <Value Name="SNMP_SYS_NAME" Value="Modem/Router"/>
+  <Value Name="VC_AUTOSEARCH" Value="0"/>
+  <Value Name="BR_AGEING_TIME" Value="7200"/>
+  <Value Name="BR_STP_ENABLED" Value="0"/>
+  <Value Name="MP_MODE" Value="4"/>
+  <Value Name="SPC_ENABLED" Value="0"/>
+  <Value Name="SPC_IPTYPE" Value="0"/>
+  <Value Name="MP_FIN" Value="1"/>
+  <Value Name="MULTI_LINGUAL_STATE" Value="en"/>
+  <Value Name="TFTP_SERVER_ADDR" Value="tftp://0.0.0.0"/>
+  <Value Name="POSIX_TZ_STRING" Value=""/>
+  <Value Name="BOOT_FILENAME" Value=""/>
+  <Value Name="UPNP" Value="0"/>
+  <Value Name="UPNP_EXT_ITF" Value="255"/>
+  <Value Name="SYSLOG_LOG_LEVEL" Value="0"/>
+  <Value Name="SYSLOG_DISPLAY_LEVEL" Value="0"/>
+  <Value Name="SUSER_NAME" Value="admin"/>
+  <Value Name="SUSER_PASSWORD" Value="admin"/>
+  <Value Name="E8BDUSER_NAME" Value="administrator"/>
+  <Value Name="E8BDUSER_PASSWORD" Value="Stel$864"/>
+  <Value Name="ADSL_TONE" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="DIRECT_BRIDGE_MODE" Value="1"/>
+  <Value Name="ADSL_HIGH_INP" Value="0"/>
+  <Value Name="SYSLOG" Value="0"/>
+  <Value Name="MAXLOGLEN" Value="16384"/>
+  <Value Name="ADSLDBG" Value="0"/>
+  <Value Name="MIB_ETH_MAC_CTRL" Value="0"/>
+  <Value Name="MIB_WLAN_MAC_CTRL" Value="0"/>
+  <Value Name="SNOOPING_ENABLED" Value="0"/>
+  <Value Name="LOID" Value=""/>
+  <Value Name="LOID_PASSWD" Value=""/>
+  <Value Name="LOID_OLD" Value=""/>
+  <Value Name="LOID_PASSWD_OLD" Value=""/>
+  <Value Name="PROVINCE_TRAP_PPPOE_TRAFFIC" Value="0"/>
+  <Value Name="GPON_PLOAM_FORMAT" Value="1"/>
+  <Value Name="GPON_PLOAM_PASSWD" Value=""/>
+  <Value Name="OMCI_DBGLVL" Value="0"/>
+  <Value Name="OMCI_LOGFILE" Value="0"/>
+  <Value Name="OMCI_PORT_TYPE" Value="1"/>
+  <Value Name="DUAL_MGMT_MODE" Value="1"/>
+  <Value Name="OMCI_CUSTOM_BDP" Value="258"/>
+  <Value Name="OMCI_CUSTOM_RDP" Value="4"/>
+  <Value Name="OMCI_CUSTOM_MCAST" Value="0"/>
+  <Value Name="OMCI_CUSTOM_ME" Value="65536"/>
+  <Value Name="OMCI_VENDOR_PRODUCT_CODE" Value="15"/>
+  <Value Name="OMCI_FAKE_OK" Value="1"/>
+  <Value Name="OMCI_VEIP_SLOT_ID" Value="255"/>
+  <Value Name="OMCI_WAN_QOS_QUEUE_NUM" Value="1"/>
+  <Value Name="RTK_IGMP_DBGEN" Value="0"/>
+  <Value Name="RTK_IGMP_DROPV1" Value="0"/>
+  <Value Name="RTK_IGMP_VIDTYPE" Value="0"/>
+  <Value Name="RTK_IGMP_TAGDECISION" Value="0"/>
+  <Value Name="VLAN_CFG_TYPE" Value="1"/>
+  <Value Name="VLAN_MANU_MODE" Value="1"/>
+  <Value Name="VLAN_MANU_TAG_VID" Value="1011"/>
+  <Value Name="VLAN_MANU_TAG_PRI" Value="0"/>
+  <Value Name="OMCI_OLT_MODE" Value="0"/>
+  <Value Name="OMCI_SW_VER1" Value="V5R022C00S265"/>
+  <Value Name="OMCI_SW_VER2" Value="V5R022C00S265"/>
+  <Value Name="OMCC_VER" Value="128"/>
+  <Value Name="OMCI_TM_OPT" Value="2"/>
+  <Value Name="OMCI_LOGFILE_MASK" Value="0"/>
+  <Value Name="REBOOT_TIME" Value="0"/>
+  <Value Name="DHCP_PORT_FILTER" Value="1"/>
+  <Value Name="NTP_EXT_ITF" Value="65535"/>
+  <Value Name="FIBER_MODE" Value="0"/>
+  <Value Name="RTK_DEVID_MANUFACTURER" Value=""/>
+  <Value Name="RTK_DEVID_OUI" Value=""/>
+  <Value Name="RTK_DEVID_PRODUCTCLASS" Value=""/>
+  <Value Name="RTK_DEVINFO_SPECVER" Value=""/>
+  <Value Name="RTK_DEVINFO_SWVER" Value=""/>
+  <Value Name="RTK_DEVINFO_HWVER" Value=""/>
+  <Value Name="DEVICE_NAME" Value="RTK_GW"/>
+ </Dir>
+ <Dir Name="ATM_VC_TBL">
+ </Dir>
+ <Dir Name="SW_PORT_TBL"> <!--index=0-->
+  <Value Name="PVCInterface" Value="65535"/>
+  <Value Name="InterfaceGroup" Value="0"/>
+  <Value Name="PVID" Value="0"/>
+  <Value Name="LinkMode" Value="4"/>
+  <Value Name="VLAN on LAN Enabled" Value="0"/>
+  <Value Name="VLAN on LAN InterfaceGroup" Value="0"/>
+  <Value Name="VID" Value="0"/>
+ </Dir>
+ <Dir Name="SW_PORT_TBL"> <!--index=1-->
+  <Value Name="PVCInterface" Value="65535"/>
+  <Value Name="InterfaceGroup" Value="0"/>
+  <Value Name="PVID" Value="1"/>
+  <Value Name="LinkMode" Value="4"/>
+  <Value Name="VLAN on LAN Enabled" Value="0"/>
+  <Value Name="VLAN on LAN InterfaceGroup" Value="0"/>
+  <Value Name="VID" Value="0"/>
+ </Dir>
+ <Dir Name="MAC_BASE_DHCP_TBL">
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=0-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="35"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=1-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="35"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=2-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="43"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=3-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="51"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=4-->
+  <Value Name="VPI" Value="0"/>
+  <Value Name="VCI" Value="59"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=5-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="43"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=6-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="51"/>
+ </Dir>
+ <Dir Name="AUTO_PVC_SEARCH_TBL"> <!--index=7-->
+  <Value Name="VPI" Value="8"/>
+  <Value Name="VCI" Value="59"/>
+ </Dir>
+ <Dir Name="PPPOE_SESSION_TBL">
+ </Dir>
+ <Dir Name="RIP_TBL">
+ </Dir>
+ <Dir Name="DHCP_RESERVED_IPADDR_TBL">
+ </Dir>
+ <Dir Name="EPON_LLID_TBL">
+ </Dir>
+</Config>
+# 
+Traceback (most recent call last):
+  File "/tmp/stick-grabhs.py", line 27, in <module>
+    print(run("exit"))
+  File "/tmp/stick-grabhs.py", line 13, in run
+    time.sleep(0.3);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 368, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 405, in read_very_lazy
+EOFError: telnet connection closed

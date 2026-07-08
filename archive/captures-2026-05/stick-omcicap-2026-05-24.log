@@ -1,0 +1,15 @@
+/bin/sh: pgrep: not found
+killed
+# 
+# 
+/bin/sh: head: not found
+[1] + Done                       /etc/runomci.sh 1>/tmp/omci.log 2>&1
+# 
+Traceback (most recent call last):
+  File "/tmp/stick-omcicap.py", line 22, in <module>
+    print(r("sleep 40 ; echo waited", 45))
+  File "/tmp/stick-omcicap.py", line 13, in r
+    time.sleep(0.3);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 366, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 526, in fill_rawq
+ConnectionResetError: [Errno 104] Connection reset by peer

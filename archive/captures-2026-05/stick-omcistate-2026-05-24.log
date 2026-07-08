@@ -1,0 +1,31 @@
+
+=== $ omcicli get sn ===
+
+
+=== $ omcicli get authuptime ===
+
+
+=== $ omcicli get loidauth ===
+
+
+=== $ omcicli get tables ===
+
+
+=== $ omcicli get cflag ===
+
+
+=== $ omcicli get devmode ===
+
+
+=== $ omcicli mib reset 2>&1 | head -3 ; true ===
+
+
+=== $ omcicli getalm ===
+Traceback (most recent call last):
+  File "/tmp/stick-omcistate.py", line 39, in <module>
+    print(run(c, 5))
+  File "/tmp/stick-omcistate.py", line 13, in run
+    time.sleep(0.3);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 366, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 526, in fill_rawq
+ConnectionResetError: [Errno 104] Connection reset by peer

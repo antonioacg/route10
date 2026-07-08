@@ -1,0 +1,192 @@
+
+=== $ flash get MAC ===
+[ERR] Warning, unknown dir name: MAC
+GET fail.
+# 
+
+=== $ flash get LAN_MAC ===
+[ERR] Warning, unknown dir name: LAN_MAC
+GET fail.
+# 
+
+=== $ flash get WAN_MAC ===
+[ERR] Warning, unknown dir name: WAN_MAC
+GET fail.
+# 
+
+=== $ flash get ETH_MAC ===
+[ERR] Warning, unknown dir name: ETH_MAC
+GET fail.
+# 
+
+=== $ flash get HW_MAC ===
+[ERR] Warning, unknown dir name: HW_MAC
+GET fail.
+# 
+
+=== $ flash get RTK_MAC ===
+[ERR] Warning, unknown dir name: RTK_MAC
+GET fail.
+# 
+
+=== $ flash get DEVICE_MAC ===
+[ERR] Warning, unknown dir name: DEVICE_MAC
+GET fail.
+# 
+
+=== $ flash get | grep -i mac ===
+# 
+
+=== $ flash all cs 2>&1 | grep -i mac ===
+  <Value Name="MIB_ETH_MAC_CTRL" Value="0"/>
+  <Value Name="MIB_WLAN_MAC_CTRL" Value="0"/>
+ <Dir Name="MAC_BASE_DHCP_TBL">
+# 
+
+=== $ flash all hs 2>&1 | grep -i mac ===
+  <Value Name="TEST_MAC_ADDR" Value="realtek"/>
+  <Value Name="ELAN_MAC_ADDR" Value="e0da90c4f885"/>
+  <Value Name="WLAN_MAC_ADDR" Value="00e04c076802"/>
+  <Value Name="MAC_KEY" Value="0903625421575fc3fc86cc7565c35451"/>
+# 
+
+=== $ mib get LAN_MAC ===
+mib_info_id: get mib info id failed! (id=0)
+Cannot get value of LAN_MAC.
+# 
+
+=== $ mib get ETH_MAC ===
+mib_info_id: get mib info id failed! (id=0)
+Cannot get value of ETH_MAC.
+# 
+
+=== $ mib get | grep -i mac ===
+Segmentation fault
+# 
+
+=== $ nv get MAC 2>&1 ===
+Usage: nv getenv [parameter_name]
+       nv setenv parameter_name value 
+# 
+
+=== $ nv get LAN_MAC 2>&1 ===
+Usage: nv getenv [parameter_name]
+       nv setenv parameter_name value 
+# 
+
+=== $ nv 2>&1 | head -20 ; true ===
+/bin/sh: head: not found
+# 
+
+=== $ cat /sys/class/net/eth0/address ===
+e0:da:90:c4:f8:85
+# 
+
+=== $ cat /sys/class/net/br0/address ===
+e0:da:90:c4:f8:85
+# 
+
+=== $ cat /sys/class/net/pon0/address 2>&1 ===
+00:00:00:01:00:02
+# 
+
+=== $ cat /var/config/europa.data | xxd 2>/dev/null | head -10 ; true ===
+/bin/sh: head: not found
+# 
+
+=== $ cat /var/config/europa.data | od -An -c 2>/dev/null | head -5 ===
+/bin/sh: head: not found
+# 
+
+=== $ ls -la /var/config/europa.data ===
+-rw-r--r--    1 admin    0            1552 Jan  1 00:00 /var/config/europa.data
+# 
+
+=== $ europacli get 2>&1 | head -30 ; true ===
+/bin/sh: head: not found
+# 
+
+=== $ europacli 2>&1 ; true ===
+available cmds:
+init
+reset
+set
+get
+cal
+gen
+dump
+clear
+close
+delete
+gpon
+epon
+# 
+
+=== $ europacli show all 2>&1 ; true ===
+incorrect command
+# 
+
+=== $ cat /etc/serial_num 2>/dev/null ===
+# 
+
+=== $ cat /var/serial_num 2>/dev/null ===
+# 
+
+=== $ ls /flash 2>/dev/null ===
+# 
+
+=== $ dd if=/var/config/europa.data bs=1 count=6 skip=0 2>/dev/null | od -An -tx1 ; true ===
+/bin/sh: od: not found
+# 
+
+=== $ dd if=/var/config/europa.data bs=1 count=6 skip=8 2>/dev/null | od -An -tx1 ; true ===
+/bin/sh: od: not found
+# 
+
+=== $ dd if=/var/config/europa.data bs=1 count=6 skip=16 2>/dev/null | od -An -tx1 ; true ===
+/bin/sh: od: not found
+# 
+
+=== $ od -An -tx1 /var/config/europa.data 2>/dev/null | tr -s ' 
+' ' ' ===
+> /bin/sh: tr: not found
+# 
+
+=== $ dd if=/var/config/rtl8290b.data bs=1 count=64 2>/dev/null | od -An -tx1 ===
+/bin/sh: od: not found
+# 
+
+=== $ cat /proc/mtd ===
+dev:    size   erasesize  name
+mtd0: 00040000 00001000 "boot"
+mtd1: 00002000 00001000 "env"
+mtd2: 00002000 00001000 "env2"
+mtd3: 0003c000 00001000 "config"
+mtd4: 0014c000 00001000 "k0"
+mtd5: 00274000 00001000 "r0"
+mtd6: 0014c000 00001000 "k1"
+mtd7: 00274000 00001000 "r1"
+mtd8: 00001000 00001000 "Partition_008"
+mtd9: 00001000 00001000 "Partition_009"
+mtd10: 00001000 00001000 "Partition_010"
+mtd11: 00001000 00001000 "Partition_011"
+mtd12: 0014c000 00001000 "linux"
+mtd13: 00274000 00001000 "rootfs"
+# 
+
+=== $ strings /bin/omci_app 2>/dev/null | grep -i mac_check ; true ===
+# 
+
+=== $ strings /bin/omci_app 2>/dev/null | grep -i -E 'onuMac|hwMac|GPON' | head -20 ; true ===
+/bin/sh: head: not found
+# 
+
+=== $ exit ===
+Traceback (most recent call last):
+  File "/tmp/stick-mac.py", line 69, in <module>
+    print(run(c, 4))
+  File "/tmp/stick-mac.py", line 13, in run
+    time.sleep(0.3);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 368, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 405, in read_very_lazy
+EOFError: telnet connection closed

@@ -1,0 +1,248 @@
+
+=== $ flash all hs ===
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+  <Value Name="SUPER_NAME" Value="adsl"/>
+  <Value Name="SUPER_PASSWORD" Value="realtek"/>
+  <Value Name="TEST_MAC_ADDR" Value="realtek"/>
+  <Value Name="ELAN_MAC_ADDR" Value="e0da90c4f885"/>
+  <Value Name="WLAN_MAC_ADDR" Value="00e04c076802"/>
+  <Value Name="MAC_KEY" Value="0903625421575fc3fc86cc7565c35451"/>
+  <Value Name="RESTORE_DEFAULT_EN" Value="1"/>
+  <Value Name="WAN_PHY_PORT" Value="4"/>
+  <Value Name="LASER_POLARITY_TYPE" Value="0"/>
+  <Value Name="PON_DETECT_ENABLE" Value="1"/>
+  <Value Name="HW_RF_TYPE" Value="7"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_CCK_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_A" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_HT40_1S_B" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT40_2S" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_HT20" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_TX_POWER_DIFF_OFDM" Value="00,00,00,00,00,00,00,00,00,00,00,00,00,00"/>
+  <Value Name="HW_WLAN0_11N_TSSI1" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TSSI2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER" Value="0"/>
+  <Value Name="HW_WLAN0_11N_THER_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_PA_TYPE" Value="0"/>
+  <Value Name="HW_WLAN0_REG_DOMAIN" Value="1"/>
+  <Value Name="HW_WLAN0_11N_TRSWITCH" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_C9" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TRSWPAPE_CC" Value="0"/>
+  <Value Name="HW_ANT_DIVERSITY" Value="0"/>
+  <Value Name="HW_TX_ANT" Value="0"/>
+  <Value Name="HW_CS_THRESHOLD" Value="11"/>
+  <Value Name="HW_CCA_MODE" Value="1"/>
+  <Value Name="HW_PHY_TYPE" Value="0"/>
+  <Value Name="HW_WLAN_LED_TYPE" Value="7"/>
+  <Value Name="BYTE" Value="255"/>
+  <Value Name="WORD" Value="65535"/>
+  <Value Name="DWORD" Value="4294967295"/>
+  <Value Name="INT1" Value="2147483647"/>
+  <Value Name="INT2" Value="-2147483648"/>
+  <Value Name="WIFI_SUPPORT" Value="0"/>
+  <Value Name="HW_SERIAL_NO" Value="XPON26020216"/>
+  <Value Name="HW_FON_KEYWORD" Value="63,62,68,4a,75,3c,65,cd,7b,75,e5,2d,a9,80,72,8c,97,fc,bd,9b,37,51,d9,e3,82,92,68,a1,07,ae,a0,b5"/>
+  <Value Name="HW_WLAN0_11N_XCAP" Value="0"/>
+  <Value Name="HW_WLAN0_11N_XCAP_2" Value="0"/>
+  <Value Name="HW_WLAN0_11N_TARGET_PWR" Value="0"/>
+  <Value Name="HW_WLAN0_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN1_COUNTRYCODE" Value="1"/>
+  <Value Name="HW_WLAN0_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_WLAN1_COUNTRYSTR" Value="US"/>
+  <Value Name="HW_CWMP_MANUFACTURER" Value="HWTC"/>
+  <Value Name="HW_CWMP_PRODUCTCLASS" Value="EG8145X6-10"/>
+  <Value Name="HW_HWVER" Value="343D.D"/>
+  <Value Name="GPON_ONU_MODEL" Value="EG8145X6-10"/>
+  <Value Name="LAN_SDS_MODE" Value="0"/>
+  <Value Name="PON_MODE" Value="1"/>
+  <Value Name="PON_LED_SPEC" Value="0"/>
+  <Value Name="OUI" Value="e0,da,90"/>
+  <Value Name="PORT_REMAPPING" Value="00,01,00,00"/>
+  <Value Name="PON_VENDOR_ID" Value="HWTC"/>
+  <Value Name="GPON_SN" Value="HWTC370F0BAE"/>
+  <Value Name="EPON_ONU_MODEL" Value="HWTC"/>
+  <Value Name="EPON_EXTONU_MODEL" Value="EG8145X6-10"/>
+  <Value Name="EPON_SILENT_MODE" Value="1"/>
+ </Dir>
+</Config>
+# 
+
+=== $ ls /bin/ | grep -i -E 'mac|set|gen' ===
+consoleset
+# 
+
+=== $ ls /sbin/ 2>/dev/null | grep -i -E 'mac|set|gen' ===
+consoleset
+# 
+
+=== $ ls /usr/bin /usr/sbin 2>/dev/null ===
+# 
+
+=== $ find /bin /sbin /etc /lib -type f -executable 2>/dev/null | xargs -I{} sh -c "echo {} && busybox strings {} 2>/dev/null | grep -l -i mac_check 2>&1" 2>&1 | grep -B1 mac_check | head -20 ===
+/bin/sh: head: not found
+grep: invalid option -- B
+BusyBox v1.12.4 (2022-09-23 19:33:44 CST) multi-call binary
+
+Usage: grep [-HhrilLnqvsoeFE] PATTERN [FILEs...]
+
+Search for PATTERN in each FILE or standard input
+
+Options:
+	-H	Prefix output lines with filename where match was found
+	-h	Suppress the prefixing filename on output
+	-r	Recurse subdirectories
+	-i	Ignore case distinctions
+	-l	List names of files that match
+	-L	List names of files that do not match
+	-n	Print line number with output lines
+	-q	Quiet. Return 0 if PATTERN is found, 1 otherwise
+	-v	Select non-matching lines
+	-s	Suppress file open/read error messages
+	-c	Only print count of matching lines
+	-o	Show only the part of a line that matches PATTERN
+	-m MAX	Match up to MAX times per file
+	-F	PATTERN is a set of newline-separated strings
+	-E	PATTERN is an extended regular expression
+	-e PTRN	Pattern to match
+	-f FILE	Read pattern from file
+
+# 
+
+=== $ busybox strings /bin/omci_app | grep -i mac | head -30 ===
+strings: applet not found
+/bin/sh: head: not found
+# 
+
+=== $ busybox strings /bin/omci_app | grep -i -E 'check|valid|tamper|hmac|key' | head -30 ===
+strings: applet not found
+/bin/sh: head: not found
+# 
+
+=== $ busybox strings /bin/omci_app | grep -E 'GPON|onuMac' | head -20 ===
+strings: applet not found
+/bin/sh: head: not found
+# 
+
+=== $ busybox strings /bin/europacli | grep -i -E 'mac_check|hmac|secret|key' | head -20 ===
+strings: applet not found
+/bin/sh: head: not found
+# 
+
+=== $ busybox strings /bin/xmlconfig | grep -i -E 'mac_check|hmac|secret|key' | head -20 ===
+strings: applet not found
+/bin/sh: head: not found
+# 
+
+=== $ ls /etc/config_default* ===
+/etc/config_default.xml     /etc/config_default_hs.xml
+# 
+
+=== $ cat /etc/config_default_hs.xml 2>/dev/null | grep -i -E 'mac|key' | head -20 ===
+/bin/sh: head: not found
+# 
+
+=== $ cat /etc/config_default.xml 2>/dev/null | grep -i -E 'mac|key' | head -10 ===
+/bin/sh: head: not found
+# 
+
+=== $ ls /etc/scripts/mp_default 2>/dev/null ===
+/etc/scripts/mp_default
+# 
+
+=== $ cat /etc/scripts/mp_default 2>/dev/null | head -40 ===
+/bin/sh: head: not found
+# 
+
+=== $ ls -la /dev/mtd* ===
+crw-rw----    1 admin    0         90,   0 Jan  1 00:00 /dev/mtd0
+crw-rw----    1 admin    0         90,   1 Jan  1 00:00 /dev/mtd0ro
+crw-rw----    1 admin    0         90,   2 Jan  1 00:00 /dev/mtd1
+crw-rw----    1 admin    0         90,  20 Jan  1 00:00 /dev/mtd10
+crw-rw----    1 admin    0         90,  21 Jan  1 00:00 /dev/mtd10ro
+crw-rw----    1 admin    0         90,  22 Jan  1 00:00 /dev/mtd11
+crw-rw----    1 admin    0         90,  23 Jan  1 00:00 /dev/mtd11ro
+crw-rw----    1 admin    0         90,  24 Jan  1 00:00 /dev/mtd12
+crw-rw----    1 admin    0         90,  25 Jan  1 00:00 /dev/mtd12ro
+crw-rw----    1 admin    0         90,  26 Jan  1 00:00 /dev/mtd13
+crw-rw----    1 admin    0         90,  27 Jan  1 00:00 /dev/mtd13ro
+crw-rw----    1 admin    0         90,   3 Jan  1 00:00 /dev/mtd1ro
+crw-rw----    1 admin    0         90,   4 Jan  1 00:00 /dev/mtd2
+crw-rw----    1 admin    0         90,   5 Jan  1 00:00 /dev/mtd2ro
+crw-rw----    1 admin    0         90,   6 Jan  1 00:00 /dev/mtd3
+crw-rw----    1 admin    0         90,   7 Jan  1 00:00 /dev/mtd3ro
+crw-rw----    1 admin    0         90,   8 Jan  1 00:00 /dev/mtd4
+crw-rw----    1 admin    0         90,   9 Jan  1 00:00 /dev/mtd4ro
+crw-rw----    1 admin    0         90,  10 Jan  1 00:00 /dev/mtd5
+crw-rw----    1 admin    0         90,  11 Jan  1 00:00 /dev/mtd5ro
+crw-rw----    1 admin    0         90,  12 Jan  1 00:00 /dev/mtd6
+crw-rw----    1 admin    0         90,  13 Jan  1 00:00 /dev/mtd6ro
+crw-rw----    1 admin    0         90,  14 Jan  1 00:00 /dev/mtd7
+crw-rw----    1 admin    0         90,  15 Jan  1 00:00 /dev/mtd7ro
+crw-rw----    1 admin    0         90,  16 Jan  1 00:00 /dev/mtd8
+crw-rw----    1 admin    0         90,  17 Jan  1 00:00 /dev/mtd8ro
+crw-rw----    1 admin    0         90,  18 Jan  1 00:00 /dev/mtd9
+crw-rw----    1 admin    0         90,  19 Jan  1 00:00 /dev/mtd9ro
+brw-rw----    1 admin    0         31,   0 Jan  1 00:00 /dev/mtdblock0
+brw-rw----    1 admin    0         31,   1 Jan  1 00:00 /dev/mtdblock1
+brw-rw----    1 admin    0         31,  10 Jan  1 00:00 /dev/mtdblock10
+brw-rw----    1 admin    0         31,  11 Jan  1 00:00 /dev/mtdblock11
+brw-rw----    1 admin    0         31,  12 Jan  1 00:00 /dev/mtdblock12
+brw-rw----    1 admin    0         31,  13 Jan  1 00:00 /dev/mtdblock13
+brw-rw----    1 admin    0         31,   2 Jan  1 00:00 /dev/mtdblock2
+brw-rw----    1 admin    0         31,   3 Jan  1 00:00 /dev/mtdblock3
+brw-rw----    1 admin    0         31,   4 Jan  1 00:00 /dev/mtdblock4
+brw-rw----    1 admin    0         31,   5 Jan  1 00:00 /dev/mtdblock5
+brw-rw----    1 admin    0         31,   6 Jan  1 00:00 /dev/mtdblock6
+brw-rw----    1 admin    0         31,   7 Jan  1 00:00 /dev/mtdblock7
+brw-rw----    1 admin    0         31,   8 Jan  1 00:00 /dev/mtdblock8
+brw-rw----    1 admin    0         31,   9 Jan  1 00:00 /dev/mtdblock9
+# 
+
+=== $ cat /etc/config_default_hs.xml 2>/dev/null ===
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+		<Value Name="PON_MODE" Value="1"/>
+ </Dir>
+</Config>
+# 
+
+=== $ grep -l ELAN_MAC /etc/* /var/config/* 2>/dev/null ===
+/etc/runoam.sh
+/var/config/lastgood_hs.xml
+/var/config/lastgood_hs.xml_bak
+/var/config/lastgood_mp_hs2.xml
+# 
+
+=== $ grep -l MAC_KEY /etc/* /var/config/* 2>/dev/null ===
+/var/config/lastgood_hs.xml
+/var/config/lastgood_hs.xml_bak
+# 
+
+=== $ cat /var/config/lastgood_hs.xml | grep -i -E 'mac|key|serial' | head -10 ===
+/bin/sh: head: not found
+# 
+
+=== $ wc -c /var/config/lastgood_hs.xml ===
+/bin/sh: wc: not found
+# 
+
+=== $ cat /dev/mtdblock1 2>/dev/null | busybox strings | head -30 ===
+/bin/sh: head: not found
+strings: applet not found
+# 
+
+=== $ cat /dev/mtdblock2 2>/dev/null | busybox strings | head -30 ===
+/bin/sh: head: not found
+strings: applet not found
+# 
+
+=== $ exit ===
+Traceback (most recent call last):
+  File "/tmp/stick-tamper.py", line 57, in <module>
+    print(run(c, 5))
+  File "/tmp/stick-tamper.py", line 13, in run
+    time.sleep(0.3);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 368, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 405, in read_very_lazy
+EOFError: telnet connection closed

@@ -1,0 +1,35 @@
+=== capture successful PPPoE handshake for archival ===
+tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+listening on pppoe-wan3, link-type LINUX_SLL (Linux cooked v1), capture size 262144 bytes
+01:20:59.529369 IP 100.68.63.234.38152 > 52.85.78.90.443: Flags [.], seq 2054916993:2054918393, ack 773284995, win 501, length 1400
+01:20:59.529387 IP 100.68.63.234.38152 > 52.85.78.90.443: Flags [P.], seq 1400:1940, ack 1, win 501, length 540
+01:20:59.558319 IP 47.236.156.107.32100 > 100.68.63.234.29486: UDP, length 12
+01:20:59.560719 IP 17.253.10.201.443 > 100.68.63.234.60809: Flags [FP.], seq 482587583:482587607, ack 1532140999, win 137, options [nop,nop,TS val 2901537735 ecr 3614374583], length 24
+01:20:59.645292 IP 52.85.78.90.443 > 100.68.63.234.38152: Flags [.], ack 1940, win 2667, length 0
+5 packets captured
+10 packets received by filter
+0 packets dropped by kernel
+---
+{
+  "up": true,
+  "proto": "pppoe",
+  "device": "eth4",
+  "ipv4-address": [
+    {
+      "address": "100.68.63.234",
+      "mask": 32,
+      "ptpaddress": "168.195.103.5"
+    }
+  ],
+  "ipv6-address": [
+    {
+      "address": "fe80::1cc9:927a:1e5a:1cb9",
+      "mask": 128
+    }
+  ],
+  "dns-server": [
+    "190.109.67.237",
+    "190.109.67.240"
+  ],
+  "uptime": 453
+}

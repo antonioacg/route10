@@ -3,26 +3,31 @@
 Operational home for the **Route10** edge router (Alta IPQ9574) — the Brazilian-residential
 GPON path, its boot-fixup scripts, monitoring daemons, and incident post-mortems.
 
-> **Migration in progress.** This repo starts with the 2026-06-24 power-surge / DHCP effort
-> (post-mortem + the `post-cfg.sh` fix). More Route10 scripts, daemons, and notes land here
-> as they're migrated in.
-
 ## Layout
-- `scripts/` — scripts deployed to Route10 under `/cfg/...`. `post-cfg.sh` (→ `/cfg/`) runs
-  after every Alta cloud-config reapply (idempotent boot-fixup + daemon launcher; the cloud
-  master overwrites local `uci`/`config.json` on boot, so persistent fixes live here).
-  `dhcp-watchdog.sh` (→ `/cfg/scripts/`) detects & auto-restarts a mute dnsmasq (the
-  2026-06-24 surge failure mode) by watching `br-lan` for the "many requests, zero replies"
-  signature; launched by `post-cfg.sh`.
-  `route-defaultroute-hook.sh` (→ `/cfg/scripts/`; `post-cfg.sh` symlinks it into
-  `/etc/ppp/ip-up.d/` and adds a 1-min cron backstop) re-asserts the WAN default route (v4+v6)
-  that netifd drops on a PPPoE reconnect (the 2026-07-08 failure mode) — no daemon.
+- `scripts/` — scripts deployed to Route10 under `/cfg/...`.
+  - `post-cfg.sh` (→ `/cfg/`) runs after every Alta cloud-config reapply — idempotent
+    boot-fixup + daemon launcher (the cloud master overwrites local `uci`/`config.json` on
+    boot, so persistent fixes live here).
+  - Daemons launched by `post-cfg.sh` (→ `/cfg/scripts/`): `odi-health.sh` (5-min health:
+    PPP/RTT/thermals/DDM), `flap-hunt.sh` (2 s sub-minute event catcher), `lcp-watch.sh`
+    (PPPoE LCP-echo headroom telemetry), `daemon-odi-w2-ddm.sh` (Boa→i2c bridge that surfaces
+    the W2 stick DDM in the Alta dashboard), `dhcp-watchdog.sh` (detects & restarts a mute
+    dnsmasq — the 2026-06-24 surge mode).
+  - `route-defaultroute-hook.sh` (`post-cfg.sh` symlinks it into `/etc/ppp/ip-up.d/` + a
+    1-min cron backstop) re-asserts the WAN default route (v4+v6) netifd drops on a PPPoE
+    reconnect (the 2026-07-08 mode) — no daemon.
+  - `stick-exec.py` (→ `/cfg/scripts/`) — clean-exit telnet wrapper for OMCI commands on the
+    ODI stick (`ssh route10 'python3 /cfg/scripts/stick-exec.py --json "omcicli …"'`).
 - `tools/` — local dev tooling (not deployed). `deploy-preflight.sh` validates a script
-  against Route10's busybox **ash** before you copy it to `/cfg` — the authoritative check
-  runs `sh -n` on the router itself (macOS `/bin/sh` accepts bashisms ash rejects).
-  Run: `tools/deploy-preflight.sh scripts/post-cfg.sh`. `dhcp-probe.py` injects a DHCP DISCOVER
-  on `br-lan` from the router to test for a mute dnsmasq (`ANSWERED` / `NO_REPLY`).
-- `docs/postmortems/` — incident write-ups.
+  against Route10's busybox **ash** before you copy it to `/cfg` (authoritative `sh -n` runs
+  on the router itself). `dhcp-probe.py` injects a DHCP DISCOVER on `br-lan` to test for a mute
+  dnsmasq. `diag-drive.py`, `stick-relay.py`, `oneshot.py`, `cutover-monitor.sh`,
+  `poke-monitor.sh` — stick-debug / cutover helpers from the fiber-migration effort.
+- `docs/postmortems/` — incident write-ups. `docs/reference/` — ODI-stick / mwan3 / IPv6 /
+  hardware reference notes. `docs/runbooks/` — step-by-step procedures (e.g. the ODI PPPoE
+  bring-up recipe).
+- `archive/` — one-time recon captures, cutover logs, and pre-reboot backups from the
+  2026-05 stick-flashing effort (kept for provenance, not maintained).
 
 ## Quick facts
 - LAN `192.168.10.0/24`; gateway + DNS = `192.168.10.1` (dnsmasq). WAN = PPPoE `wan3` via the

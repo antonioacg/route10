@@ -1,0 +1,45 @@
+<html>
+<! Copyright (c) Realtek Semiconductor Corp., 2003. All Rights Reserved. ->
+<head>
+<meta http-equiv="Content-Type" content="text/html" charset="utf-8">
+<title>Commit and Reboot</title>
+<SCRIPT>
+function saveClick()
+{
+
+ return true;
+}
+
+function resetClick()
+{
+ return true;
+}
+</SCRIPT>
+</head>
+
+<body>
+<blockquote>
+<h2><font color="#0000FF">Reboot Time</font></h2>
+
+<form action=/boaform/admin/formAutoRebootTime method=POST name="rebootTime">
+<table border=0 width="500" cellspacing=4 cellpadding=0>
+  <tr><td><font size=2>
+    It will reboot,After runing the setting of time!
+  </font></td></tr>
+  <tr><td><hr size=1 noshade align=top></td></tr>
+</table>
+<table border=0 width="500" cellspacing=4 cellpadding=0>
+ <tr>
+  <th width="40%">uptime(mins):</th>
+  <td><input type="text" name="time" size="20" maxlength="10" value="0" >(0:not reboot)</td>
+ </tr>
+
+</table>
+  <br>
+      <input type="submit" value="Apply Changes" name="save" onclick="return saveClick()">&nbsp;&nbsp;
+      <input type="hidden" value="/rebootTime.asp" name="submit-url">
+ </form>
+</blockquote>
+</body>
+
+</html>

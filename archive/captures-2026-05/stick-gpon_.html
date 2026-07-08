@@ -1,0 +1,275 @@
+<html>
+<! Copyright (c) Realtek Semiconductor Corp., 2003. All Rights Reserved. ->
+<head>
+<meta http-equiv="Content-Type" content="text/html" charset="utf-8">
+<title>Settings</title>
+<script type="text/javascript" src="share.js">
+</script>
+<script>
+var ploamformat="1";
+
+var omcc_ver_value = 128;
+var omci_olt_mode_value = "0";
+
+function on_init()
+{
+ if ( ploamformat == 1 )
+ {
+  document.formgponconf.fmgpon_ploamformat.selectedIndex = 1;
+ }
+ else
+ {
+  document.formgponconf.fmgpon_ploamformat.selectedIndex = 0;
+ }
+
+ with (document.forms[0])
+ {
+  //omci_tm_opt.value = omci_tm_opt_value;
+  omcc_ver.value = omcc_ver_value;
+  //if(omci_olt_mode_value == 0)
+  //	apply.style.display = "none";
+ }
+}
+
+function updatePloamFormat()
+{
+ document.formgponconf.fmgpon_ploam_password.value = "";
+}
+
+function applyclick()
+{
+ /* LOID */
+ /*if (document.formgponconf.fmgpon_loid.value=="") {		
+
+		alert('');
+
+		document.formgponconf.fmgpon_loid.focus();
+
+		return false;
+
+	}*/
+ /* LOID Password */
+/*	if (document.formgponconf.fmgpon_loid_password.value=="") {		
+
+		alert('');
+
+		document.formgponconf.fmgpon_loid_password.focus();
+
+		return false;
+
+	}*/
+ if (includeSpace(document.formgponconf.fmgpon_loid_password.value)) {
+  alert('Cannot accept space character in LOID Password.');
+  document.formgponconf.fmgpon_loid_password.focus();
+  return false;
+ }
+ if (checkString(document.formgponconf.fmgpon_loid_password.value) == 0) {
+  alert('Invalid LOID Password.');
+  document.formgponconf.fmgpon_loid_password.focus();
+  return false;
+ }
+ /* PLOAM Password */
+ /*if (document.formgponconf.fmgpon_ploam_password.value=="") {		
+
+		alert('');
+
+		document.formgponconf.fmgpon_ploam_password.focus();
+
+		return false;
+
+	}*/
+ if (includeSpace(document.formgponconf.fmgpon_ploam_password.value)) {
+  alert('Cannot accept space character in PLOAM Password.');
+  document.formgponconf.fmgpon_ploam_password.focus();
+  return false;
+ }
+ if (checkString(document.formgponconf.fmgpon_ploam_password.value) == 0) {
+  alert('Invalid PLOAM Password.');
+  document.formgponconf.fmgpon_ploam_password.focus();
+  return false;
+ }
+ /*if( document.formgponconf.fmgpon_ploam_password.value.length>10 )
+
+	{		
+
+		alert('');
+
+		document.formgponconf.fmgpon_ploam_password.focus();
+
+		return false;
+
+	}*/
+ return true;
+}
+function applyclick2()
+{
+ if (document.formOmciInfo.omci_sw_ver1.value=="") {
+  alert('OMCI software version 1 cannot be empty');
+  document.formOmciInfo.omci_sw_ver1.focus();
+  return false;
+ }
+ if (document.formOmciInfo.omci_sw_ver2.value=="") {
+  alert('OMCI software version 2 cannot be empty');
+  document.formOmciInfo.omci_sw_ver2.focus();
+  return false;
+ }
+ if (document.formOmciInfo.cwmp_productclass.value=="") {
+  alert('CWMP Product Class cannot be empty');
+  document.formOmciInfo.cwmp_productclass.focus();
+  return false;
+ }
+ if (document.formOmciInfo.cwmp_hw_ver.value=="") {
+  alert('HW version cannot be empty');
+  document.formOmciInfo.cwmp_hw_ver.focus();
+  return false;
+ }
+ if (document.formOmciInfo.oui.value=="") {
+  alert('Oui cannot be empty');
+  document.formOmciInfo.oui.focus();
+  return false;
+ }
+ return true;
+}
+function on_change()
+{
+ with (document.forms[0])
+ {
+  if(omci_olt_mode_value == 0){
+   //omci_tm_opt.value = omci_tm_opt_value;
+   omcc_ver.value = omcc_ver_value;
+  }
+ }
+}
+</script>
+</head>
+<body onLoad="on_init();">
+<blockquote>
+<h2><font color="#0000FF">Settings</font></h2>
+<form action=/boaform/admin/formgponConf method=POST name="formgponconf">
+<table border=0 width="500" cellspacing=4 cellpadding=0>
+  <tr><td><font size=2>
+    This page is used to configure the parameters for your network access.
+  </font></td></tr>
+  <tr><td><hr size=1 noshade align=top></td></tr>
+</table>
+<table border=0 width="500" cellspacing=4 cellpadding=0>
+<tr>
+      <td width="30%"><font size=2><b>LOID:</b></td>
+      <td width="70%"><input type="text" name="fmgpon_loid" size="28" maxlength="28" value=""></td>
+  </tr>
+<tr>
+      <td width="30%"><font size=2><b>LOID Password:</b></td>
+      <td width="70%"><input type="text" name="fmgpon_loid_password" size="12" maxlength="12" value=""></td>
+  </tr>
+  <tr>
+      <td width="30%"><font size=2><b>PLOAM Format:</b></td>
+      <td width="70%">
+  <select id="ploam_format" name="fmgpon_ploamformat" value="1" onChange="updatePloamFormat()">
+   <option value="0">Hex (20 characters)</option>
+   <option value="1">ASCII (10 characters)</option>
+  </select>
+   </td>
+  </tr>
+  <tr>
+      <td width="30%"><font size=2><b>PLOAM Password:</b></td>
+      <td width="70%"><input type="text" name="fmgpon_ploam_password" size="20" maxlength="20" value="" </td>
+  </tr>
+  <tr>
+      <td width="30%"><font size=2><b>GPON SN:</b></td>
+      <td width="70%"><input type="text" name="fmgpon_sn" size="10" maxlength="12" value="HWTC370F0BAE"> </td>
+  </tr>
+</table>
+<br>
+      <input type="submit" value="Apply Changes" name="apply" onClick="return applyclick()">&nbsp;&nbsp;
+      <input type="hidden" value="/gpon.asp" name="submit-url">
+</form>
+</blockquote>
+<blockquote>
+<form action=/boaform/admin/formOmciInfo method=POST name="formOmciInfo">
+<table border=0 width="500" cellspacing=4 cellpadding=0>
+  <tr><td><font size=2>
+  </font></td></tr>
+</table>
+<table border=0 width="500" cellspacing=4 cellpadding=0>
+<tr>
+      <td width="40%"><font size=2><b>Vendor ID</b></td>
+      <td width="60%"><input type="text" name="omci_vendor_id" size="14" maxlength="4" value="HWTC"></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>software version 1</b></td>
+      <td width="60%"><input type="text" name="omci_sw_ver1" size="14" maxlength="14" value="V5R022C00S265" ></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>software version 2</b></td>
+      <td width="60%"><input type="text" name="omci_sw_ver2" size="14" maxlength="14" value="V5R022C00S265" ></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>OMCC version</b></td>
+      <td width="60%"><!--<input type="text" name="omcc_ver" size="40" maxlength="40" value="128">-->
+      <select name="omcc_ver" onChange="on_change()">
+      <option value="128" > 0x80</option>
+      <option value="129" > 0x81</option>
+      <option value="130" > 0x82</option>
+      <option value="131" > 0x83</option>
+      <option value="132" > 0x84</option>
+      <option value="133" > 0x85</option>
+      <option value="134" > 0x86</option>
+      <option value="150" > 0x96</option>
+      <option value="160" > 0xA0</option>
+      <option value="161" > 0xA1</option>
+      <option value="162" > 0xA2</option>
+      <option value="163" > 0xA3</option>
+      <option value="176" > 0xB0</option>
+      <option value="177" > 0xB1</option>
+      <option value="178" > 0xB2</option>
+      <option value="179" > 0xB3</option>
+      </select></td>
+</tr>
+<!--<tr>
+      <td width="40%"><font size=2><b>Traffic Managament option</b></td>
+      <td width="60%"><input type="text" name="omci_tm_opt" size="40" maxlength="40" value="2">
+    <select name="omci_tm_opt" onChange="on_change()">
+ <option value="0" > 0</option>
+ <option value="1" > 1 </option>
+ <option value="2" > 2 </option>
+ </select></td>
+</tr>-->
+<tr>
+      <td width="40%"><font size=2><b>Product Class</b></td>
+      <td width="60%"><input type="text" name="cwmp_productclass" size="20" maxlength="20" value="EG8145X6-10" ></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>HW version</b></td>
+      <td width="60%"><input type="text" name="cwmp_hw_ver" size="14" maxlength="14" value="343D.D" ></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>OUI</b></td>
+      <td width="60%"><input type="text" name="oui" size="6" maxlength="6" value="e0da90" ></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>Device Serial Number</b></td>
+      <td width="60%"><input type="text" name="hw_serial_no" size="32" maxlength="64" value="XPON26020216" ></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>MAC</b></td>
+      <td width="60%"><input type="text" name="mac" size="12" maxlength="12" value="e0da90c4f885" ></td>
+</tr>
+<tr>
+      <td width="40%"><font size=2><b>MACKEY</b></td>
+      <td width="60%"><input type="text" name="mackey" size="40" maxlength="64" value="0903625421575fc3fc86cc7565c35451" ></td>
+</tr>
+<tr>
+      <td><font size=2><b>Fiber Reset:</b></td>
+      <td><font size=2>
+       <input type="radio" value="0" name="fiberreset" >Disable&nbsp;&nbsp;
+      <input type="radio" value="1" name="fiberreset" checked>Enable
+      </td>
+</tr>
+</table>
+<br>
+      <input type="submit" value="Apply Changes" name="apply" onClick="return applyclick2()">&nbsp;&nbsp;
+      <input type="hidden" value="/gpon.asp" name="submit-url">
+</form>
+</blockquote>
+</body>
+</html>

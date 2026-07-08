@@ -1,0 +1,3 @@
+# Archived recon captures / backups are historical artifacts — store them
+# byte-for-byte, no EOL normalization, no diffing.
+archive/** -text -diff

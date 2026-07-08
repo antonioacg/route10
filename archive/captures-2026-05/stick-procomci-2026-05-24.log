@@ -1,0 +1,53 @@
+
+========== /proc/omci/wanInfo ==========
+# 
+
+========== /proc/omci/wanData ==========
+# 
+
+========== /proc/omci/cf_map ==========
+# 
+
+========== /proc/omci/f2dq ==========
+# 
+
+========== /proc/omci/l2 ==========
+# 
+
+========== /proc/omci/mb ==========
+# 
+
+========== /proc/omci/macFilter ==========
+# 
+
+========== /proc/omci/uniQos ==========
+# 
+
+========== /proc/omci/veip ==========
+
+
+========== /proc/omci/vgf ==========
+
+
+========== /proc/omci/usage ==========
+
+
+========== /proc/omci/devMode ==========
+
+
+========== /proc/omci/dmMode ==========
+
+
+========== /proc/omci/omciMirror ==========
+
+
+========== /proc/omci/debugInfo ==========
+
+Traceback (most recent call last):
+  File "/tmp/stick-procomci.py", line 19, in <module>
+    print(r("exit"))
+  File "/tmp/stick-procomci.py", line 13, in r
+    time.sleep(0.4);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 366, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 526, in fill_rawq
+ConnectionResetError: [Errno 104] Connection reset by peer

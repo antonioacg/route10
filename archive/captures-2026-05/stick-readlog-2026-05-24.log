@@ -1,0 +1,25 @@
+-rw-r--r--    1 admin    0          494095 Jan  1 00:13 /tmp/omci.log
+# 
+# 
+  eth0:   19597     402    0    0    0     0          0         0    80336    1569    0    0    0     0       0          0
+eth0.2:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+eth0.3:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  pon0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+# 
+=== wanInfo ===
+=== wanData ===
+=== cf_map ===
+=== mb ===
+=== veip ===
+=== vgf ===
+=== l2 ===
+=== f2dq ===
+# 
+Traceback (most recent call last):
+  File "/tmp/stick-readlog.py", line 20, in <module>
+    print(r("exit"))
+  File "/tmp/stick-readlog.py", line 13, in r
+    time.sleep(0.3);x=t.read_very_eager()
+  File "/usr/lib/python3.9/telnetlib.py", line 368, in read_very_eager
+  File "/usr/lib/python3.9/telnetlib.py", line 405, in read_very_lazy
+EOFError: telnet connection closed

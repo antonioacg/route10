@@ -1,0 +1,921 @@
+
+=== $ cat /etc/insdrv.sh ===
+#!/bin/sh
+
+pon_mode=`flash get PON_MODE`
+if [ -d /proc/rg ]; then
+	drvMode=1
+else
+	drvMode=0
+fi
+if [ "$pon_mode" == "PON_MODE=1" ]; then
+	dualMgmt=`flash get DUAL_MGMT_MODE | sed 's/DUAL_MGMT_MODE=//g'`
+    if [ -f  /lib/modules/omcidrv.ko ]; then
+        insmod /lib/modules/omcidrv.ko
+        if [ "$drvMode" = "0" ]; then
+			if [ -f /lib/modules/pf_rtk.ko ]; then
+				insmod /lib/modules/pf_rtk.ko
+			else
+				echo "Warning no exist rtk platform"
+			fi
+		else
+			if [ -f /lib/modules/pf_rg.ko ]; then
+				insmod /lib/modules/pf_rg.ko
+                insmod /lib/modules/gpon_pppoe_adv.ko
+			else
+				echo "Warning no exist rg platform"
+			fi
+
+			if [ "$dualMgmt" == "1" ]; then
+				if [ -f /etc/rtk_tr142.sh ]; then
+					/etc/rtk_tr142.sh
+				else
+					echo "warning no exit rtk_tr142.sh"
+				fi
+			fi
+		fi
+    else
+        echo "Warning no insert OMCI module in GPON mode"
+    fi
+fi
+
+# 
+
+=== $ cat /etc/runsdk.sh ===
+#!/bin/sh
+
+pon_mode=`flash get PON_MODE`
+sn_string=`flash get GPON_SN`
+detect_enale=`flash get PON_DETECT_ENABLE`
+def_sn=${sn_string##*=}
+fiber_mode=`flash get FIBER_MODE | sed 's/FIBER_MODE=//g'`
+if [ "$pon_mode" == "PON_MODE=1" ]; then
+	/etc/runomci.sh
+	if [ "$detect_enale" == "PON_DETECT_ENABLE=1" ]; then		
+	/bin/pondetect 1 $def_sn 1 &
+        else
+	/bin/pondetect 1 $def_sn 0 &
+	fi
+		echo "running GPON mode ..."
+elif [ "$pon_mode" == "PON_MODE=2" ]; then
+        insmod /lib/modules/epon_drv.ko
+        /etc/runoam.sh
+        insmod epon_polling.ko
+        insmod epon_mpcp.ko
+        sleep 2
+	if [ "$detect_enale" == "PON_DETECT_ENABLE=1" ]; then	
+        /bin/pondetect 2 $def_sn 1 &
+	else
+	/bin/pondetect 2 $def_sn 0&
+        fi
+        echo "running EPON mode ..."
+elif [ "$pon_mode" == "PON_MODE=3" ]; then
+        echo $fiber_mode > proc/fiber_mode
+elif echo $pon_mode | grep -q "GET fail"; then
+        echo $fiber_mode > proc/fiber_mode
+else
+        echo "running Ether mode..."
+fi
+
+insmod rldp_drv.ko
+
+# 
+
+=== $ cat /etc/runlansds.sh ===
+#!/bin/sh
+
+lan_sds_mode=`flash get LAN_SDS_MODE | sed 's/LAN_SDS_MODE=//g'`
+echo $lan_sds_mode > proc/lan_sds/lan_sds_cfg
+echo 1 > proc/lan_sds/sfp_app
+sfpapp &
+
+# 
+
+=== $ cat /etc/scripts/insert_europa.sh ===
+#!/bin/sh
+
+#MIBPONMODE=$(flash get PON_MODE | awk -F'=' '{print $2}')
+#MIBPONMODE=$(mib get PON_MODE | awk -F'=' '{print $2}')
+
+MIBPONMODE=$(flash get PON_MODE | sed -e 's/[[:space:]]//g' -e 's/PON_MODE=//g')
+
+if [ -f  /lib/modules/omcidrv.ko ]; then
+	EUROPADRV=/lib/modules/europa_drv.ko
+else
+	EUROPADRV=europa_drv
+fi
+
+if [ $MIBPONMODE -eq 2 ]; then
+	echo "EPON mode."
+else
+#while [ $(ps | grep -c omci_app) -lt 2 ]; do
+#	echo "omci_app is not ready."
+#	sleep 1
+#done
+#	echo "omci_app is up."
+	echo "GPON mode."
+fi
+
+if [ -f  /var/config/europa.data ]; then
+	echo  "/var/config/europa.data existed, do nothing."
+else
+	echo  "/var/config/europa.data not existed, generate it."
+	/bin/europacli init flash europa
+fi
+		
+if [ -f  /var/config/rtl8290b.data ]; then
+	echo  "/var/config/rtl8290b.data existed, do nothing."
+else
+	echo  "/var/config/rtl8290b.data not existed, generate it."
+	/bin/europacli init flash 8290b
+fi
+
+		
+insmod $EUROPADRV PON_MODE=$MIBPONMODE \
+I2C_PORT=1 INTR_PIN=29 TXDIS_PIN=13 TXPWR_PIN=0
+# 
+
+=== $ cat /etc/scripts/config_xmlconfig.sh ===
+#!/bin/ash
+#
+# usage: config-xmlconfig.sh [option] ...
+#
+
+DEFAULT_FILE="/etc/config_default.xml"
+DEFAULT_HS_FILE="/etc/config_default_hs.xml"
+LASTGOOD_FILE="/var/config/lastgood.xml"
+LASTGOOD_HS_FILE="/var/config/lastgood_hs.xml"
+FAIL_FILE_SUFFIX=".check_failed"
+MP_HS_FILE="/var/config/lastgood_mp_hs.xml"
+MP_HS_FILE2="/var/config/lastgood_mp_hs2.xml"
+CONFIGD_RUNFILE="/var/run/configd.pid"
+PROVINCE_DIR="/etc/province/config"
+HW_PROVINCE_NAME="HW_PROVINCE_NAME"
+SHELL_NAME="ash"
+BACKUP_SUFFIX="bak"
+ONGOING_LOCK="/tmp/lock_ongoing."
+WAITING_LOCK="/tmp/lock_waiting."
+
+waitOngoingLock(){
+	lock_name=$1
+	index=0
+	while [ ${index} -le 10  ]
+	do
+		if mkdir "${ONGOING_LOCK}${lock_name}"  2> /dev/null
+		then
+			return 0
+		fi
+		sleep 1
+		index=$(( ++index ))
+	done
+	return 1
+}
+
+lockWorkingProcess(){
+	lock_name=$1
+	if mkdir "${WAITING_LOCK}${lock_name}" 2> /dev/null
+	then
+		trap 'rm -rf "${WAITING_LOCK}${lock_name}"; exit $?' INT TERM EXIT
+		if  waitOngoingLock "${lock_name}"
+		then
+			rm -rf "${WAITING_LOCK}${lock_name}"
+			trap - INT TERM EXIT
+			trap 'rm -rf "${ONGOING_LOCK}${lock_name}"; exit $?' INT TERM EXIT
+			return 0
+		else
+			echo "Wait Ongoing lock Timeout!"
+			rm -rf "${WAITING_LOCK}${lock_name}"
+			trap - INT TERM EXIT
+			exit 1
+		fi
+	else
+		echo "Not get waiting lock!"
+		# not acquire the waiting lock
+		exit 0
+	fi
+}
+
+
+unlockWorkingProcess(){
+	lock_name=$1
+	ret="$?"
+	rm -rf "${ONGOING_LOCK}${lock_name}"
+	trap - INT TERM EXIT
+	return ${ret}
+}
+
+
+check_space(){
+	if [ "${1}" = "" -o ! -f ${1} ]; then
+		_FILE_PATH="/var/config"
+		file_size=100
+	else
+		_FILE_NAME="${1}"
+		_FILE_PATH=${_FILE_NAME%/*}
+		output_result=$(ls -s ${_FILE_NAME} )
+		set ${output_result}
+		file_size=${1}
+	fi
+	output_result=$( df ${_FILE_PATH} )
+	set ${output_result}
+	space_size=${11}
+	whole_space=${9}
+	if [ "${whole_space}" -gt "1000" ]; then
+		file_size=`expr ${file_size} + ${file_size}`
+	fi
+	if [ ${space_size} -lt ${file_size} -o ${space_size} = "0" ]; then
+		echo "FATAL ERROR: Not enough space ${space_size}/${file_size}"
+		return  1
+	fi
+	return 0
+}
+
+genBackup(){
+	fn="${1}"
+	[ -f "${fn}" ] && check_space "${fn}" && /bin/xmlconfig -c "${fn}" > /dev/null && cp -f "$fn" "${fn}_${BACKUP_SUFFIX}" >  /dev/null
+}
+
+get_cmp_tool(){
+	if [ -f "/bin/cmp" ]; then
+		echo "/bin/cmp"
+		return 0
+	elif [ -f "/bin/diff" ]; then
+		echo "/bin/diff"
+		return 0
+	fi
+	return -1
+}
+
+chkBackup(){
+	fn="${1}"
+	cmp_tool=$( get_cmp_tool )
+	if [ "$?" != "0" ]; then
+		echo "msg: not cmp tool!"
+		return -1
+	fi
+	
+	if [ -f "${fn}" -a -f "${fn}_${BACKUP_SUFFIX}" ]; then
+		cmp_str=$( ${cmp_tool} "$fn" "${fn}_${BACKUP_SUFFIX}" 2> /dev/null )
+		if [ "${cmp_str}" != "" ]; then
+			cp -f "$fn" "${fn}_${BACKUP_SUFFIX}" && echo "Renew [${fn##*/}] backup file!"
+		fi
+	fi
+	return 0
+}
+
+getProvinceConfigName() {
+	ctc_prov=$(/bin/xmlconfig -g ${HW_PROVINCE_NAME} 2> /dev/null | sed "s/${HW_PROVINCE_NAME}=//")
+	if [  ${ctc_prov:0:3} = "GET" ]; then
+		ctc_prov='default'
+	fi
+	cfg_file=${PROVINCE_DIR}_${ctc_prov}.xml
+	echo ${cfg_file}
+}
+
+loadLastgoodBackup(){
+	[ -f ${LASTGOOD_FILE}_${BACKUP_SUFFIX} ] && /bin/xmlconfig -c ${LASTGOOD_FILE}_${BACKUP_SUFFIX} 2> /dev/null 
+	if [ "$?" = '0' ]; then
+		/bin/xmlconfig -def $DEFAULT_FILE -if ${LASTGOOD_FILE}_${BACKUP_SUFFIX}  && /bin/xmlconfig -of ${LASTGOOD_FILE}
+		if [ "$?" = '0' ]; then
+			echo "[xml_INFO]: Restore First Backup"
+			return 0
+		fi
+	fi
+	return 1
+}
+
+loadLastgoodHsBackup(){
+	[ -f ${LASTGOOD_HS_FILE}_${BACKUP_SUFFIX} ] && /bin/xmlconfig -c ${LASTGOOD_HS_FILE}_${BACKUP_SUFFIX} 2> /dev/null 
+	if [ "$?" = '0' ]; then
+		/bin/xmlconfig -def $DEFAULT_HS_FILE -if ${LASTGOOD_HS_FILE}_${BACKUP_SUFFIX}  && /bin/xmlconfig -of -hs $LASTGOOD_HS_FILE
+		if [ "$?" = '0' ]; then
+			echo "[xml_INFO]: Restore First HS Backup"
+			return 0
+		fi
+	fi
+	return 1
+}
+
+
+loadMpLastgoodHsTwo(){
+	[ -f ${MP_HS_FILE2} ] && /bin/xmlconfig -c ${MP_HS_FILE2}
+	if [ "$?" = '0' ]; then
+		/bin/xmlconfig -def $DEFAULT_HS_FILE -if ${MP_HS_FILE2}  && /bin/xmlconfig -of -hs $LASTGOOD_HS_FILE
+		if [ "$?" = '0' ]; then
+			echo "[xml_INFO]: Restore MP HS2 Backup"
+			return 0
+		else
+			return 1
+		fi
+	else
+		return 1
+	fi
+}
+
+
+loadMpLastgoodHsWhenFail(){
+	if [ "$?" != '0' ]; then
+		[ -f ${MP_HS_FILE} ] && /bin/xmlconfig -c ${MP_HS_FILE}
+		if [ "$?" = '0' ]; then
+			/bin/xmlconfig -def $DEFAULT_HS_FILE -if ${MP_HS_FILE}  && /bin/xmlconfig -of -hs $LASTGOOD_HS_FILE
+			if [ "$?" = '0' ]; then
+				echo "[xml_INFO]: Restore MP HS Backup"
+				return 0
+			else
+				loadMpLastgoodHsTwo
+				return $?
+			fi
+		else
+			loadMpLastgoodHsTwo
+			return $?
+		fi
+	fi
+	return 0
+}
+
+
+genMpLastgoodHsTwo(){
+	[ -f ${MP_HS_FILE} ] && /bin/xmlconfig -c ${MP_HS_FILE} > /dev/null
+	if [ "$?" != "0" ]; then
+		[ -f ${MP_HS_FILE2} ] && /bin/xmlconfig -c ${MP_HS_FILE2} > /dev/null
+		if [ "$?" != "0" ]; then
+			cp ${LASTGOOD_HS_FILE} ${MP_HS_FILE2} && echo "Prepare the MP HS 2 OK"
+		fi
+	fi
+}
+
+preserveFail(){
+	fname=$1
+	if [ -f ${fname} ]; then
+		cp ${fname} ${fname}${FAIL_FILE_SUFFIX}
+	fi
+}
+
+case "$1" in
+  "-b")
+  	echo "------ [$1]Bootup_config ------"
+  	wait_count=10
+	while [  $wait_count -gt 0 ]; do
+		[ -f $CONFIGD_RUNFILE ] && break
+		echo "Wait for configd initialize 'MsgQ' and 'Shm'... "
+		sleep 1
+		wait_count=$(( $wait_count - 1 ))
+	done
+	[ -f $CONFIGD_RUNFILE ] || echo "WARNING: Configd has not finish initiation, xmlconfig may has some problem!"
+
+	/bin/xmlconfig -def_mib && /bin/xmlconfig -def_mib -hs && echo "Pre-fetch mib data from program default done." || echo "Pre-fetch mib data from program default FAIL."
+	[ -f $LASTGOOD_HS_FILE ]  && /bin/xmlconfig -c $LASTGOOD_HS_FILE
+	if [ "$?" = '0' ]; then
+		/bin/xmlconfig -def $DEFAULT_HS_FILE -if $LASTGOOD_HS_FILE
+		genMpLastgoodHsTwo
+		chkBackup "${LASTGOOD_HS_FILE}"
+	else
+		preserveFail ${LASTGOOD_HS_FILE}
+		[ -f ${LASTGOOD_HS_FILE} ] && loadLastgoodHsBackup
+		loadMpLastgoodHsWhenFail
+		if [ "$?" != '0' ]; then
+			/bin/xmlconfig -nodef -if $DEFAULT_HS_FILE && /bin/xmlconfig -of -hs $LASTGOOD_HS_FILE
+		fi
+	fi
+	if [ "$?" = '0' ]; then
+		echo "[xml_INFO]: Load HS configuration success."
+	else
+		echo "[xml_ERR]: Load HS configuration FAIL."
+	fi
+
+	[ -f $LASTGOOD_FILE ] && /bin/xmlconfig -c $LASTGOOD_FILE
+	if [ "$?" = '0' ]; then
+		/bin/xmlconfig -def $DEFAULT_FILE -if $LASTGOOD_FILE
+	else
+		preserveFail ${LASTGOOD_FILE}
+		[ -f $LASTGOOD_FILE ] && loadLastgoodBackup
+		if [ "$?" != '0' ]; then
+			cfg_file=$( getProvinceConfigName )
+			[ -f ${cfg_file} ] && /bin/xmlconfig -c $cfg_file 
+			if [ "$?" = "0" ]; then
+				/bin/xmlconfig -nodef -if $DEFAULT_FILE && /bin/xmlconfig -nodef -if $cfg_file && /bin/xmlconfig -of $LASTGOOD_FILE
+			else
+				/bin/xmlconfig -nodef -if $DEFAULT_FILE && /bin/xmlconfig -of $LASTGOOD_FILE
+			fi
+		fi
+	fi
+        if [ "$?" = '0' ]; then
+                echo "[xml_INFO]: Load CS configuration success."
+        else
+                echo "[xml_ERR]: Load CS configuration FAIL."
+		exit 1
+        fi
+	exit 0
+  	;;
+  "-c")
+  	echo "------ [$1]Check_config ------"
+  	if [ "$2" != "" ]; then
+  		/bin/xmlconfig -c $2
+  		if [ "$?" = "0" ]; then
+			echo "[xml_INFO]: The input configuration file is available."
+			exit 0
+		fi
+	else
+		echo "[xml_ERR]: No input configuration file."
+		/bin/$SHELL_NAME $0 -h
+		exit 1
+	fi
+	echo "[xml_ERR]: The input configuration file is invalid."
+	exit 1
+  	;;
+  "-d")
+  	echo "------ [$1]Default_config ------"
+		cfg_file=$( getProvinceConfigName )
+		[ -f ${cfg_file} ] && /bin/xmlconfig -c $cfg_file 
+		if [ "$?" = "0" ]; then
+			/bin/xmlconfig -def_mib && /bin/xmlconfig -if $DEFAULT_FILE -nodef && /bin/xmlconfig -nodef -if $cfg_file && /bin/xmlconfig -of $LASTGOOD_FILE
+		else
+			/bin/xmlconfig -def_mib && /bin/xmlconfig -if $DEFAULT_FILE -nodef && /bin/xmlconfig -of $LASTGOOD_FILE
+		fi
+	if [ "$?" = "0" ]; then
+		echo "[xml_INFO]: Reset to default configuration success, please reboot the system."
+		exit 0
+	else
+		rm $LASTGOOD_FILE
+		echo "[xml_ERR]: Reset to default configuration FAIL!!"
+		echo "Sysyem has removed the current setting, please reboot to reset to default."
+		exit 1
+	fi
+	;;
+  "-l")
+  	echo "------ [$1]Load_input_config ------"
+  	if [ "$2" != "" ] && [ -s $2 ]; then
+		genBackup "${LASTGOOD_FILE}"
+  		/bin/xmlconfig -c $2 && cp $2 $LASTGOOD_FILE
+		if [ "$?" = "0" ]; then
+			echo "[xml_INFO]: Load the configuration file success, please reboot the system."
+			exit 0;
+		fi
+	else
+		echo "[xml_ERR]: No input configuration file."
+		/bin/$SHELL_NAME $0 -h
+	fi
+	echo "[xml_ERR]: Upload the configuration file FAIL!! Need to Reboot~"
+	exit 1
+	;;
+  "-s")
+  	echo "------ [$1]Save_config ------"
+	if [ "$2" != "" ]; then
+ 		/bin/xmlconfig -of $2 && /bin/xmlconfig -c $2
+ 		if [ "$?" = "0" ]; then
+			echo "[xml_INFO]: Save cofiguration to $2 success."
+			exit 0
+		fi
+	else
+		echo "[xml_ERR]: No input configuration file."
+		/bin/$SHELL_NAME $0 -h
+	fi
+	echo "[xml_ERR]: Save cofiguration FAIL."
+	exit 1
+	;;
+  "-u" | "-u cs")
+	lockWorkingProcess "cs"
+	echo "------ [$1]Update cs setting ------"
+	genBackup "${LASTGOOD_FILE}"
+	/bin/xmlconfig -of $LASTGOOD_FILE
+	unlockWorkingProcess "cs"
+	if [ "$?" = "0" ]; then
+		echo "[xml_INFO]: Update cs configuration success."
+		exit 0
+	fi
+	echo "[xml_ERR]: Update cs configuration FAIL!!"
+	exit 1
+	;;
+  "-u hs")
+	lockWorkingProcess "hs"
+	echo "------ [$1]Update hs setting ------"
+	genBackup "${LASTGOOD_HS_FILE}"
+	/bin/xmlconfig -of -hs $LASTGOOD_HS_FILE
+	unlockWorkingProcess "hs"
+	if [ "$?" = "0" ]; then
+		echo "[xml_INFO]: Update hs configuration success."
+		exit 0
+	fi
+	echo "[xml_ERR]: Update hs configuration FAIL!!"
+	exit 1
+	;;
+	"-p")
+		echo "------ [$1]Check_config ------"
+		if [ "$2" != "" ]; then
+			cfg_file=${PROVINCE_DIR}_$2.xml
+			[ -f ${cfg_file} ] && /bin/xmlconfig -c $cfg_file 
+			if [ "$?" = "0" ]; then
+				echo "[xml_INFO]: The input configuration file is available."
+				/bin/xmlconfig -nodef -if $cfg_file && /bin/xmlconfig -of $LASTGOOD_FILE
+				if [ "$?" = '0' ]; then
+					echo "[xml_INFO]: Load PROVINCE configuration success."
+				else
+					echo "[xml_ERR]: Load PROVINCE configuration FAIL."
+					exit 1
+				fi
+				exit 0
+			else
+				echo "[xml_ERR]: No input configuration file."
+				/bin/$SHELL_NAME $0 -h
+				exit 1
+			fi
+		else
+			echo "[xml_ERR]: insufficient arguments"
+			/bin/$SHELL_NAME $0 -h
+			exit 1
+		fi
+	;;
+  "-h")
+	echo 'usage: config_xmlconfig.sh [option]...'
+	echo 'options:'
+	echo '  -h        : print this help'
+	echo '  -b        : Boot up process with configuration file'
+	echo '  -c <file> : Check input configuration file'
+	echo '  -d        : Restore to default configuration'
+	echo '  -l <file> : Load from input file'
+	echo '  -s <file> : Save current configuration to specific file'
+	echo '  -u cs/hs  : Update configuration to flash'
+	echo '  -p <prov> : Load Province setting'
+  	;;
+  *)
+  	echo "[xml_ERR]: insufficient arguments"
+  	/bin/$SHELL_NAME $0 -h
+	exit 1
+	;;
+esac
+# 
+
+=== $ cat /bin/startup 2>/dev/null | strings 2>/dev/null ===
+# 
+
+=== $ ls -la /etc/ ===
+drwxr-xr-x    5 admin    0             469 Sep 23  2022 .
+drwxrwxrwx   11 admin    0             204 Sep 23  2022 ..
+lrwxrwxrwx    1 admin    0               7 Sep 23  2022 TZ -> /var/TZ
+lrwxrwxrwx    1 admin    0              11 Sep 23  2022 config -> /var/config
+-rwxr-xr-x    1 admin    0             435 Sep 23  2022 config_default.xml
+-rwxr-xr-x    1 admin    0             103 Sep 23  2022 config_default_hs.xml
+drwxr-xr-x    2 admin    0              44 Sep 23  2022 dropbear
+-rwxr-xr-x    1 admin    0            1146 Sep 23  2022 ethertypes
+-rwxrwxrwx    1 admin    0             763 Sep 21  2022 igmp_gpon.conf
+-rw-r--r--    1 admin    0             134 Sep 23  2022 inetd.conf
+drwxr-xr-x    2 admin    0              84 Sep 23  2022 init.d
+-rwxr-xr-x    1 admin    0            1112 Sep 23  2022 inittab
+-rwxrwxrwx    1 admin    0             888 Sep 21  2022 insdrv.sh
+-rwxr-xr-x    1 admin    0             108 Sep 23  2022 mdev.conf
+-rwxrwxrwx    1 admin    0             431 Sep 21  2022 omci_custom_opt.conf
+-rwxrwxrwx    1 admin    0            7920 Sep 21  2022 omci_mib.cfg
+lrwxrwxrwx    1 admin    0              11 Sep 23  2022 passwd -> /var/passwd
+lrwxrwxrwx    1 admin    0               8 Sep 23  2022 ppp -> /var/ppp
+-rwxr-xr-x    1 admin    0              48 Sep 23  2022 profile
+-rwxrwxrwx    1 admin    0             656 Sep 21  2022 runigmp.sh
+-rwxrwxrwx    1 admin    0             162 Sep 21  2022 runlansds.sh
+-rwxrwxrwx    1 admin    0             880 Sep 21  2022 runoam.sh
+-rwxrwxrwx    1 admin    0            6488 Sep 21  2022 runomci.sh
+-rwxrwxrwx    1 admin    0            1019 Sep 21  2022 runsdk.sh
+drwxr-xr-x    2 admin    0             279 Sep 23  2022 scripts
+-rwxr-xr-x    1 admin    0            8205 Sep 23  2022 services
+-rwxr-xr-x    1 admin    0              17 Sep 23  2022 shells
+-rw-r--r--    1 admin    0              45 Sep 23  2022 version
+# 
+
+=== $ ls /proc/sys/ ===
+debug            fs               loopback_detect  vm
+dev              kernel           net
+# 
+
+=== $ ls /proc/ ===
+1                640              filesystems      omci
+158              65               fs               pagetypeinfo
+171              689              internet_flag    partitions
+2                698              interrupts       power_flag
+3                699              iomem            realtek
+316              709              ioports          rtk_smux
+329              8                irq              rtl8686gmac
+4                81               kmsg             self
+46               br_igmpProxy     lan_sds          slabinfo
+471              br_igmpquery     led_test         stat
+472              br_mCastFastFwd  load_ah_default  sys
+473              buddyinfo        load_default     sysvipc
+474              bus              load_reboot      timer_list
+475              capabilities     loadavg          tty
+476              cmdline          locks            uptime
+479              cpuinfo          loopback_detect  version
+480              devices          meminfo          vmallocinfo
+481              diskstats        misc             vmstat
+490              driver           modules          watchdog
+492              execdomains      mounts           zoneinfo
+5                fastbridge       mptest
+63               fiber_debug      mtd
+64               fiber_mode       net
+# 
+
+=== $ cat /proc/modules ===
+igmp_drv 1712 0 - Live 0xc026b000
+pf_rtk 120608 0 - Live 0xc02cd000
+omcidrv 35040 1 pf_rtk, Live 0xc0284000
+# 
+
+=== $ lsmod 2>&1 ===
+Module                  Size  Used by    Not tainted
+igmp_drv 1712 0 - Live 0xc026b000
+pf_rtk 120608 0 - Live 0xc02cd000
+omcidrv 35040 1 pf_rtk, Live 0xc0284000
+# 
+
+=== $ ls /dev/ | grep -i -E 'pon|gpon|omci' ===
+omcidrv
+# 
+
+=== $ omcicli get all 2>&1 ===
+
+Usage: omcicli get [cmd]
+
+  sn        : get serial number
+  log       : get runtime log level
+  logfile   : get omci msg log mode/action mask
+  tables    : get all registered MIB tables
+  devmode   : get omci device mode
+  dmmode    : get dual mgmt mode
+  loid      : get loid and password
+  loidauth  : get loid auth status
+  cflag     : get customized flag
+  authuptime    : get auth uptime
+
+# 
+
+=== $ omcicli get pon 2>&1 ===
+
+Usage: omcicli get [cmd]
+
+  sn        : get serial number
+  log       : get runtime log level
+  logfile   : get omci msg log mode/action mask
+  tables    : get all registered MIB tables
+  devmode   : get omci device mode
+  dmmode    : get dual mgmt mode
+  loid      : get loid and password
+  loidauth  : get loid auth status
+  cflag     : get customized flag
+  authuptime    : get auth uptime
+
+# 
+
+=== $ omcicli dump 2>&1 ===
+
+Usage: omcicli dump [cmd]
+
+  avltree   : dump MAC bridge AVL tree
+    [avlkeyid]
+        -list of avl tree key id-
+        [PPTP Ethernet UNI     0]
+        [VEIP                  1]
+        [Ext. VLAN OP UNI      3]
+        [VLAN OP UNI           5]
+        [VLAN Filter UNI       4]
+        [MAC bridge port UNI   6]
+        [MAC bridge service    7]
+        [MAC bridge port ANI   8]
+        [VLAN Filter ANI       11]
+        [VLAN OP ANI           10]
+        [Ext. VLAN OP ANI      9]
+        [802.1P mapper         12]
+        [GEM IWTP              13]
+        [Mcast GEM IWTP        14]
+        [GEM Port              15]
+  qmap      : dump tcont queue mapping
+  conn      : dump data path connections
+  srvflow   : dump data path service flow
+  tasks     : dump tasks
+
+# 
+
+=== $ omcicli dump all 2>&1 ===
+
+Usage: omcicli dump [cmd]
+
+  avltree   : dump MAC bridge AVL tree
+    [avlkeyid]
+        -list of avl tree key id-
+        [PPTP Ethernet UNI     0]
+        [VEIP                  1]
+        [Ext. VLAN OP UNI      3]
+        [VLAN OP UNI           5]
+        [VLAN Filter UNI       4]
+        [MAC bridge port UNI   6]
+        [MAC bridge service    7]
+        [MAC bridge port ANI   8]
+        [VLAN Filter ANI       11]
+        [VLAN OP ANI           10]
+        [Ext. VLAN OP ANI      9]
+        [802.1P mapper         12]
+        [GEM IWTP              13]
+        [Mcast GEM IWTP        14]
+        [GEM Port              15]
+  qmap      : dump tcont queue mapping
+  conn      : dump data path connections
+  srvflow   : dump data path service flow
+  tasks     : dump tasks
+
+# 
+
+=== $ omcicli mib 2>&1 ===
+
+Usage: omcicli mib [cmd]
+
+  create    : create MIB ME
+    {classId, entityId, "value of all SBC attributes"}
+  delete    : delete MIB ME
+    {classId, entityId}
+  set       : set MIB ME attribute
+    {classId, entityId, attrName, attrValue}
+  get       : get all MIB or any single ME class
+    [all | classId | tableName[, entityId]]
+  getcurr   : get PM MIB current accumulations
+    {classId | tableName[, entityId]}
+  getalm    : get all alarm or any single ME class
+    [classId[, entityId]]
+  getattr   : get specefic attribute for any single ME class
+    [classId, entityId, attributeId]
+  reset     : trigger MIB reset
+
+# 
+
+=== $ mib get GponPonStatus 2>&1 ===
+mib_info_id: get mib info id failed! (id=0)
+Cannot get value of GponPonStatus.
+# 
+
+=== $ mib get gpon 2>&1 ===
+mib_info_id: get mib info id failed! (id=0)
+Cannot get value of gpon.
+# 
+
+=== $ mib show 2>&1 ===
+WAN_MODE=7
+LAN_IP_ADDR=192.168.1.1
+LAN_SUBNET=255.255.255.0
+LAN_ENABLE_IP2=0
+LAN_IP_ADDR2=192.168.100.1
+LAN_SUBNET2=255.255.255.0
+LAN_RIP=0
+LAN_AUTOSEARCH=0
+DNS_MODE=0
+DNS1=0.0.0.0
+DNS2=0.0.0.0
+DNS3=0.0.0.0
+ADSL_MODE=83
+ADSL_OLR=3
+USER_NAME=user
+USER_PASSWORD=user
+REBOOT_TIME=0
+DEVICE_TYPE=0
+INIT_LINE=1
+INIT_SCRIPT=1
+SNMP_SYS_NAME=Modem/Router
+VC_AUTOSEARCH=0
+BR_AGEING_TIME=7200
+BR_STP_ENABLED=0
+MP_MODE=4
+SPC_ENABLED=0
+SPC_IPTYPE=0
+MP_FIN=1
+MULTI_LINGUAL_STATE=en
+TFTP_SERVER_ADDR=tftp://0.0.0.0
+POSIX_TZ_STRING=
+BOOT_FILENAME=
+UPNP=0
+UPNP_EXT_ITF=255
+SYSLOG_LOG_LEVEL=0
+SYSLOG_DISPLAY_LEVEL=0
+SUSER_NAME=admin
+SUSER_PASSWORD=admin
+E8BDUSER_NAME=administrator
+E8BDUSER_PASSWORD=Stel$864
+ADSL_TONE=00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+DIRECT_BRIDGE_MODE=1
+ADSL_HIGH_INP=0
+SYSLOG=0
+MAXLOGLEN=16384
+ADSLDBG=0
+MIB_ETH_MAC_CTRL=0
+MIB_WLAN_MAC_CTRL=0
+LOID=
+LOID_PASSWD=
+LOID_OLD=
+LOID_PASSWD_OLD=
+PROVINCE_TRAP_PPPOE_TRAFFIC=0
+GPON_PLOAM_FORMAT=1
+GPON_PLOAM_PASSWD=
+OMCI_DBGLVL=0
+OMCI_LOGFILE=0
+OMCI_PORT_TYPE=1
+DUAL_MGMT_MODE=1
+OMCI_CUSTOM_BDP=258
+OMCI_CUSTOM_RDP=4
+OMCI_CUSTOM_MCAST=0
+OMCI_CUSTOM_ME=65536
+OMCI_VENDOR_PRODUCT_CODE=15
+OMCI_FAKE_OK=1
+OMCI_VEIP_SLOT_ID=255
+OMCI_WAN_QOS_QUEUE_NUM=1
+RTK_IGMP_DBGEN=0
+RTK_IGMP_DROPV1=0
+RTK_IGMP_VIDTYPE=0
+RTK_IGMP_TAGDECISION=0
+VLAN_CFG_TYPE=1
+VLAN_MANU_MODE=1
+VLAN_MANU_TAG_VID=1011
+VLAN_MANU_TAG_PRI=0
+OMCI_OLT_MODE=0
+OMCI_SW_VER1=V5R022C00S265
+OMCI_SW_VER2=V5R022C00S265
+OMCC_VER=128
+OMCI_TM_OPT=2
+OMCI_LOGFILE_MASK=0
+DHCP_PORT_FILTER=1
+NTP_EXT_ITF=65535
+FIBER_MODE=0
+RTK_DEVID_MANUFACTURER=
+RTK_DEVID_OUI=
+RTK_DEVID_PRODUCTCLASS=
+RTK_DEVINFO_SPECVER=
+RTK_DEVINFO_SWVER=
+RTK_DEVINFO_HWVER=
+DEVICE_NAME=RTK_GW
+SNOOPING_ENABLED=0
+RS_PING_INTF=0
+RS_PING_HOST=
+RS_TRACEROUTE_INTF=0
+RS_TRACEROUTE_HOST=
+RS_CWMP_SESSION_START_TIME=0
+RS_CWMP_SESSION_END_TIME=0
+# 
+
+=== $ cat /var/config/omci_custom_opt.conf ===
+# DEBUG_MDOE: 
+# 	0, Force to copy omci_custom_opt.conf from /etc to /var/config
+# 	1, If omci_custom_opt.conf exists in /var/config, don't overwrite /var/config/omci_custom_opt.conf
+# DEBUG_MODE=0
+# Format:
+# CUSTOM_MODULE CUSTOM_NUMBER OPTION(HEX)
+# CUSTOM_MODULE, 0: BDP, 1: RDP, 2: MC, 3: ME
+#
+# BDP
+# e.g. 0 00000001 1 
+# RDP
+# e.g. 1 00000020 2
+# MC
+# e.g. 2 00000400 3 
+# ME
+# e.g. 3 00008000 4 
+ 
+0 00000080 3
+3 00100000 c
+# 
+
+=== $ cat /var/config/omci_mib.cfg | strings | head -100 ===
+/bin/sh: head: not found
+/bin/sh: strings: not found
+# 
+
+=== $ nv get gpon 2>&1 ===
+Usage: nv getenv [parameter_name]
+       nv setenv parameter_name value 
+# 
+
+=== $ nv show 2>&1 | head -50 ===
+/bin/sh: head: not found
+# 
+
+=== $ nv list 2>&1 | head -50 ===
+/bin/sh: head: not found
+# 
+
+=== $ pondetect -h 2>&1 ; true ===
+need reboot 0
+
+
+=== $ ls /proc/rtl_* ===
+
+
+=== $ cat /proc/rtl_pon_status 2>/dev/null ===
+
+
+=== $ diag 2>&1 | head -20 ; true ===
+
+
+=== $ mpctl 2>&1 ; true ===
+
+
+=== $ cat /tmp/running_startup 2>/dev/null ===
+
+
+=== $ ifconfig pon0 ===
+
+
+=== $ ip link show pon0 2>&1 ===
+
+
+=== $ echo q | pondetect 1 HWTC370F0BAE 1 2>&1 | head -30 ===
+
