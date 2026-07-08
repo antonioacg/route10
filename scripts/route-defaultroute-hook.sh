@@ -45,7 +45,11 @@ fix_iface() {
         ip route replace default via "$V4GW" dev "$IF" 2>/dev/null &&
             log "v4 default via $V4GW dev $IF re-asserted ($CALLER)"
     fi
-    if [ -n "$V6GW" ] && ! ip -6 route show default 2>/dev/null | grep -q "via $V6GW dev $IF"; then
+    # Match the v6 default by `dev`, not the exact gateway string: pppd hands us
+    # $LLREMOTE zero-padded (fe80::02e4:06ff:…) while `ip` prints it unpadded
+    # (fe80::2e4:6ff:…), so an exact-string check would re-fire every link-up.
+    # Single-WAN: any v6 default out this iface is ours.
+    if [ -n "$V6GW" ] && ! ip -6 route show default 2>/dev/null | grep -q "dev $IF"; then
         ip -6 route replace default via "$V6GW" dev "$IF" 2>/dev/null &&
             log "v6 default via $V6GW dev $IF re-asserted ($CALLER)"
     fi
