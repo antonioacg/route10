@@ -327,7 +327,7 @@ source Boa reads — so it should return **real** DDM, not `0xff`. (The host-sid
 | Command | Source path | Fields | Status on our stick |
 |---|---|---|---|
 | **`diag pon get transceiver <field>`** | `rtk_ponmac_transceiver_get` (same as Boa) | **Same 5 DDM** + vendor-name/sn/part-number (A0 identity). Clean one-line-per-field, engineering units (C/V/mA/dBm). | **Community-confirmed** ([Anime4000 #99](https://github.com/Anime4000/RTL960x/issues/99); [Strykar `gpon_exporter.py:867-874`](https://github.com/Strykar/GPON/blob/main/gpon_exporter.py)) + SDK handler `diag_ponmac.c:1230-1288`. **Live 2026-07-09: command confirmed present in `/bin/diag`** (cparser handler `cparser_cmd_pon_get_transceiver_…` + `rtk_ponmac_transceiver_get` symbol both present). **Output still unverified** — `diag-drive.py` (which drives the `RTK.0>` shell) has never been run live; a one-shot call would confirm it returns real DDM. |
-| **`diag i2c get port 0 dev 0x51 reg 0 count 120`** | `rtk_i2c_seq_read` (same SoC-I2C path) | **Potentially richer:** full SFF-8472 A2 page — thresholds (bytes 0-39: hi/lo alarm+warning for temp/volt/bias/tx/rx), measured values (96-105), alarm/warning status flags (112-117). Single-byte: `i2c get port 0 dev 0x51 reg <n>`. | SDK handler `diag_i2c.c:333-384`. **Never run on our stick.** Whether port 0 reaches the live 8290B DDMI vs the dead host-facing buffer is the open question — a one-shot probe would settle it. |
+| **`diag i2c get port 1 dev 0x51 reg <r>`** | `rtk_i2c_seq_read` (SoC I2C master, port 1 = BOSA/transceiver bus) | **VERIFIED richer than Boa (live 2026-07-09):** full SFF-8472 — measured values (match Boa), **thresholds** (temp hi-alarm ≈+100 °C, lo-alarm ≈−40 °C), **alarm/warning status flags**, DDM-enable (0x68 at source vs 0x00 host-side). Single-register only (no `count` in this build). Port 0 unused (NACK). | Driven via [diag-drive.py](../../tools/diag-drive.py) (**live-validated**, first run, no wedge). Rx floor measured: low-alarm −30 dBm, low-warning −28.9 dBm; current −26 dBm ≈ 3 dB headroom. See [odi-ddm-native-and-firmware-mod.md](odi-ddm-native-and-firmware-mod.md) for the full read + the Rx health check. |
 | `omcicli mib get 263` (ANI-G, ME 263) | OMCI stack (OLT's view) | **Rx + Tx power + thresholds.** Rx/Tx as signed-16-bit hex (value/500 dB); plus `Low/UppOpThreshold`, `Low/UppTranPowThreshold`, `Low/UppDflRxThreshold`, `Low/UppDflTxThreshold`. No temp/voltage/bias. **Live 2026-07-09: `OpticalSignalLevel: 0xcc79` = −26.38 dBm Rx — matches Boa exactly; `TranOpticLevel: 0x0370` = +1.76 dBm Tx.** | Works in O5. See [stick-exec-playbook.md](stick-exec-playbook.md). Richer than Boa for *thresholds*, but no temp/voltage/bias. |
 | `debug europa dump ddmi` / `dump a2` | `rtk_ldd_parameter_get` → `pLddMapper` (europa_drv LDD path) | Would be raw LDD DDMI. | **DEAD — error 18** (`pLddMapper` NULL, driver not loaded). And the handler **doesn't print the buffer even on success** — half-implemented stub (`diag_debug.c:16618-16698`, only output between the call and `free()` is a bare `"\n"`). Don't bother. |
 | `debug europa get tx-bias / tx-power / rx-power / rssi-voltage` | `rtk_ldd_*` (LDD path) | Richest raw ADC + calibration coefficients in engineering units (`TX Bias = %d uA`, `TX Power = %d nW`). | **DEAD — same error-18 LDD path.** Unreachable without a working `europa_drv` + BOSA i2c master. |
@@ -335,16 +335,24 @@ source Boa reads — so it should return **real** DDM, not `0xff`. (The host-sid
 | `ShowStatus` / `show` / `qc` | — | Only `DSL Operational Status :` (empty). | No DDM. |
 | `mib get GponPONStatus` | — | `mib_info_id: get mib info id failed! (id=0)`. | No DDM. |
 
-**Richness verdict (live-updated):** the *working* DDM sources on this stick are
-(1) Boa `/status_pon.asp` (5 fields, via `rtk_ponmac_transceiver_get`) and
-(2) `omcicli mib get 263` (Rx/Tx + thresholds — **richer than Boa for
-thresholds**, live-confirmed, Rx matches Boa exactly). `diag pon get
-transceiver` reads the same 5 fields as Boa (command present, output unverified).
-The one path that *could* be richer still (full SFF-8472 A2 incl alarm/warning
-flags) is raw `i2c get`, unverified. The `europa`/LDD path that *would* give raw
+**Richness verdict (live-updated 2026-07-09):** the *working* DDM sources on
+this stick are (1) Boa `/status_pon.asp` (5 fields, via
+`rtk_ponmac_transceiver_get`), (2) `omcicli mib get 263` (Rx/Tx + thresholds —
+**richer than Boa for thresholds**, Rx matches Boa exactly), and (3) **`diag i2c
+get port 1`** — the **richest: full SFF-8472 A2** (measured values + thresholds +
+alarm/warning status flags), read straight off the 8290B, now **verified working**
+via diag-drive.py. `diag pon get transceiver` reads the same 5 fields as Boa
+(command present, output unverified). The `europa`/LDD path that *would* give raw
 ADC + calibration is dead (error 18) and can't be revived without loading
 `europa_drv` against a BOSA i2c master that's unreachable from userspace on this
 build.
+
+> **Can the stick self-populate host-A2 (delete the daemon)?** Researched &
+> closed out in [odi-ddm-native-and-firmware-mod.md](odi-ddm-native-and-firmware-mod.md):
+> the mechanism exists in Realtek's SDK (`lan_sds` bridge → `rtk_i2c_eepMirror_write`
+> → slave SRAM), but it's a stub (`0x12`) on RTL9601D and **unbuildable** (Lexra
+> core, no toolchain/source). V08 hardware is the only real fix; the daemon stays
+> for V06.
 
 ### Which command wedged us in May — the close, not the command
 
