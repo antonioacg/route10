@@ -1,0 +1,533 @@
+<title>Home Network Segmentation Plan</title>
+<style>
+  :root{
+    --ground:#0F1622; --ground-2:#0B111B;
+    --surface:#18202E; --surface-2:#1F2A3A; --raise:#243149;
+    --hair:#2B384B; --hair-soft:#212C3D;
+    --ink:#E7EDF6; --muted:#93A2BC; --faint:#63728C;
+    --trust:#5B8DEF; --servers:#9B84F3; --iot:#E0A458; --mgmt:#3FB8AF;
+    --mesh:#F2739D; --danger:#F0555C; --good:#46B27E; --warn:#E0A458;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,Helvetica,Arial,sans-serif;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; font-family:var(--sans); color:var(--ink);
+    background:
+      radial-gradient(1100px 520px at 50% -8%, rgba(242,115,157,.10), transparent 60%),
+      radial-gradient(900px 700px at 50% 118%, rgba(91,141,239,.08), transparent 60%),
+      var(--ground);
+    line-height:1.55; letter-spacing:.1px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:0 20px}
+  .mono{font-family:var(--mono)}
+  .eyebrow{
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.22em;
+    text-transform:uppercase; color:var(--faint);
+  }
+
+  /* ---- header ---- */
+  header.top{
+    position:sticky; top:0; z-index:40;
+    background:linear-gradient(var(--ground) 62%, rgba(15,22,34,.86));
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--hair-soft);
+  }
+  .top-in{display:flex; align-items:center; gap:16px; padding:14px 20px; max-width:1080px; margin:0 auto; flex-wrap:wrap}
+  .brand{display:flex; align-items:center; gap:11px; margin-right:auto}
+  .brand .dot{width:26px; height:26px; border-radius:8px; flex:0 0 auto;
+    background:conic-gradient(from 210deg, var(--trust), var(--servers), var(--iot), var(--mgmt), var(--trust));
+    box-shadow:inset 0 0 0 3px var(--ground);}
+  .brand b{font-size:15px; font-weight:650; letter-spacing:.2px}
+  .brand span{font-size:12px; color:var(--muted); display:block; margin-top:-2px}
+
+  /* ---- toggle ---- */
+  .toggle{display:inline-flex; padding:4px; gap:4px; border:1px solid var(--hair);
+    border-radius:11px; background:var(--surface); }
+  .toggle button{
+    font-family:var(--mono); font-size:12.5px; letter-spacing:.06em;
+    padding:7px 14px; border:0; border-radius:8px; cursor:pointer;
+    background:transparent; color:var(--muted); transition:.18s;
+  }
+  .toggle button .k{opacity:.55; font-size:10px; margin-right:6px}
+  body[data-mode="today"] .toggle button[data-m="today"],
+  body[data-mode="proposed"] .toggle button[data-m="proposed"]{
+    color:var(--ground); font-weight:600;
+  }
+  body[data-mode="today"] .toggle button[data-m="today"]{background:var(--warn)}
+  body[data-mode="proposed"] .toggle button[data-m="proposed"]{background:var(--good)}
+  .toggle button:focus-visible{outline:2px solid var(--trust); outline-offset:2px}
+
+  /* ---- hero ---- */
+  .hero{padding:40px 0 8px}
+  .hero h1{
+    font-size:clamp(26px,4.6vw,42px); line-height:1.08; margin:14px 0 0;
+    font-weight:700; letter-spacing:-.5px; text-wrap:balance; max-width:16ch;
+  }
+  .hero p.lede{font-size:clamp(15px,2.2vw,18px); color:var(--muted); max-width:60ch; margin:16px 0 0}
+  .hero .accent{color:var(--mesh)}
+  .mode-note{
+    margin-top:20px; font-family:var(--mono); font-size:12.5px; color:var(--muted);
+    display:inline-flex; align-items:center; gap:9px; padding:8px 13px; border-radius:9px;
+    border:1px solid var(--hair); background:var(--surface);
+  }
+  .mode-note .swatch{width:9px;height:9px;border-radius:50%}
+  body[data-mode="today"] .mn-prop{display:none}
+  body[data-mode="proposed"] .mn-today{display:none}
+
+  /* ---- map ---- */
+  section{padding:30px 0}
+  .board{display:grid; grid-template-columns:1fr 320px; gap:20px; align-items:start}
+  @media(max-width:860px){ .board{grid-template-columns:1fr} }
+
+  .map-shell{position:relative; border:1px solid var(--hair); border-radius:18px;
+    background:linear-gradient(180deg,var(--ground-2),rgba(24,32,46,.55)); padding:18px; overflow:hidden}
+  .map-shell::before{content:"OUTSIDE"; position:absolute; top:12px; left:16px;
+    font-family:var(--mono); font-size:10px; letter-spacing:.24em; color:var(--faint)}
+  .map-shell::after{content:"HOME"; position:absolute; bottom:12px; left:16px;
+    font-family:var(--mono); font-size:10px; letter-spacing:.24em; color:var(--faint)}
+
+  .map{position:relative; display:grid; gap:26px 20px; padding:22px 6px 26px;
+    grid-template-columns:1fr 1fr 1fr;
+    grid-template-areas:
+      "remote internet visitor"
+      "edge   edge     edge"
+      "rt     rt       rt"
+      "sw     sw       sw"
+      "trust  servers  iot";
+  }
+  @media(max-width:600px){
+    .map{grid-template-columns:1fr; grid-template-areas:none; gap:16px}
+  }
+  svg.wires{position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; overflow:visible}
+  .node{position:relative; z-index:1}
+
+  /* node buttons */
+  .node button{
+    width:100%; text-align:left; cursor:pointer; color:var(--ink);
+    font-family:inherit; border-radius:var(--r); padding:12px 13px;
+    background:var(--surface); border:1px solid var(--hair);
+    transition:transform .16s, border-color .16s, box-shadow .16s, background .16s;
+    display:flex; flex-direction:column; gap:3px;
+  }
+  .node button:hover{transform:translateY(-2px); border-color:var(--faint)}
+  .node button:focus-visible{outline:2px solid var(--trust); outline-offset:2px}
+  .node.sel button{border-color:var(--z,var(--trust)); box-shadow:0 0 0 1px var(--z,var(--trust)), 0 10px 30px -12px rgba(0,0,0,.7)}
+  .node .nlabel{font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px}
+  .node .ntag{font-family:var(--mono); font-size:10.5px; color:var(--muted); letter-spacing:.02em}
+  .node .chip{margin-left:auto; font-family:var(--mono); font-size:9.5px; padding:2px 6px; border-radius:20px;
+    letter-spacing:.05em; text-transform:uppercase; border:1px solid transparent}
+  .zdot{width:9px; height:9px; border-radius:50%; background:var(--z,var(--faint)); flex:0 0 auto}
+
+  .r-remote{grid-area:remote} .r-internet{grid-area:internet} .r-visitor{grid-area:visitor}
+  .r-edge{grid-area:edge; justify-self:center; width:min(320px,100%)}
+  .r-rt{grid-area:rt; justify-self:center; width:min(320px,100%)}
+  .r-sw{grid-area:sw; justify-self:center; width:min(300px,100%)}
+  .r-trust{grid-area:trust} .r-servers{grid-area:servers} .r-iot{grid-area:iot}
+
+  /* zone accents */
+  .r-trust{--z:var(--trust)} .r-servers{--z:var(--servers)} .r-iot{--z:var(--iot)}
+  .r-edge{--z:var(--mesh)} .r-rt{--z:var(--mgmt)} .r-remote{--z:var(--mesh)}
+  .r-internet{--z:var(--faint)} .r-visitor{--z:var(--faint)} .r-sw{--z:var(--mgmt)}
+
+  /* flat-net backdrop (today only) */
+  .flatbox{position:absolute; z-index:0; border:1.5px dashed var(--warn); border-radius:16px;
+    background:rgba(224,164,88,.05); pointer-events:none; opacity:0; transition:opacity .3s}
+  .flatbox .fl-tag{position:absolute; top:-10px; left:14px; background:var(--ground-2); padding:0 8px;
+    font-family:var(--mono); font-size:10px; letter-spacing:.16em; color:var(--warn)}
+  body[data-mode="today"] .flatbox{opacity:1}
+
+  /* status chips on nodes, mode-driven */
+  .chip.risk{color:var(--danger); border-color:rgba(240,85,92,.4); background:rgba(240,85,92,.1)}
+  .chip.okc{color:var(--good); border-color:rgba(70,178,126,.4); background:rgba(70,178,126,.1)}
+  .chip.hold{color:var(--iot); border-color:rgba(224,164,88,.4); background:rgba(224,164,88,.1)}
+  .show-today{display:none} .show-prop{display:none}
+  body[data-mode="today"] .show-today{display:inline-block}
+  body[data-mode="proposed"] .show-prop{display:inline-block}
+
+  /* wires */
+  .wire{fill:none; stroke-width:2; stroke-linecap:round}
+  .wire.flow{stroke-dasharray:2 9; animation:dash 1.1s linear infinite}
+  @keyframes dash{to{stroke-dashoffset:-22}}
+  @media(prefers-reduced-motion:reduce){.wire.flow{animation:none; stroke-dasharray:2 9}}
+
+  /* ---- detail panel ---- */
+  .panel{position:sticky; top:78px; border:1px solid var(--hair); border-radius:18px;
+    background:var(--surface); padding:18px; min-height:260px}
+  @media(max-width:860px){ .panel{position:static} }
+  .panel .p-eyebrow{display:flex; align-items:center; gap:8px}
+  .panel h3{margin:10px 0 2px; font-size:18px; letter-spacing:-.2px}
+  .panel .p-what{color:var(--muted); font-size:13.5px; margin:6px 0 14px}
+  .p-row{border-top:1px solid var(--hair-soft); padding:11px 0 2px}
+  .p-row .lab{font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); display:flex; align-items:center; gap:7px}
+  .p-row .val{font-size:13.5px; margin-top:5px}
+  .p-row .val.risk{color:#ffb3b6} .p-row .val.good{color:#a7e6c6}
+  .p-empty{color:var(--muted); font-size:13.5px}
+  .legend{margin-top:16px; border-top:1px solid var(--hair-soft); padding-top:14px; display:grid; gap:8px}
+  .legend .li{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--muted)}
+  .legend .ln{width:20px; height:0; border-top:2px solid; border-radius:2px; flex:0 0 auto}
+
+  /* ---- layers ---- */
+  .h2{font-size:22px; letter-spacing:-.3px; margin:0}
+  .h2-sub{color:var(--muted); font-size:14px; margin:6px 0 0; max-width:64ch}
+  .layers{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:22px}
+  @media(max-width:760px){.layers{grid-template-columns:1fr}}
+  .layer{border:1px solid var(--hair); border-radius:16px; background:var(--surface); padding:16px; position:relative; overflow:hidden}
+  .layer .bar{position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--lc)}
+  .layer .ln{font-family:var(--mono); font-size:11px; letter-spacing:.12em; color:var(--faint); text-transform:uppercase}
+  .layer h4{margin:9px 0 4px; font-size:15.5px}
+  .layer .stops{font-size:13px; color:var(--muted); margin:8px 0}
+  .layer .verdict{font-size:12px; font-family:var(--mono); margin-top:12px; padding:9px 11px; border-radius:9px; line-height:1.45}
+  .layer.big{box-shadow:0 0 0 1px var(--lc), 0 16px 40px -22px var(--lc)}
+
+  /* ---- actions ---- */
+  .acts{display:grid; gap:12px; margin-top:22px}
+  .act{border:1px solid var(--hair); border-radius:14px; background:var(--surface); padding:15px 16px;
+    display:grid; grid-template-columns:34px 1fr auto; gap:14px; align-items:start}
+  .act .num{font-family:var(--mono); font-size:15px; font-weight:600; color:var(--mesh);
+    width:34px; height:34px; border-radius:9px; display:grid; place-items:center;
+    border:1px solid var(--hair); background:var(--ground-2)}
+  .act.hold .num{color:var(--iot)}
+  .act h4{margin:2px 0 3px; font-size:15px}
+  .act p{margin:0; color:var(--muted); font-size:13px; max-width:62ch}
+  .act .meta{display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end}
+  .badge{font-family:var(--mono); font-size:10px; letter-spacing:.03em; padding:4px 8px; border-radius:20px; white-space:nowrap; border:1px solid var(--hair); color:var(--muted)}
+  .badge.hi{color:var(--good); border-color:rgba(70,178,126,.4)}
+  .badge.med{color:var(--trust); border-color:rgba(91,141,239,.4)}
+  .badge.lo{color:var(--faint)}
+  .badge.eff{color:var(--muted)}
+  .act.hold{border-style:dashed; opacity:.9}
+  .act.hold h4::after{content:"HOLD"; font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; color:var(--iot); border:1px solid rgba(224,164,88,.4); padding:2px 6px; border-radius:20px; margin-left:9px; vertical-align:middle}
+  .act.dont h4::after{content:"DON'T"; color:var(--danger); border-color:rgba(240,85,92,.4)}
+  @media(max-width:600px){.act{grid-template-columns:34px 1fr} .act .meta{grid-column:1/-1; justify-content:flex-start}}
+
+  details.changed{margin:26px 0 60px; border:1px solid var(--hair); border-radius:14px; background:var(--surface); padding:0 16px}
+  details.changed summary{cursor:pointer; padding:15px 0; font-size:14px; font-weight:600; list-style:none; display:flex; align-items:center; gap:10px}
+  details.changed summary::-webkit-details-marker{display:none}
+  details.changed summary::before{content:"+"; font-family:var(--mono); color:var(--mesh); font-size:18px}
+  details.changed[open] summary::before{content:"−"}
+  details.changed ul{margin:0 0 16px; padding-left:20px; color:var(--muted); font-size:13.5px; display:grid; gap:8px}
+  details.changed b{color:var(--ink); font-weight:600}
+  footer{border-top:1px solid var(--hair-soft); padding:24px 0 50px; color:var(--faint); font-size:12px; font-family:var(--mono)}
+  .kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--hair); border-bottom-width:2px; border-radius:5px; padding:1px 5px; color:var(--muted)}
+</style>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <div class="dot"></div>
+      <div><b>Home Network — Segmentation</b><span>opi5pro · Route10 · edge mesh</span></div>
+    </div>
+    <div class="toggle" role="group" aria-label="View mode">
+      <button data-m="today" aria-pressed="true"><span class="k">1</span>Today</button>
+      <button data-m="proposed" aria-pressed="false"><span class="k">2</span>Proposed</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="eyebrow">The one idea to hold onto</div>
+    <h1>Your defenses live in <span class="accent">three layers</span> — VLANs are the smallest.</h1>
+    <p class="lede">Remote access and workload rules are already handled by the <span class="accent">mesh</span> and by <span style="color:var(--servers)">Kubernetes</span>. A VLAN only earns its keep for one job: stopping a hacked <span style="color:var(--iot)">smart bulb</span> from reaching your laptop — and that job is blocked by your Wi-Fi AP today. So: fix the real exposure cheaply, don't over-build VLANs.</p>
+    <div class="mode-note">
+      <span class="swatch" style="background:var(--warn)"></span>
+      <span class="mn-today"><b style="color:var(--ink)">Today</b> — one flat network. Two things are exposed. Flip to <span class="kbd">2</span> to see the fix.</span>
+      <span class="mn-prop" style="display:none"><b style="color:var(--ink)">Proposed</b> — same map, defended. Tap any node for the why & the action.</span>
+    </div>
+  </div>
+
+  <section>
+    <div class="board">
+      <div class="map-shell">
+        <div class="map" id="map">
+          <svg class="wires" id="wires" aria-hidden="true"></svg>
+          <div class="flatbox" id="flatbox"><span class="fl-tag">ONE FLAT LAN · 192.168.10.0/24</span></div>
+
+          <div class="node r-remote" id="n-remote"><button>
+            <span class="nlabel"><span class="zdot"></span>You, away</span>
+            <span class="ntag">roaming laptop / phone</span></button></div>
+
+          <div class="node r-internet" id="n-internet"><button>
+            <span class="nlabel"><span class="zdot"></span>Internet</span>
+            <span class="ntag">the open world</span></button></div>
+
+          <div class="node r-visitor" id="n-visitor"><button>
+            <span class="nlabel"><span class="zdot"></span>Public viewer</span>
+            <span class="ntag">someone opening Jellyfin</span></button></div>
+
+          <div class="node r-edge" id="n-edge"><button>
+            <span class="nlabel"><span class="zdot"></span>Edge cluster <span class="chip" style="color:var(--mesh);border-color:rgba(242,115,157,.4)">EPIC-01</span></span>
+            <span class="ntag">OCI VPS · Headscale + reverse-ingress + PowerDNS</span></button></div>
+
+          <div class="node r-rt" id="n-rt"><button>
+            <span class="nlabel"><span class="zdot"></span>Route10 <span class="chip show-prop okc">+ Mgmt VLAN</span></span>
+            <span class="ntag">router · creates & polices VLANs · mesh subnet-router</span></button></div>
+
+          <div class="node r-sw" id="n-sw"><button>
+            <span class="nlabel"><span class="zdot"></span>Managed switch</span>
+            <span class="ntag">VLAN-capable · can tag any wired port</span></button></div>
+
+          <div class="node r-trust" id="n-trust"><button>
+            <span class="nlabel"><span class="zdot"></span>Your devices <span class="chip show-prop" style="color:var(--trust);border-color:rgba(91,141,239,.4)">Trust</span></span>
+            <span class="ntag">laptops · phones</span></button></div>
+
+          <div class="node r-servers" id="n-servers"><button>
+            <span class="nlabel"><span class="zdot"></span>opi5pro
+              <span class="chip show-today risk">:6443 open</span>
+              <span class="chip show-prop okc">:6443 locked</span></span>
+            <span class="ntag">k3s · ingress .240 · AdGuard .241 · media/arr</span></button></div>
+
+          <div class="node r-iot" id="n-iot"><button>
+            <span class="nlabel"><span class="zdot"></span>Smart bulbs
+              <span class="chip show-today risk">same L2</span>
+              <span class="chip show-prop hold">needs AP</span></span>
+            <span class="ntag">Wi-Fi · single-SSID AP · HomeAssistant soon</span></button></div>
+        </div>
+      </div>
+
+      <aside class="panel" id="panel">
+        <div id="panel-body">
+          <div class="p-eyebrow eyebrow"><span class="zdot" style="background:var(--mesh)"></span>Start here</div>
+          <h3>Tap any part of your network</h3>
+          <p class="p-empty">Each node tells you what it is, what's exposed <b>today</b>, and the <b>fix</b> in the proposal. Use the <b>Today / Proposed</b> switch up top to watch the risks turn green.</p>
+          <div class="legend">
+            <div class="li"><span class="ln" style="border-color:var(--mesh)"></span> Headscale mesh — private remote path</div>
+            <div class="li"><span class="ln" style="border-color:var(--faint)"></span> Normal LAN / wired</div>
+            <div class="li"><span class="ln" style="border-color:var(--trust)"></span> Local service (DNS / ingress)</div>
+            <div class="li"><span class="ln" style="border-color:var(--danger)"></span> Open risk today</div>
+            <div class="li"><span class="ln" style="border-color:var(--good)"></span> Fixed in proposal</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Why VLANs are the small layer</div>
+    <h2 class="h2" style="margin-top:12px">Three layers do the guarding</h2>
+    <p class="h2-sub">Each layer stops a different kind of attacker. Two of them are already decided or live — which is why a big VLAN build-out mostly duplicates work you've already done.</p>
+    <div class="layers">
+      <div class="layer" style="--lc:var(--mesh)">
+        <div class="bar"></div>
+        <div class="ln">Layer 1 · reach from outside</div>
+        <h4>Mesh &amp; firewall</h4>
+        <div class="stops">Stops strangers reaching your stuff remotely. Headscale ACLs + Route10 rules on advertised routes.</div>
+        <div class="verdict" style="background:rgba(242,115,157,.1); color:#f7a9c4">DECIDED — "Tailscale-native, no client VLAN."</div>
+      </div>
+      <div class="layer" style="--lc:var(--servers)">
+        <div class="bar"></div>
+        <div class="ln">Layer 2 · reach inside cluster</div>
+        <h4>Kubernetes NetworkPolicy</h4>
+        <div class="stops">Stops a workload reaching your LAN. Default-deny; qBittorrent's egress excludes all private IPs.</div>
+        <div class="verdict" style="background:rgba(155,132,243,.1); color:#c3b6f8">LIVE — torrent pod already can't touch RFC1918.</div>
+      </div>
+      <div class="layer big" style="--lc:var(--iot)">
+        <div class="bar"></div>
+        <div class="ln">Layer 3 · reach on the wire</div>
+        <h4>L2 VLAN</h4>
+        <div class="stops">The <b style="color:var(--ink)">only</b> layer that stops a hacked bulb reaching your laptop or server.</div>
+        <div class="verdict" style="background:rgba(224,164,88,.12); color:#f0cd9a">BLOCKED — your single-SSID AP can't tag the bulbs. Fix the AP, or this layer does nothing.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">The plan, ranked by payoff</div>
+    <h2 class="h2" style="margin-top:12px">Do this, in order</h2>
+    <p class="h2-sub">Highest impact for least effort first. The last two are deliberately <i>not</i> to-dos.</p>
+    <div class="acts">
+      <div class="act">
+        <div class="num">1</div>
+        <div><h4>Firewall the k3s API (<span class="mono">ufw</span> on opi5pro)</h4>
+          <p>Allow <span class="mono">:6443</span> only from you + the tailnet. It's the biggest local exposure and needs zero rewiring — and you already run <span class="mono">ufw</span> on that host.</p></div>
+        <div class="meta"><span class="badge eff">effort · low</span><span class="badge hi">impact · high</span></div>
+      </div>
+      <div class="act">
+        <div class="num">2</div>
+        <div><h4>A Management VLAN</h4>
+          <p>Put the router / switch / AP admin pages on a locked segment. Extra-justified now: Route10 is about to bridge the mesh into your LAN, so it's security-critical.</p></div>
+        <div class="meta"><span class="badge eff">effort · low</span><span class="badge med">impact · med</span></div>
+      </div>
+      <div class="act">
+        <div class="num">3</div>
+        <div><h4>A VLAN-capable Access Point (Alta)</h4>
+          <p>The gate for <b>any</b> real bulb isolation. One SSID → IoT VLAN, same controller you already use. Everything IoT waits on this — including a clean HomeAssistant split later.</p></div>
+        <div class="meta"><span class="badge eff">effort · med</span><span class="badge hi">impact · high (IoT)</span></div>
+      </div>
+      <div class="act hold">
+        <div class="num">4</div>
+        <div><h4>A separate Servers VLAN for opi5pro</h4>
+          <p>Only a modest gain over the <span class="mono">ufw</span> rule, and it collides with the edge plan's hard-wired <span class="mono">192.168.10.240</span>. If you ever do it, pick the subnet <i>before</i> the edge cluster bakes it in.</p></div>
+        <div class="meta"><span class="badge eff">effort · high</span><span class="badge lo">impact · low now</span></div>
+      </div>
+      <div class="act hold dont">
+        <div class="num">5</div>
+        <div><h4>A dedicated VLAN for your own devices</h4>
+          <p>Already replaced by Tailscale-native segmentation in the edge plan. Building it would just duplicate the mesh layer.</p></div>
+        <div class="meta"><span class="badge lo">skip it</span></div>
+      </div>
+    </div>
+  </section>
+
+  <details class="changed">
+    <summary>What changed from my earlier (text-heavy) answer</summary>
+    <ul>
+      <li><b>VPN = Headscale</b>, not NetBird — and the "tunnel" is <b>mesh-as-transport reverse ingress</b> through the edge cluster. No Cloudflare Tunnel; Cloudflare gets retired entirely.</li>
+      <li><b>Torrent question is closed:</b> classic qBittorrent, <b>no egress VPN for now</b>, contained by a NetworkPolicy that blocks all private IPs. Nothing more to decide there.</li>
+      <li><b>DNS is decided:</b> split-horizon — AdGuard is the LAN "inside" view (keeps its MetalLB IP), edge PowerDNS is authoritative. A DNS backup was consciously declined.</li>
+      <li><b>MetalLB stays</b> — it's how AdGuard &amp; ingress get stable LAN IPs. It's the LAN door; the mesh is the internet door. Not in conflict.</li>
+    </ul>
+  </details>
+</div>
+
+<footer class="wrap">Tap nodes · toggle Today / Proposed · press <span class="kbd">1</span> / <span class="kbd">2</span></footer>
+
+<script>
+(function(){
+  var body=document.body;
+  body.dataset.mode="today";
+
+  // ---- detail content ----
+  var DATA={
+    remote:{z:"--mesh",tag:"Headscale mesh",title:"You, away",what:"Your laptop or phone when you're not home.",
+      today:{t:"No private way in — the VPN isn't built yet.",bad:true},
+      prop:{t:"Join the Headscale mesh and reach home privately. No open ports on your router.",good:true}},
+    internet:{z:"--faint",tag:"Outside",title:"The internet",what:"Everything beyond your front door.",
+      today:{t:"Your home IP is directly on the LAN — including the k3s API port."},
+      prop:{t:"Only the edge cluster faces it. Home stays behind the mesh."}},
+    visitor:{z:"--faint",tag:"Public",title:"Public viewer",what:"A guest or a TV opening your Jellyfin from outside.",
+      today:{t:"Nothing is exposed for them yet."},
+      prop:{t:"Public name → edge → mesh → your Jellyfin. Nothing else of yours is reachable.",good:true}},
+    edge:{z:"--mesh",tag:"EPIC-01 · OCI VPS",title:"Edge cluster",what:"Your public front door: Headscale VPN + reverse ingress + PowerDNS. Replaces Cloudflare.",
+      today:{t:"Planned — not built yet."},
+      prop:{t:"The one machine with a public IP. Terminates public TLS and pipes traffic home over the mesh.",good:true}},
+    rt:{z:"--mgmt",tag:"Router · policer",title:"Route10",what:"Creates and polices VLANs. It doesn't sit inside one — it enforces them. Soon also the mesh subnet-router bridging the tailnet into your LAN.",
+      today:{t:"One flat network — it can't firewall traffic between two devices on the same wire.",bad:true},
+      prop:{t:"Enforces the zone rules, and its own admin page moves onto a locked Management VLAN.",good:true}},
+    sw:{z:"--mgmt",tag:"Switch",title:"Managed switch",what:"VLAN-aware — it can tag and trunk any wired port you want.",
+      today:{t:"Carrying a single flat VLAN for now."},
+      prop:{t:"Trunks the Management VLAN today; ready for Servers / IoT segments later."}},
+    trust:{z:"--trust",tag:"Trust zone",title:"Your devices",what:"Laptops and phones — the things that are really you.",
+      today:{t:"Share one L2 with the bulbs and with the k3s API. A hacked bulb is a peer.",bad:true},
+      prop:{t:"Your own zone. Reaches services and controls the bulbs; nothing untrusted reaches back.",good:true}},
+    servers:{z:"--servers",tag:"Servers",title:"opi5pro",what:"Your k3s box: ingress VIP .240, AdGuard DNS .241, and the media / arr / qBittorrent stack. HomeAssistant lands here soon.",
+      today:{t:"The k3s API :6443 is open to every device on the LAN. This is the real exposure.",bad:true},
+      prop:{t:"ufw locks :6443 to you + the tailnet. A separate Servers VLAN is optional later, not now.",good:true}},
+    iot:{z:"--iot",tag:"IoT · untrusted",title:"Smart bulbs",what:"Cheap Wi-Fi bulbs behind a single-SSID access point. HomeAssistant will want to talk to them.",
+      today:{t:"Can't be isolated — the AP can't put them on their own VLAN. They share your L2.",bad:true},
+      prop:{t:"A VLAN-capable AP moves them to an IoT zone. This is the one job VLANs are truly for.",hold:true}}
+  };
+
+  var panelBody=document.getElementById('panel-body');
+  var nodes={};
+  ['remote','internet','visitor','edge','rt','sw','trust','servers','iot'].forEach(function(id){
+    nodes[id]=document.getElementById('n-'+id);
+  });
+  var selected=null;
+
+  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+  function render(){
+    if(!selected){return;}
+    var d=DATA[selected], mode=body.dataset.mode;
+    var s=(mode==='today')?d.today:d.prop;
+    var cls=s.bad?'risk':(s.good?'good':'');
+    var lab=(mode==='today')?'Exposed today':'In the proposal';
+    var icon=s.bad?'▲':(s.good?'✓':(s.hold?'◇':'•'));
+    panelBody.innerHTML=
+      '<div class="p-eyebrow eyebrow"><span class="zdot" style="background:var('+d.z+')"></span>'+esc(d.tag)+'</div>'+
+      '<h3>'+esc(d.title)+'</h3>'+
+      '<p class="p-what">'+esc(d.what)+'</p>'+
+      '<div class="p-row"><div class="lab"><span style="color:var('+d.z+')">'+icon+'</span> '+lab+'</div>'+
+        '<div class="val '+cls+'">'+esc(s.t)+'</div></div>';
+  }
+
+  function select(id){
+    if(selected&&nodes[selected])nodes[selected].classList.remove('sel');
+    selected=id;
+    nodes[id].classList.add('sel');
+    render();
+  }
+
+  Object.keys(nodes).forEach(function(id){
+    nodes[id].querySelector('button').addEventListener('click',function(){select(id);});
+  });
+
+  // ---- toggle ----
+  var tbtns=document.querySelectorAll('.toggle button');
+  function setMode(m){
+    body.dataset.mode=m;
+    tbtns.forEach(function(b){b.setAttribute('aria-pressed', b.dataset.m===m?'true':'false');});
+    render();
+    requestAnimationFrame(drawWires);
+  }
+  tbtns.forEach(function(b){b.addEventListener('click',function(){setMode(b.dataset.m);});});
+  document.addEventListener('keydown',function(e){
+    if(e.key==='1')setMode('today'); if(e.key==='2')setMode('proposed');
+  });
+
+  // ---- wires ----
+  var map=document.getElementById('map'), svg=document.getElementById('wires'), flat=document.getElementById('flatbox');
+  var SVGNS='http://www.w3.org/2000/svg';
+  // from,to,color,{flow,mode}
+  var LINKS=[
+    ['remote','edge','var(--mesh)',{flow:true}],
+    ['visitor','internet','var(--faint)',{}],
+    ['internet','edge','var(--faint)',{}],
+    ['edge','rt','var(--mesh)',{flow:true}],
+    ['rt','sw','var(--faint)',{}],
+    ['sw','trust','var(--faint)',{}],
+    ['sw','servers','var(--faint)',{}],
+    ['sw','iot','var(--faint)',{}],
+    ['servers','trust','var(--trust)',{curve:26}],
+    ['trust','servers','var(--danger)',{mode:'today',flow:true,curve:-46}],
+    ['iot','trust','var(--danger)',{mode:'today',curve:60}],
+    ['trust','servers','var(--good)',{mode:'proposed',curve:-46}]
+  ];
+  function center(id){
+    var el=nodes[id].querySelector('button');
+    var r=el.getBoundingClientRect(), m=map.getBoundingClientRect();
+    return {x:r.left+r.width/2-m.left, y:r.top+r.height/2-m.top};
+  }
+  function drawWires(){
+    // size flatbox around the zone row (today)
+    try{
+      var t=nodes.trust.getBoundingClientRect(), i=nodes.iot.getBoundingClientRect(), mr=map.getBoundingClientRect();
+      var pad=14;
+      flat.style.left=(Math.min(t.left,i.left)-mr.left-pad)+'px';
+      flat.style.top=(Math.min(t.top,i.top)-mr.top-pad)+'px';
+      flat.style.width=(Math.max(t.right,i.right)-Math.min(t.left,i.left)+pad*2)+'px';
+      flat.style.height=(Math.max(t.bottom,i.bottom)-Math.min(t.top,i.top)+pad*2)+'px';
+    }catch(e){}
+    while(svg.firstChild)svg.removeChild(svg.firstChild);
+    var mode=body.dataset.mode;
+    LINKS.forEach(function(l){
+      if(l[3].mode && l[3].mode!==mode)return;
+      var a=center(l[0]), b=center(l[1]);
+      var p=document.createElementNS(SVGNS,'path');
+      var d;
+      var cv=l[3].curve||0;
+      if(cv){
+        var mx=(a.x+b.x)/2+cv, my=(a.y+b.y)/2;
+        d='M'+a.x+' '+a.y+' Q'+mx+' '+my+' '+b.x+' '+b.y;
+      }else{
+        d='M'+a.x+' '+a.y+' L'+b.x+' '+b.y;
+      }
+      p.setAttribute('d',d);
+      p.setAttribute('class','wire'+(l[3].flow?' flow':''));
+      p.setAttribute('stroke',l[2]);
+      if(l[2]==='var(--faint)')p.setAttribute('opacity','.5');
+      svg.appendChild(p);
+    });
+  }
+  drawWires();
+  window.addEventListener('resize',function(){requestAnimationFrame(drawWires);});
+  if(window.ResizeObserver){new ResizeObserver(function(){drawWires();}).observe(map);}
+  window.addEventListener('load',function(){requestAnimationFrame(drawWires);});
+  // default selection to orient the user
+  select('servers');
+})();
+</script>
