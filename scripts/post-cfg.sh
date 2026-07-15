@@ -21,6 +21,14 @@
 
 set -e
 
+# ── seam values (rendered from ops/NETWORK-CONTRACT.md; router-local, NOT in repo) ─
+# /cfg/seam.env carries the shared LAN/mesh contract values (e.g. the LAN ULA)
+# so they are never committed into this repo — a committed copy of a contract
+# value would be a second authority for it (the coupling the seam rule forbids;
+# see docs/reference/mesh-seam.md). Absent file or unset var → every consumer
+# below is a clean no-op. Render it on the router from the contract; never here.
+[ -f /cfg/seam.env ] && . /cfg/seam.env
+
 # ── network ────────────────────────────────────────────────────────────────
 uci set network.ont_mgmt_dev=device
 uci set network.ont_mgmt_dev.type='macvlan'
@@ -153,6 +161,26 @@ if [ -n "$(uci -q get network.lan.ip6class 2>/dev/null || true)" ]; then
     # outage; see the post-mortem). `network reload` re-selects the PD and re-pulls
     # the /64 WITHOUT muting dnsmasq (confirmed 3/3) and without bouncing wan3/PPP.
     # dnsmasq (enable-ra, constructor:br-lan) then advertises the new /64 via SLAAC.
+    /etc/init.d/network reload >/dev/null 2>&1 || true
+fi
+
+# ── LAN ULA — stable v6 for the LAN (the ISP GUA churns on reconnect) ────────
+# The Alta portal has NO ULA field: its only LAN IPv6 knobs are "IPv6 Router IP"
+# and "IPv6 Prefix ID" (= ip6hint), and that hint is shared with the /60 GUA
+# assignment (only 16 subnets, 0-15) — so it cannot reach the contract's ULA
+# subnet without breaking the GUA. So we add the ULA as a STATIC address on
+# br-lan; Alta's dnsmasq (constructor:br-lan) then advertises this /64 via SLAAC
+# ALONGSIDE the untouched GUA. Verified 2026-07-15: LAN clients autoconf a
+# ULA address end-to-end, GUA + v4 + wan3/PPP unaffected.
+#
+# $LAN_ULA comes from /cfg/seam.env (rendered from ops/NETWORK-CONTRACT.md) — the
+# value is NEVER hard-coded here (no second authority; see the seam mirror rule).
+# This makes the v6 VIPs (…::240/::241) on-link so they become reachable.
+if [ -n "$LAN_ULA" ] && ! uci -q get network.lan.ip6addr 2>/dev/null | grep -q "$LAN_ULA"; then
+    uci add_list "network.lan.ip6addr=$LAN_ULA"
+    uci commit network
+    # `network reload` (not `ifup lan`) — re-applies without muting dnsmasq or
+    # bouncing wan3/PPP, same rationale as the ip6class block above.
     /etc/init.d/network reload >/dev/null 2>&1 || true
 fi
 
