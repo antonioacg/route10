@@ -271,6 +271,30 @@ ssh route10 'curl --http0.9 -s --interface 192.168.1.2 -m 5 -u admin:admin -X PO
 | odi-health | running | `/cfg/scripts/odi-health.log`, 5 min cadence |
 | W2 DDM daemon | running | populates Alta dashboard DDM |
 
+## Cross-repo seam with `ops` (homelab)
+
+This router is co-managed by two repos with two agents: **this one** (`route10`)
+and the homelab GitOps platform **`~/git/ops`**. They share exactly one seam.
+
+- **Shared source of truth: `ops/NETWORK-CONTRACT.md`** (in the `ops` repo root)
+  — LAN VIPs, the site ULA prefix, advertised mesh routes, Headscale ACL tags.
+  Don't duplicate those values here; reconcile the router to them.
+- **Contract-first:** to move any shared value, change `NETWORK-CONTRACT.md`
+  first, then reconcile the router. Never move the seam unilaterally, and never
+  edit `ops` manifests from here (the ops side likewise never writes router
+  config — only read-only inspection, respecting the hard rules below).
+- **Router-side asks land via Alta dashboard or `post-cfg.sh`** (not bare `uci` —
+  cloud sync wipes it). Router work is tracked on *this* side, not ops `INFRA-*`.
+- Full mirror rule: [`docs/reference/mesh-seam.md`](docs/reference/mesh-seam.md)
+  (mirrors `ops/.claude/rules/mesh-seam.md`). Design rationale:
+  [`docs/reference/declarative-config-and-coordination.md`](docs/reference/declarative-config-and-coordination.md).
+- **Pending router-side asks live in the contract, not here** — as of
+  2026-07-14: a LAN-ULA RA on br-lan and a DHCP-pool reservation for the VIP
+  range. Values in `ops/NETWORK-CONTRACT.md` only; never mirror them into
+  committed files (a second copy is a second authority). Working detail may
+  live in session memory. INFRA-68 (Route10 joins the Headscale mesh as
+  subnet-router) is the ops-side umbrella.
+
 ## Hard rules (don't break)
 
 - Never call the ISP. (`feedback_no_isp_calls.md`)
@@ -281,3 +305,6 @@ ssh route10 'curl --http0.9 -s --interface 192.168.1.2 -m 5 -u admin:admin -X PO
 - Local `/cfg/config.json` edits are ephemeral — cloud overwrites on boot.
   Persistent changes must go through Alta dashboard or a watchdog.
   (`project_route10_cloud_config_overwrite.md`)
+- Never edit `ops` repo config, and never move a shared LAN/mesh value without
+  changing `ops/NETWORK-CONTRACT.md` first. (see "Cross-repo seam with `ops`"
+  above / `docs/reference/mesh-seam.md`)
