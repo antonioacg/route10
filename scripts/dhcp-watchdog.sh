@@ -26,8 +26,12 @@ COOLDOWN=300                    # min seconds between restarts
 HEARTBEAT=300                   # heartbeat cadence (s)
 ROTATE_BYTES=$((5 * 1024 * 1024))
 
+# Add a syslog copy (route10.dhcp-watchdog) to the existing file logger. no-op
+# default so a missing lib can't break the watchdog; the lib overrides it.
+obs_syslog() { :; }
+. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init dhcp-watchdog "$LOG"
 ts()  { date '+%Y-%m-%d %H:%M:%S'; }
-log() { echo "$(ts) $*" >> "$LOG"; }
+log() { obs_syslog notice "$*"; echo "$(ts) $*" >> "$LOG"; }
 # count lines in $1 matching BRE $2
 cnt() { printf '%s\n' "$1" | grep -c "$2"; }
 

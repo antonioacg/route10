@@ -38,10 +38,12 @@
 # See CLAUDE.md "stale IPv6 prefix", ra-deprecate.py, and project memory.
 
 STATE=/var/run/.lan-prefix.env
-LOG=/cfg/scripts/prefix-track.log
 DEP=/cfg/scripts/ra-deprecate.py
 IFACE=br-lan
-log() { echo "$(date '+%F %T') prefix-track: $*" >> "$LOG"; }
+# Dual-sink logging (syslog route10.prefix-track + /cfg/scripts/prefix-track.log);
+# fall back to file-only if the lib is missing so a bad deploy can't break us.
+. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init prefix-track \
+  || { OBS_LOG=/cfg/scripts/prefix-track.log; log(){ echo "$(date '+%F %T') $*" >>"$OBS_LOG"; }; event(){ log "$@"; }; warn(){ log "$@"; }; err(){ log "$@"; }; obs_syslog(){ :; }; }
 
 # Current LAN GUA /64: a global-scope br-lan address that is NOT ULA (fc00::/7);
 # reduce it to its /64 network (first four hextets, host part zeroed).
@@ -61,12 +63,11 @@ prev=""
 [ -f "$STATE" ] && . "$STATE" 2>/dev/null && prev="$LAN_PREFIX"
 
 if [ -n "$prev" ] && [ "$prev" != "$net" ]; then
-    log "GUA rotated $prev -> $net; deprecating old prefix on $IFACE"
     if [ -x "$DEP" ]; then
-        python3 "$DEP" "$prev" "$IFACE" 3 >> "$LOG" 2>&1 \
-            || log "ra-deprecate FAILED for $prev"
+        out=$(python3 "$DEP" "$prev" "$IFACE" 3 2>&1)
+        event "GUA rotated $prev -> $net; deprecated old prefix on $IFACE (${out:-no output})"
     else
-        log "ra-deprecate.py missing/not executable at $DEP"
+        err "GUA rotated $prev -> $net but $DEP missing — cannot deprecate old prefix"
     fi
 fi
 

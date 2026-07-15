@@ -19,5 +19,10 @@
 # iface/) each boot by post-cfg.sh — /etc is tmpfs on this box.
 case "$ACTION"    in ifup|ifupdate) ;; *) return 0 2>/dev/null || exit 0 ;; esac
 case "$INTERFACE" in lan|wan3|wan36) ;; *) return 0 2>/dev/null || exit 0 ;; esac
+# One inline syslog line (same route10.prefix-track tag as the tracker) records
+# that the event path fired even when no rotation is found. We do NOT source
+# lib-observability.sh here: hotplug.d hooks are SOURCED, so defining its
+# functions would leak into the dispatcher's shell and sibling hooks.
+logger -t route10.prefix-track -p daemon.debug -- "hotplug $ACTION on $INTERFACE -> checking LAN prefix" 2>/dev/null
 [ -x /cfg/scripts/lan-prefix-track.sh ] && /cfg/scripts/lan-prefix-track.sh
 return 0 2>/dev/null || exit 0

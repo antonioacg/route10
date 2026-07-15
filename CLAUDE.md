@@ -77,6 +77,29 @@ telnet probes — they orphan the lock too.
      `lan-prefix-track.sh` hotplug hook (`/etc/hotplug.d/iface/89-lan-prefix`,
      fires on `ifupdate`) + `* * * * *` cron backstop (stale-IPv6-prefix deprecation).
 
+## Observability standard
+
+All `/cfg/scripts` helpers log through `scripts/lib-observability.sh` (deployed to
+`/cfg/scripts/lib-observability.sh`). Every message is **dual-sunk**:
+- **syslog** — `logger -t route10.<component> -p daemon.<sev>`. busybox syslogd
+  writes it to `/var/log/messages` and can forward to the homelab collector via
+  `syslogd -R host:port` (uci `system.@system[0].log_ip` — not set yet). This is
+  the capture surface for the observability stack.
+- **file** — `/cfg/scripts/<component>.log`, size-rotated. Persistent on-box
+  forensics (the volatile syslog ring `log_size` is only 64 KiB).
+
+Usage: `. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init <comp> [log] [rotate]`
+(with a file-only fallback so a missing lib never breaks a daemon), then `log`
+(info), `event` (notice — a state change), `warn`, `err`. Scripts that own a
+special file format (flap-hunt's ms lines) call `obs_syslog <sev> "msg"` for the
+syslog side only. **hotplug.d hooks must NOT source the lib** (they are SOURCED
+into the dispatcher — defining functions would leak into sibling hooks); they
+call `logger` inline with the same `route10.<component>` tag.
+
+Tag convention `route10.<component>`. On the standard: `prefix-track`, `route-hook`,
+`odi-health`, `dhcp-watchdog`, `flap-hunt`, `w2-ddm` (`lcp-watch` writes only a
+state file, no log). Check: `ssh route10 'grep route10. /var/log/messages | tail'`.
+
 ## Current open investigations
 
 ### Perceived intermittent "drops" on wan3 — likely ICMP-only loss to ping.alta.inc
@@ -267,6 +290,10 @@ ssh route10 'echo "eth4_mac:        $(cat /sys/class/net/eth4/address)"
 
 # Reboot stick (~80s blip — kills internet, see feedback_internet_path_single_fiber.md before doing)
 ssh route10 'curl --http0.9 -s --interface 192.168.1.2 -m 5 -u admin:admin -X POST http://192.168.1.1/boaform/admin/formReboot'
+
+# All script observability in one place (syslog, route10.* tags → homelab stack)
+ssh route10 'grep " route10\." /var/log/messages | tail -20'
+ssh route10 'grep " route10\.flap-hunt" /var/log/messages | tail'   # one component
 
 # LAN prefix-rotation self-heal — last-seen /64 + any deprecation events
 ssh route10 'cat /var/run/.lan-prefix.env; tail -3 /cfg/scripts/prefix-track.log 2>/dev/null'

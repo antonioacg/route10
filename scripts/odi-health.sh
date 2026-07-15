@@ -21,6 +21,11 @@
 LOG=/cfg/scripts/odi-health.log
 INTERVAL=300
 
+# Add a syslog copy (route10.odi-health) alongside the file log. no-op default so
+# a missing lib can't break the daemon; the lib overrides obs_syslog.
+obs_syslog() { :; }
+. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init odi-health "$LOG"
+
 restore_mgmt() {
     # Mgmt path is now an Alta-blessed MACVLAN child (ont_mgmt0 on eth4),
     # set up persistently via /cfg/post-cfg.sh. Self-heal only if missing.
@@ -93,6 +98,7 @@ probe_w2_ddm() {
         "$W2_T" "$W2_V" "$W2_A" "$W2_P" "$W2_R"
 }
 
+obs_syslog notice "odi-health restarted, interval ${INTERVAL}s"
 echo "$(date '+%Y-%m-%d %H:%M:%S') === odi-health.sh restarted, interval ${INTERVAL}s ===" >> $LOG
 
 restore_mgmt
@@ -126,7 +132,9 @@ except: print('-')" 2>/dev/null)
         W2_DDM="W2_mgmt_path_down"
     fi
 
-    echo "$TS wan3_up=$WAN3_UP ip=$WAN3_IP pppd=$PPPD carrier=$CARRIER speed=$SPEED $PING $R10_THERM $L4_DDM $W2_DDM" >> $LOG
+    LINE="wan3_up=$WAN3_UP ip=$WAN3_IP pppd=$PPPD carrier=$CARRIER speed=$SPEED $PING $R10_THERM $L4_DDM $W2_DDM"
+    obs_syslog info "$LINE"
+    echo "$TS $LINE" >> $LOG
 
     sleep $INTERVAL
 done

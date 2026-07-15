@@ -30,8 +30,10 @@
 # `/` is tmpfs — post-cfg.sh installs the ip-up.d symlink and the cron line each
 # boot. Log (persistent; logread is volatile here): /cfg/scripts/route-hook.log
 
-LOG=/cfg/scripts/route-hook.log
-log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+# Dual-sink logging (syslog route10.route-hook + /cfg/scripts/route-hook.log);
+# fall back to file-only if the lib is missing so a bad deploy can't break us.
+. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init route-hook \
+  || { OBS_LOG=/cfg/scripts/route-hook.log; log(){ echo "$(date '+%F %T') $*" >>"$OBS_LOG"; }; event(){ log "$@"; }; warn(){ log "$@"; }; err(){ log "$@"; }; obs_syslog(){ :; }; }
 
 # Ensure v4+v6 default routes for one pppoe iface; act only when missing. $2/$3 =
 # v4/v6 gateway from pppd env, derived from the iface itself if empty (cron path).
@@ -43,7 +45,7 @@ fix_iface() {
 
     if [ -n "$V4GW" ] && ! ip route show default 2>/dev/null | grep -q "via $V4GW dev $IF"; then
         ip route replace default via "$V4GW" dev "$IF" 2>/dev/null &&
-            log "v4 default via $V4GW dev $IF re-asserted ($CALLER)"
+            event "v4 default via $V4GW dev $IF re-asserted ($CALLER)"
     fi
     # Match the v6 default by `dev`, not the exact gateway string: pppd hands us
     # $LLREMOTE zero-padded (fe80::02e4:06ff:…) while `ip` prints it unpadded
@@ -51,7 +53,7 @@ fix_iface() {
     # Single-WAN: any v6 default out this iface is ours.
     if [ -n "$V6GW" ] && ! ip -6 route show default 2>/dev/null | grep -q "dev $IF"; then
         ip -6 route replace default via "$V6GW" dev "$IF" 2>/dev/null &&
-            log "v6 default via $V6GW dev $IF re-asserted ($CALLER)"
+            event "v6 default via $V6GW dev $IF re-asserted ($CALLER)"
     fi
 }
 

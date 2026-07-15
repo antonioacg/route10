@@ -44,6 +44,12 @@ MIB_SEC=30               # CRC counter sample every 30s
 BOA_SEC=30               # stick Boa liveness every 30s
 ROTATE_BYTES=5242880     # rotate at 5 MiB
 
+# Add a syslog copy (route10.flap-hunt) to emit()'s file writer. no-op default so
+# a missing lib can't break the monitor; the lib overrides obs_syslog. flap-hunt
+# keeps its own file format/rotation — syslogd stamps its own (ms) timestamp.
+obs_syslog() { :; }
+. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init flap-hunt "$LOG"
+
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 restore_mgmt() {
@@ -53,6 +59,7 @@ restore_mgmt() {
 
 # Cheap log writer with size-based rotation. Keeps current + .1; drops older.
 emit() {
+    obs_syslog notice "$*"
     sz=$(wc -c < "$LOG" 2>/dev/null)
     if [ -n "$sz" ] && [ "$sz" -gt $ROTATE_BYTES ]; then
         mv "$LOG" "$LOG.1" 2>/dev/null

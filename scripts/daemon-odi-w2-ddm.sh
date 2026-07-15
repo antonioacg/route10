@@ -42,7 +42,11 @@ CACHE_SH='/var/run/w2-ddm.env'      # POSIX-sh-sourceable (for odi-health.sh)
 LOG='/cfg/scripts/daemon-odi-w2-ddm.log'
 LOG_MAX=524288           # 512K — manual rotation (Route10 has no logrotate here)
 
-log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
+# Add a syslog copy (route10.w2-ddm) to the existing file logger. no-op default
+# so a missing lib can't break the daemon; the lib overrides it.
+obs_syslog() { :; }
+. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init w2-ddm "$LOG"
+log() { obs_syslog notice "$*"; echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
 
 # Rotate log if it exceeds LOG_MAX
 [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt "$LOG_MAX" ] && : > "$LOG"
