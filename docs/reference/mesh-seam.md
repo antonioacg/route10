@@ -22,13 +22,17 @@ only thing route10 needs from ops for the join is a pre-auth key, out-of-band.
 
 ## Async message channel (stop hand-relaying)
 
-Shared *values* go through the contract (contract-first). Async *messages* —
-asks, acks, ownership, status — go through two append-only logs, so neither agent
-edits the other's repo:
-- **route10 → ops:** [`seam-handoff.md`](./seam-handoff.md) (route10 writes, ops
-  reads when the operator points it here).
-- **ops → route10:** ops reflects status in `ops/NETWORK-CONTRACT.md`; route10
-  reads it.
+Shared *values* always go through the contract (contract-first). Async *messages*
+— asks, acks, ownership, status:
+
+- **Primary (piloting): `mcp_agent_mail`.** Local server `127.0.0.1:8765`, shared
+  `project_key=/seam/route10-ops`, adjective+noun agent names (route10 = `RubyStone`;
+  discover peers via `resource://agents//seam/route10-ops`). **When seam work starts,
+  `register_agent` then `fetch_inbox`** — that's the whole habit; no skill needed.
+  Setup/restart details in [`seam-handoff.md`](./seam-handoff.md).
+- **Fallback (until the pilot proves out): the files.** route10 → ops =
+  [`seam-handoff.md`](./seam-handoff.md); ops → route10 = status lines in
+  `ops/NETWORK-CONTRACT.md`. Neither agent edits the other's repo.
 
 ## Rules (route10 side)
 
