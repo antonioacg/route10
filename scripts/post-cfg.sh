@@ -29,6 +29,16 @@ set -e
 # below is a clean no-op. Render it on the router from the contract; never here.
 [ -f /cfg/seam.env ] && . /cfg/seam.env
 
+# ── tailscale mesh boot hook (INFRA-68) ──────────────────────────────────────
+# Launch the Tailscale boot script if installed. It re-creates the tmpfs-wiped
+# /etc/init.d/tailscale, re-adds the tailscale0 firewall + WAN MASQUERADE
+# (WAN_IFACE=pppoe-wan3), and starts tailscaled — internet-waiting and
+# self-reverting on failure. Idempotent; absent file = clean no-op. Installed by
+# the route10-owned fork antonioacg/alta-route10-tailscale, whose installer also
+# adds this same line to the live /cfg/post-cfg.sh — keeping it here is what
+# survives a future post-cfg redeploy (drift protection).
+[ -x /cfg/tailscale-post-cfg.sh ] && /cfg/tailscale-post-cfg.sh &
+
 # ── network ────────────────────────────────────────────────────────────────
 uci set network.ont_mgmt_dev=device
 uci set network.ont_mgmt_dev.type='macvlan'
