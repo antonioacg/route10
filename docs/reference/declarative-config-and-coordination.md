@@ -103,14 +103,22 @@ Alta's cloud or a self-hosted Control.
 - **Dashboard-expressible rules → the cloud master.** Zones, filter rules,
   port-forward, NAT, static routes. Git the JSON export; re-import on change
   (path 3), or automate via 1/2 if you accept the NDA/SDK tradeoffs.
-- **Everything else → `post-cfg.sh`.** Idempotent uci that wins after each sync.
+- **Only the genuinely portal-inexpressible → `post-cfg.sh`.** Idempotent uci
+  that wins after each sync. **User rule (2026-07-14): nothing goes in
+  `post-cfg.sh` that the portal could show and configure** — the dashboard must
+  stay the truthful view of router config. Verify the portal *can't* express a
+  setting (forum/dashboard check, not assumption) before it earns a post-cfg
+  slot.
 - **Never double-own a rule.** A rule defined in *both* the cloud and
   `post-cfg.sh` invites drift and ordering surprises. Pick one home per rule.
 
-**The mesh firewall is forced into `post-cfg.sh`.** The rules that gate what
-tailnet peers reach over the advertised LAN routes reference `tailscale0` —
-installed by the community fork, invisible to Alta's dashboard. So the INFRA-68
-firewall lives in `post-cfg.sh`, full stop, regardless of A/B choices.
+**The mesh firewall is *probably* `post-cfg.sh` — but test the portal first.**
+The rules that gate what tailnet peers reach over the advertised LAN routes
+reference `tailscale0`, installed by the community fork and unknown to Alta's
+dashboard. However, portal zone rules reportedly accept raw interface syntax
+(e.g. `br-lan_123`) — so before assuming, test whether a portal rule can target
+`tailscale0`. Only if it can't does the INFRA-68 firewall earn a post-cfg slot
+(then genuinely portal-inexpressible, satisfying the portal-first rule).
 
 **Recommendation — mirror the pattern you already built for the edge.** The
 homelab's `ops/edge/firewall/` is exactly this shape and is battle-tested:
