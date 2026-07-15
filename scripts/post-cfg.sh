@@ -290,6 +290,31 @@ if [ -x "$HOOK" ]; then
     fi
 fi
 
+# ── LAN IPv6 prefix-rotation deprecation (stale-prefix self-heal) ─────────────
+# When the ISP rotates our delegated /64 (PPP reconnect / cloud reapply), dnsmasq
+# stops advertising the old prefix but never DEPRECATES it — the rotation
+# coincides with a dnsmasq restart that wipes its memory of the outgoing prefix,
+# so no preferred-lifetime-0 RA ever goes out. Every LAN host then keeps the dead
+# /64 *preferred* for up to 24 h (RFC 4862) and source-selects it for new flows
+# the ISP no longer routes → the whole LAN is stuck. lan-prefix-track.sh watches
+# for the rotation and emits the deprecation RA (via ra-deprecate.py) itself.
+# Same tmpfs-reinstall + 1-minute-cron pattern as the route hook; no daemon.
+# Confirmed 2026-07-15 (stale 2804:2488:5083:8830:: on every device after the
+# 2026-07-14 flap). See lan-prefix-track.sh + ra-deprecate.py.
+TRACK=/cfg/scripts/lan-prefix-track.sh
+PFXHOTPLUG=/cfg/scripts/hotplug-lan-prefix.sh
+if [ -x "$TRACK" ]; then
+    # Event (near-instant): a hotplug.d/iface hook fires the tracker on netifd
+    # ifup/ifupdate — the DHCPv6-PD rotation lands as ifupdate. /etc is tmpfs so
+    # (re)install the symlink each boot, same as the route hook's ip-up.d symlink.
+    [ -x "$PFXHOTPLUG" ] && ln -sfn "$PFXHOTPLUG" /etc/hotplug.d/iface/89-lan-prefix
+    # Backstop (guaranteed): 1-minute cron catches any transition the event misses.
+    if ! grep -qF "$TRACK" /etc/crontabs/root 2>/dev/null; then
+        echo "* * * * * $TRACK" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── daemons ────────────────────────────────────────────────────────────────
 # Idempotent launchers — only start each daemon if not already running.
 # pgrep -f matches the full command line, including the script path, so the

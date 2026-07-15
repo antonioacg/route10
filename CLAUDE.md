@@ -40,8 +40,19 @@ telnet probes — they orphan the lock too.
 - `/cfg/scripts/daemon-odi-w2-ddm.sh` — every 5s: polls stick `/status_pon.asp`
   via Boa, encodes per SFF-8472, writes to i2c-1 0x51. Surfaces W2 stick DDM in
   Alta dashboard. See `reference_odi_ddm_blocker.md`.
+- `/cfg/scripts/lan-prefix-track.sh` — hotplug `ifupdate` event (instant) +
+  `* * * * *` cron backstop, no daemon. State-diffs br-lan's GUA /64 in
+  `/var/run/.lan-prefix.env`; on an ISP prefix rotation it deprecates the OUTGOING
+  /64 to all LAN nodes via `ra-deprecate.py` (multicast RA, preferred **and** valid
+  lifetime 0 per RFC 9096). The event hook is `/etc/hotplug.d/iface/89-lan-prefix`
+  → `scripts/hotplug-lan-prefix.sh`. dnsmasq stops advertising a rotated-away prefix but
+  never deprecates it (the rotation coincides with a dnsmasq restart that wipes
+  its memory), so clients would otherwise stay stuck on the dead /64 as a
+  *preferred* address for up to 24 h. Quiet when healthy. Log:
+  `/cfg/scripts/prefix-track.log`. Sources: `scripts/lan-prefix-track.sh` +
+  `scripts/ra-deprecate.py`. See `project_route10_stale_ipv6_prefix.md`.
 - `/cfg/post-cfg.sh` — runs after every Alta cloud-config reapply. Source:
-  `scripts/post-cfg.sh`. **Idempotent**. Four jobs:
+  `scripts/post-cfg.sh`. **Idempotent**. Jobs:
   1. **MACVLAN mgmt-path** (`ont_mgmt0` on eth4, `192.168.1.2/24`,
      `ont_mgmt` firewall zone forward=REJECT) — see
      `reference_alta_macvlan_mgmt_pattern.md`.
@@ -61,6 +72,10 @@ telnet probes — they orphan the lock too.
   5. **Launches daemons** if not running: `odi-health.sh`,
      `daemon-odi-w2-ddm.sh`, `lcp-watch.sh`, `flap-hunt.sh`. Uses
      `setsid nohup … </dev/null` so the daemons survive SSH disconnect.
+  6. **Reinstalls the event/cron self-heals** each boot (`/` is tmpfs): the
+     `route-defaultroute-hook.sh` ip-up.d symlink + `* * * * *` cron, and the
+     `lan-prefix-track.sh` hotplug hook (`/etc/hotplug.d/iface/89-lan-prefix`,
+     fires on `ifupdate`) + `* * * * *` cron backstop (stale-IPv6-prefix deprecation).
 
 ## Current open investigations
 
@@ -252,6 +267,15 @@ ssh route10 'echo "eth4_mac:        $(cat /sys/class/net/eth4/address)"
 
 # Reboot stick (~80s blip — kills internet, see feedback_internet_path_single_fiber.md before doing)
 ssh route10 'curl --http0.9 -s --interface 192.168.1.2 -m 5 -u admin:admin -X POST http://192.168.1.1/boaform/admin/formReboot'
+
+# LAN prefix-rotation self-heal — last-seen /64 + any deprecation events
+ssh route10 'cat /var/run/.lan-prefix.env; tail -3 /cfg/scripts/prefix-track.log 2>/dev/null'
+
+# Manually deprecate a stale LAN /64 to every device (what the cron does on rotation)
+ssh route10 'python3 /cfg/scripts/ra-deprecate.py 2804:2488:XXXX:YYYY::/64 br-lan 3'
+
+# Check a client (macOS) for a deprecated/stale prefix
+ifconfig en13 inet6 | grep -E "deprecated|inet6 2"   # `deprecated` flag = router told it to stop
 ```
 
 ## Current operational state (as of 2026-05-29)
@@ -270,6 +294,7 @@ ssh route10 'curl --http0.9 -s --interface 192.168.1.2 -m 5 -u admin:admin -X PO
 | lcp-watch | running | `/var/run/.lcp-state.env`, near-zero CPU |
 | odi-health | running | `/cfg/scripts/odi-health.log`, 5 min cadence |
 | W2 DDM daemon | running | populates Alta dashboard DDM |
+| lan-prefix-track | cron (`* * * * *`) | deprecates a rotated-away LAN /64; state `/var/run/.lan-prefix.env`, log `/cfg/scripts/prefix-track.log` |
 
 ## Cross-repo seam with `ops` (homelab)
 
