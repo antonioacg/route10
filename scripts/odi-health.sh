@@ -98,11 +98,25 @@ probe_w2_ddm() {
         "$W2_T" "$W2_V" "$W2_A" "$W2_P" "$W2_R"
 }
 
+# Switch MIB Rx error counters on port 5 (eth4 / W2 path) — folded in from the
+# retired flap-hunt.sh. Growth in FcsErr/Align/OverFlow/Runt is the L2 signature
+# of a degrading fibre/SFP (dirty connector, aging optics — cf. the Rx-power drop
+# in reference_odi_ddm_thresholds). Nothing else reads these; counters are
+# cumulative so any change = growth. Cheap: one ssdk_sh call per 5-min cycle.
+_read_mib()  { ( printf 'mib counter get 5\nquit\n' | ssdk_sh 2>/dev/null ) | tr '\n' ' ' | tr -d '<>'; }
+_mib_field() { echo "$1" | sed -n "s/.*$2  *\(0x[0-9a-fA-F]*\).*/\1/p"; }
+read_switch_crc() {
+    m=$(_read_mib)
+    echo "crc_fcs=$(_mib_field "$m" RxFcsErr) crc_align=$(_mib_field "$m" RxAlignErr) crc_overflow=$(_mib_field "$m" RxOverFlow) crc_runt=$(_mib_field "$m" RxRunt)"
+}
+
 obs_syslog notice "odi-health restarted, interval ${INTERVAL}s"
 echo "$(date '+%Y-%m-%d %H:%M:%S') === odi-health.sh restarted, interval ${INTERVAL}s ===" >> $LOG
 
 restore_mgmt
 sleep 2
+
+PREV_CRC=""      # switch Rx-error snapshot from the last cycle (growth alert)
 
 while true; do
     TS=$(date '+%Y-%m-%d %H:%M:%S')
@@ -132,9 +146,30 @@ except: print('-')" 2>/dev/null)
         W2_DDM="W2_mgmt_path_down"
     fi
 
-    LINE="wan3_up=$WAN3_UP ip=$WAN3_IP pppd=$PPPD carrier=$CARRIER speed=$SPEED $PING $R10_THERM $L4_DDM $W2_DDM"
-    obs_syslog info "$LINE"
+    # Switch Rx-error counters (eth4/W2 path) + growth alert.
+    CRC=$(read_switch_crc)
+    if [ -n "$PREV_CRC" ] && [ "$CRC" != "$PREV_CRC" ]; then
+        warn "switch Rx error counters changed (fibre/SFP degradation?): $PREV_CRC -> $CRC"
+    fi
+    PREV_CRC="$CRC"
+
+    # Full verbose line -> persistent file (all 13 thermal zones + full DDM + CRC).
+    LINE="wan3_up=$WAN3_UP ip=$WAN3_IP pppd=$PPPD carrier=$CARRIER speed=$SPEED $PING $R10_THERM $L4_DDM $W2_DDM $CRC"
     echo "$TS $LINE" >> $LOG
+    # Compact line -> syslog: busybox syslogd truncates ~256B, which would drop the
+    # tail (optical + CRC). Send only the alert-worthy metrics the observability
+    # stack needs: drop the 13 per-zone temps (keep tz_max) and verbose DDM (keep Rx
+    # power); collapse CRC to "clean" unless non-zero (the warn above carries full
+    # detail on any change).
+    TZMAX=$(echo "$R10_THERM" | grep -oE "tz_max=[^ ]+")
+    L4_RX=$(echo "$L4_DDM"    | grep -oE "L4_rx_dBm=[^ ]+")
+    W2_RX=$(echo "$W2_DDM"    | grep -oE "W2_rx_dBm_boa=[^ ]+")
+    if echo "$CRC" | grep -qE "^crc_fcs=0x0+ crc_align=0x0+ crc_overflow=0x0+ crc_runt=0x0+$"; then
+        CRC_TOK="crc=clean"
+    else
+        CRC_TOK="$CRC"
+    fi
+    obs_syslog info "wan3_up=$WAN3_UP ip=$WAN3_IP pppd=$PPPD carrier=$CARRIER speed=$SPEED $PING $TZMAX $L4_RX $W2_RX $CRC_TOK"
 
     sleep $INTERVAL
 done

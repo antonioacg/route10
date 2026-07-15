@@ -21,22 +21,19 @@ telnet probes — they orphan the lock too.
 ## Deployed daemons on Route10
 
 - `/cfg/scripts/odi-health.sh` — every 5 min: PPP state, ping 1.1.1.1 RTT, 13
-  thermal zones, L4 BiDi DDM, W2 stick DDM (read from cache, no Boa session).
-  Log: `/cfg/scripts/odi-health.log`. Source: `scripts/odi-health.sh`.
-- `/cfg/scripts/flap-hunt.sh` — 2 s tick, EVENT-only log + 5 min heartbeat.
-  Catches sub-minute events `odi-health` misses: eth4 carrier flap, PPP
-  reconnect, mwan3 track-loss windows, switch-MIB CRC growth (30 s sample),
-  stick Boa liveness fail (30 s probe), **LCP miss streaks** (consumes
-  `/var/run/.lcp-state.env` from `lcp-watch.sh`). Log:
-  `/cfg/scripts/flap-hunt.log` (rotates at 5 MiB). Source:
-  `scripts/flap-hunt.sh`.
-- `/cfg/scripts/lcp-watch.sh` — event-driven `pppoe-wan3` LCP-echo headroom
-  monitor. tcpdump filters protocol `0xc021` only; near-zero CPU under
-  load thanks to `lcp-echo-adaptive`. State at `/var/run/.lcp-state.env`
-  (constant-size, atomically overwritten — no log growth). Tracks
-  `LCP_SENT / LCP_REPLIED / LCP_MISSED / LCP_CUR_STREAK / LCP_MAX_STREAK`.
-  flap-hunt.sh emits `EVENT lcp_miss_streak=N` when streak grows. Source:
-  `scripts/lcp-watch.sh`.
+  thermal zones, L4 BiDi DDM, W2 stick DDM (read from cache, no Boa session), and
+  **switch-MIB Rx-error/CRC counters on port 5** (absorbed from flap-hunt on its
+  retirement; warns on any growth). File gets the full verbose line; the syslog
+  copy is a compact subset (tz_max + optical Rx + CRC state) because busybox
+  syslogd truncates ~256 B. Log: `/cfg/scripts/odi-health.log`. Source:
+  `scripts/odi-health.sh`.
+- **RETIRED 2026-07-15 — `flap-hunt.sh` + `lcp-watch.sh`** (deletion test). flap-hunt
+  was ~95% redundant: eth4 carrier flap → kernel log, PPP reconnect → pppd log,
+  Boa-liveness probe duped the DDM daemon's 5 s poll (578 noise fails/30 d), 5-min
+  heartbeat duped odi-health; its one unique signal (switch CRC) is folded into
+  odi-health above. lcp-watch never fired (`lcp-echo-adaptive` ⇒ `LCP_SENT=0` for
+  the link's life) and its only consumer was flap-hunt; the LCP-disconnect failure
+  mode is already mitigated by the `5 5` keepalive. Recoverable from git history.
 - `/cfg/scripts/daemon-odi-w2-ddm.sh` — every 5s: polls stick `/status_pon.asp`
   via Boa, encodes per SFF-8472, writes to i2c-1 0x51. Surfaces W2 stick DDM in
   Alta dashboard. See `reference_odi_ddm_blocker.md`.
@@ -70,7 +67,7 @@ telnet probes — they orphan the lock too.
      -F`. We're effectively single-WAN, so `connected`/`disconnected`
      entries served no defensive purpose.
   5. **Launches daemons** if not running: `odi-health.sh`,
-     `daemon-odi-w2-ddm.sh`, `lcp-watch.sh`, `flap-hunt.sh`. Uses
+     `daemon-odi-w2-ddm.sh`, `dhcp-watchdog.sh`. Uses
      `setsid nohup … </dev/null` so the daemons survive SSH disconnect.
   6. **Reinstalls the event/cron self-heals** each boot (`/` is tmpfs): the
      `route-defaultroute-hook.sh` ip-up.d symlink + `* * * * *` cron, and the
@@ -90,15 +87,16 @@ All `/cfg/scripts` helpers log through `scripts/lib-observability.sh` (deployed 
 
 Usage: `. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init <comp> [log] [rotate]`
 (with a file-only fallback so a missing lib never breaks a daemon), then `log`
-(info), `event` (notice — a state change), `warn`, `err`. Scripts that own a
-special file format (flap-hunt's ms lines) call `obs_syslog <sev> "msg"` for the
-syslog side only. **hotplug.d hooks must NOT source the lib** (they are SOURCED
-into the dispatcher — defining functions would leak into sibling hooks); they
-call `logger` inline with the same `route10.<component>` tag.
+(info), `event` (notice — a state change), `warn`, `err`. Scripts whose file line
+exceeds syslog's ~256 B cap (odi-health) send the full line to the file and a
+compact subset via `obs_syslog <sev> "msg"` for the syslog side. **hotplug.d hooks
+must NOT source the lib** (they are SOURCED into the dispatcher — defining
+functions would leak into sibling hooks); they call `logger` inline with the same
+`route10.<component>` tag.
 
 Tag convention `route10.<component>`. On the standard: `prefix-track`, `route-hook`,
-`odi-health`, `dhcp-watchdog`, `flap-hunt`, `w2-ddm` (`lcp-watch` writes only a
-state file, no log). Check: `ssh route10 'grep route10. /var/log/messages | tail'`.
+`odi-health`, `dhcp-watchdog`, `w2-ddm`. Check:
+`ssh route10 'grep route10. /var/log/messages | tail'`.
 
 ## Current open investigations
 
@@ -125,8 +123,10 @@ the user's actual TCP/UDP traffic is unaffected.**
 During those 8 seconds, eth4 RX/TX grew by ~600 MB and PPP uptime kept ticking.
 No L1 flap (`carrier_changes` unchanged), no CRC errors, no PPP teardown.
 
-**Monitor:** `/cfg/scripts/flap-hunt.sh` (persistent). EVENT-only logging at
-`/cfg/scripts/flap-hunt.log`. Tail with `ssh route10 'tail -F /cfg/scripts/flap-hunt.log'`.
+**Monitor (historical):** this was caught by `flap-hunt.sh`, **retired 2026-07-15**
+(deletion test — the investigation is resolved). PPP reconnects / mwan3 track-loss
+now surface in syslog (`/var/log/messages`); mwan3 state is queryable via
+`ubus call mwan3 status`. Old evidence: `/cfg/scripts/flap-hunt.log`.
 
 **Known noise we filtered out:** mwan3's `turn` field ticks every ~5 s — it's a
 heartbeat counter, not a state change. flap-hunt.sh ignores it; only enters a
@@ -240,10 +240,11 @@ nat ack-filter`. Treat 2.5G as a fun experiment, not a fix.
   via post-cfg.sh — drops the destructive `'connected'/'disconnected'`
   entries. Belt-and-suspenders against the now-vanishing false alarm
   scenario.
-- **`lcp-watch.sh`** event-driven LCP miss telemetry consumed by
-  flap-hunt.sh. Will catch any future near-disconnect (streak ≥ 1) before
-  pppd actually terminates. `LCP_MAX_STREAK` is the persistent watermark
-  for "how close did we ever come."
+- **`lcp-watch.sh`** LCP miss telemetry (consumed by flap-hunt) — **both retired
+  2026-07-15**. In practice it never fired: `lcp-echo-adaptive` suppresses echoes
+  on a busy link, so `LCP_SENT` stayed 0 for the link's life. The LCP-disconnect
+  failure mode is mitigated by the `5 5` keepalive above; an actual PPP teardown
+  still shows in pppd's syslog + odi-health's `pppup` regression.
 
 See: `project_mwan3_anycast_false_drop.md`,
 `project_pppoe_stale_session_mac_swap.md`.
@@ -252,8 +253,9 @@ See: `project_mwan3_anycast_false_drop.md`,
 
 dmesg shows ~7 down events over 74h. User confirms most were us debugging in
 prior sessions. Most recent flap was the `[248132 → 248198]` event during this
-session. **None since** (verified by `carrier_changes` counter). If new flaps
-appear, the monitor will catch them as `EVENT eth4_carrier_changed`.
+session. **None since** (verified by `carrier_changes` counter). New flaps now
+surface in the kernel log / syslog (`eth4: PHY Link is down/up` via klogd →
+`/var/log/messages`); odi-health also logs `carrier` each 5-min cycle.
 
 ## Useful one-liners
 
@@ -269,16 +271,8 @@ ssh route10 'cat /var/run/.sfp1ddm.json'
 # Quick mwan3 wan3 health snapshot
 ssh route10 "ubus call mwan3 status" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(json.dumps(d["interfaces"]["wan3"],indent=2))'
 
-# Tail the flap monitor
-ssh route10 'tail -F /cfg/scripts/flap-hunt.log'
-
-# LCP-echo headroom snapshot — "how close did we come to disconnect?"
-ssh route10 'cat /var/run/.lcp-state.env'
-#   LCP_SENT=N        # total Echo-Requests pppd has emitted on pppoe-wan3
-#   LCP_REPLIED=N     # total Echo-Replies received
-#   LCP_MISSED=N      # cumulative misses (request-without-reply pairs)
-#   LCP_CUR_STREAK=N  # current consecutive misses (0 = healthy)
-#   LCP_MAX_STREAK=N  # all-time peak streak (≥5 would have killed pppd)
+# Switch Rx-error/CRC watch (folded into odi-health; warns on growth)
+ssh route10 'tail -2 /cfg/scripts/odi-health.log | grep -oE "crc_[a-z]+=[^ ]+"'
 
 # Verify all four post-cfg.sh overrides are sticky
 ssh route10 'echo "eth4_mac:        $(cat /sys/class/net/eth4/address)"
@@ -293,7 +287,7 @@ ssh route10 'curl --http0.9 -s --interface 192.168.1.2 -m 5 -u admin:admin -X PO
 
 # All script observability in one place (syslog, route10.* tags → homelab stack)
 ssh route10 'grep " route10\." /var/log/messages | tail -20'
-ssh route10 'grep " route10\.flap-hunt" /var/log/messages | tail'   # one component
+ssh route10 'grep " route10\.odi-health" /var/log/messages | tail'   # one component
 
 # LAN prefix-rotation self-heal — last-seen /64 + any deprecation events
 ssh route10 'cat /var/run/.lan-prefix.env; tail -3 /cfg/scripts/prefix-track.log 2>/dev/null'
@@ -317,10 +311,9 @@ ifconfig en13 inet6 | grep -E "deprecated|inet6 2"   # `deprecated` flag = route
 | pppd LCP keepalive | 5 misses × 5 s = 25 s tolerance | wan + wan3 both |
 | mwan3 track_ip | 4 hosts, `reliability=1` | 168.195.103.5, 200.147.67.142, 9.9.9.9, ping.alta.inc |
 | mwan3 flush_conntrack | `ifup`, `ifdown` | `connected`/`disconnected` removed via post-cfg.sh |
-| flap-hunt | running | `/cfg/scripts/flap-hunt.log`, includes LCP telemetry |
-| lcp-watch | running | `/var/run/.lcp-state.env`, near-zero CPU |
-| odi-health | running | `/cfg/scripts/odi-health.log`, 5 min cadence |
+| odi-health | running | `/cfg/scripts/odi-health.log`, 5 min cadence; carries switch CRC (flap-hunt folded in) |
 | W2 DDM daemon | running | populates Alta dashboard DDM |
+| flap-hunt / lcp-watch | RETIRED 2026-07-15 | deletion test — redundant; CRC folded into odi-health |
 | lan-prefix-track | cron (`* * * * *`) | deprecates a rotated-away LAN /64; state `/var/run/.lan-prefix.env`, log `/cfg/scripts/prefix-track.log` |
 
 ## Cross-repo seam with `ops` (homelab)

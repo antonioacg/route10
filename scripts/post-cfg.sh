@@ -334,23 +334,19 @@ launch_if_absent() {
     fi
 }
 
-# odi-health.sh — overnight + daytime health log (was launched manually before)
+# odi-health.sh — 5-min health log (PPP, ping RTT, thermals, L4+W2 DDM, switch
+# Rx-error/CRC counters). Absorbed flap-hunt's switch-CRC sampling on retirement.
 launch_if_absent /cfg/scripts/odi-health.sh
 # daemon-odi-w2-ddm.sh — bridge Boa /status_pon.asp -> i2c slave A2 page
 # so rcstats picks up W2 DDM and the Alta dashboard shows full 5-field DDM
 # the same way it does for the L4 cage. See reference_odi_ddm_blocker.md.
 launch_if_absent /cfg/scripts/daemon-odi-w2-ddm.sh
-# lcp-watch.sh — PPPoE LCP-echo headroom telemetry on `pppoe-wan3`.
-# Tiny event-driven daemon; state file /var/run/.lcp-state.env is constant
-# size and overwritten atomically. flap-hunt consumes its output. Start it
-# BEFORE flap-hunt so the state file exists when flap-hunt's first heartbeat
-# fires.
-launch_if_absent /cfg/scripts/lcp-watch.sh
-# flap-hunt.sh — sub-minute event detector (2 s polling, EVENT-only logging)
-# Catches mwan3 track-loss windows, PPP reconnects, eth4 carrier flaps, CRC
-# growth, stick Boa liveness fails, LCP miss streaks. See CLAUDE.md.
-launch_if_absent /cfg/scripts/flap-hunt.sh
 # dhcp-watchdog.sh — detect & auto-recover a MUTE dnsmasq (the 2026-06-24 surge
 # failure mode). Safety net for ANY dnsmasq DHCP mute, whatever the cause.
 launch_if_absent /cfg/scripts/dhcp-watchdog.sh
+# NOTE: flap-hunt.sh + lcp-watch.sh were RETIRED 2026-07-15 (deletion test): flap-hunt
+# was ~95% redundant (carrier→kernel log, ppp→pppd log, boa-liveness dup of the ddm
+# daemon, heartbeat dup of odi-health) with its one unique bit (switch CRC) folded
+# above; lcp-watch never fired (lcp-echo-adaptive => LCP_SENT=0) and its only
+# consumer was flap-hunt. Recoverable from git if a future LCP/flap probe is needed.
 exit 0
