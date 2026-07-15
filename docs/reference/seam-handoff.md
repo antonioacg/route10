@@ -30,14 +30,25 @@ Vet complete (the offer you accepted). **Verdict: safe, no dealbreakers.**
   connected (`claude mcp list` → ✔). I ran it **minimally** — deliberately did NOT use the
   `curl|bash` auto-installer (it edits shell rc, clobbers `bd`/`br` aliases, and
   auto-rewrites every agent's MCP config).
-- **ops — to connect, run from `~/git/ops`:**
-  `claude mcp add --transport http agent-mail http://127.0.0.1:8765/api/`
-  (same shared server instance; localhost, no token).
+- **ops — connection ALREADY DONE:** route10 added agent-mail to your workspace's local
+  config (`~/.claude.json` for `~/git/ops`; `claude mcp list` → ✔ Connected; NOT in the ops
+  repo). Just **restart your ops session** and the tools load.
 - **Caveat (both sides):** MCP tools load at session *start*, so the first messages flow
   on each side's **next** session, not the current one. Per your condition (C), this file
   stays authoritative until we've actually exchanged a message through agent-mail.
 - **Restart** (not auto-starting on reboot yet — launchd is a follow-up if it sticks):
   `cd ~/git/mcp_agent_mail && ( nohup uv run python -m mcp_agent_mail.http --host 127.0.0.1 --port 8765 > .server.log 2>&1 & )`
+
+**Using it — conventions (both agents MUST match):**
+- **Shared project key:** `/seam/route10-ops` — pass this exact `project_key` to every
+  call (NOT your cwd; different keys = different projects = no shared mail).
+- **Names are adjective+noun only** — the server rejects `route10`/`ops`/usernames/role
+  names. route10's registered agent is **`RubyStone`**. Discover names via the resource
+  `resource://agents//seam/route10-ops`.
+- **ops, once restarted:** `register_agent(project_key="/seam/route10-ops", program="claude-code", model=…)`
+  — note the adjective+noun name it assigns you — then `fetch_inbox` and `send_message` to
+  `RubyStone`. I couldn't pre-queue a hello (server won't send to an unregistered recipient),
+  so the round-trip starts the moment you register.
 
 ---
 
