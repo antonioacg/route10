@@ -283,6 +283,85 @@ elif ! ip -4 addr show ont_mgmt0 | grep -q "192.168.1.2"; then
     ifup ont_mgmt
 fi
 
+# ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
+# A single LAN host running a P2P/torrent client opens ~1000+ simultaneous flows
+# (DHT + peer swarm). Each needs a NAT mapping on our SHARED CGNAT WAN IP. The
+# ISP CGNAT enforces a per-subscriber session cap; the swarm exhausts it, and the
+# ISP CGNAT hop then rejects our OTHER new connections (any v4 dest) with ICMP
+# "admin prohibited filter" → the kernel surfaces EHOSTUNREACH. Confirmed
+# 2026-07-18: orangepi5pro (192.168.10.200) torrent client → 1384 flows →
+# intermittent 40-92% failure to github/all v4. IPv6 was immune (native GUA, no
+# CGNAT). See memory project_route10_cgnat_torrent_exhaustion.
+#
+# Guard: cap concurrent NEW connections per LAN host on the internet-bound path
+# (br-lan → pppoe-wan3), two tiers —
+#   WARN  logs (tag route10.connlimit: greppable in /var/log/messages and
+#         forwarded to the homelab syslog collector once log_ip is set),
+#   BLOCK rejects further NEW flows so no single host can run the CGNAT table dry.
+# Only --ctstate NEW is matched, so ESTABLISHED flows are never touched and
+# under-limit hosts are unaffected — a capped host just can't open MORE. Applied
+# to BOTH families: v4 is the actual CGNAT fix; v6 has no CGNAT so its cap is
+# defense-in-depth (a rogue host still can't flood upstream / fill our conntrack).
+# v6 groups per /128, so a client spreading load across SLAAC privacy addresses
+# is undercounted — acceptable, since v6 is not the exhaustion vector.
+#
+# Portal-inexpressible (advanced firewall) → belongs here, not the Alta dashboard
+# (portal-first rule). Implemented as direct iptables into a dedicated chain,
+# rebuilt each run so threshold edits below apply cleanly, plus a single guarded
+# jump from FORWARD. No fw3 reload → no eth4/WAN bounce. Thresholds are per-host,
+# per-family concurrent-connection counts — tune here. Data-backed ceiling from
+# the 2026-07-18 incident: this subscriber's ISP CGNAT starved us with orangepi5pro
+# at ~1400 concurrent, and github was clean once it was capped-and-holding ~870. So
+# keep BLOCK below ~900 to stay in proven-safe territory; going higher trades CGNAT
+# protection for torrent headroom. A normal heavy desktop rarely exceeds ~300.
+CONNLIMIT_WARN=500
+CONNLIMIT_BLOCK=800
+install_connlimit_guard() {
+    # -w: wait for the xtables lock. post-cfg launches the tailscale boot hook in
+    # the background (top of file), which also edits iptables; without -w our
+    # calls race it, fail, and get swallowed by `|| true`, leaving the guard half
+    # applied (confirmed 2026-07-18: missing v6 jump + duplicated rules).
+    ipt="$1 -w 10"; mask=$2; icmpreject=$3
+    mark="route10-connlimit-w${CONNLIMIT_WARN}b${CONNLIMIT_BLOCK}"
+    $ipt -N RT10_CONNLIMIT 2>/dev/null || true
+    # Rebuild the chain ONLY when it is absent or the thresholds changed — the
+    # trailing marker rule encodes the active WARN/BLOCK. Skipping an unchanged
+    # rebuild preserves connlimit's live accounting, so a post-cfg re-run (e.g.
+    # after a cloud reapply) never flushes the counters and briefly un-protects a
+    # host mid-flood. A real threshold edit changes the marker → clean rebuild.
+    if ! $ipt -S RT10_CONNLIMIT 2>/dev/null | grep -q -- "$mark"; then
+        $ipt -F RT10_CONNLIMIT 2>/dev/null || true
+        # WARN: log (rate-limited, non-terminating) — the "rogue client" smell signal.
+        $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
+            -m connlimit --connlimit-above "$CONNLIMIT_WARN" --connlimit-mask "$mask" --connlimit-saddr \
+            -m limit --limit 6/hour --limit-burst 5 \
+            -j LOG --log-prefix "route10.connlimit warn: " --log-level warning 2>/dev/null || true
+        # BLOCK: reject further NEW flows from an over-cap host (existing flows survive).
+        # A firewall reject can't carry text — the client only gets an errno — so pick
+        # the one that reads as "something said no", not "the network is broken":
+        #   TCP  → tcp-reset             → app sees "Connection refused" (fast, no retry)
+        #   else → ICMP port-unreachable → the UDP "refused" equivalent
+        # We deliberately do NOT use admin/host-unreachable: those surface as the
+        # misleading "Host is unreachable" — the string the ISP CGNAT sent when IT
+        # starved us. The real "why" lives in the route10.connlimit WARN log above.
+        $ipt -A RT10_CONNLIMIT -p tcp -m conntrack --ctstate NEW \
+            -m connlimit --connlimit-above "$CONNLIMIT_BLOCK" --connlimit-mask "$mask" --connlimit-saddr \
+            -j REJECT --reject-with tcp-reset 2>/dev/null || true
+        $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
+            -m connlimit --connlimit-above "$CONNLIMIT_BLOCK" --connlimit-mask "$mask" --connlimit-saddr \
+            -j REJECT --reject-with "$icmpreject" 2>/dev/null || true
+        # Marker: encodes the active thresholds so the next run can skip an unchanged
+        # rebuild. RETURN is a no-op (the chain returns at its end anyway).
+        $ipt -A RT10_CONNLIMIT -m comment --comment "$mark" -j RETURN 2>/dev/null || true
+    fi
+    # Single guarded jump, scoped to internet-bound LAN traffic only.
+    if ! $ipt -C FORWARD -i br-lan -o pppoe-wan3 -j RT10_CONNLIMIT 2>/dev/null; then
+        $ipt -I FORWARD 1 -i br-lan -o pppoe-wan3 -j RT10_CONNLIMIT 2>/dev/null || true
+    fi
+}
+install_connlimit_guard iptables  32  icmp-port-unreachable
+install_connlimit_guard ip6tables 128 icmp6-port-unreachable
+
 # ── WAN default-route hook (netifd proto_set_keep reconnect bug) ─────────────
 # netifd drops the WAN default route on PPP reconnect: its cache still believes
 # the route is installed, so it never reprograms the kernel (confirmed in netifd

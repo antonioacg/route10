@@ -73,6 +73,18 @@ telnet probes — they orphan the lock too.
      `route-defaultroute-hook.sh` ip-up.d symlink + `* * * * *` cron, and the
      `lan-prefix-track.sh` hotplug hook (`/etc/hotplug.d/iface/89-lan-prefix`,
      fires on `ifupdate`) + `* * * * *` cron backstop (stale-IPv6-prefix deprecation).
+  7. **Per-host connlimit guard** (`RT10_CONNLIMIT` chain, v4+v6): caps concurrent
+     NEW connections per LAN host on the `br-lan → pppoe-wan3` path (internet-bound
+     only; `--ctstate NEW`, so established/LAN/mesh traffic is untouched) — WARN 500
+     (LOG, tag `route10.connlimit`), BLOCK 800 (REJECT: TCP `tcp-reset` / else ICMP
+     `port-unreachable` → client sees "Connection refused", not the misleading "Host
+     unreachable"). Stops one rogue client (a torrent swarm) from exhausting the ISP
+     CGNAT NAT-session table and starving everyone else's v4 (EHOSTUNREACH). Thresholds
+     tunable at the top of the block; keep BLOCK <~900 (proven-safe ceiling — CGNAT
+     starved at ~1400). Direct iptables (no fw3 reload → no eth4 flap); `-w` on every
+     call (the backgrounded tailscale hook also edits iptables); a marker rule gates
+     the rebuild so a re-run doesn't reset the cap mid-flood. See
+     `project_route10_cgnat_torrent_exhaustion.md`.
 
 ## Observability standard
 
