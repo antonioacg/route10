@@ -309,13 +309,18 @@ fi
 # (portal-first rule). Implemented as direct iptables into a dedicated chain,
 # rebuilt each run so threshold edits below apply cleanly, plus a single guarded
 # jump from FORWARD. No fw3 reload → no eth4/WAN bounce. Thresholds are per-host,
-# per-family concurrent-connection counts — tune here. Data-backed ceiling from
-# the 2026-07-18 incident: this subscriber's ISP CGNAT starved us with orangepi5pro
-# at ~1400 concurrent, and github was clean once it was capped-and-holding ~870. So
-# keep BLOCK below ~900 to stay in proven-safe territory; going higher trades CGNAT
-# protection for torrent headroom. A normal heavy desktop rarely exceeds ~300.
-CONNLIMIT_WARN=500
-CONNLIMIT_BLOCK=800
+# per-family concurrent-connection counts — tune here. Data from the 2026-07-18
+# incident: the ISP CGNAT starves this WHOLE subscriber at ~1000 concurrent
+# mappings — github was clean with orangepi5pro (.200) holding ~870, but a
+# WHOLE-LAN v4 outage hit once it reached ~1130 (BLOCK=800 let it). Also note the
+# per-host footprint runs ~250-330 ABOVE the BLOCK number right after a rebuild
+# (connlimit counts only flows it has observed; older ones linger), so BLOCK≈500
+# keeps that host + the rest of the LAN under the ~1000 cap with margin. A normal
+# heavy desktop rarely exceeds ~300. Going laxer trades LAN-wide CGNAT safety for
+# one host's torrent headroom — 800 was too lax and caused the outage above. The
+# durable fix is taming the client (peer-limit) or moving it to IPv6 (no CGNAT).
+CONNLIMIT_WARN=300
+CONNLIMIT_BLOCK=500
 install_connlimit_guard() {
     # -w: wait for the xtables lock. post-cfg launches the tailscale boot hook in
     # the background (top of file), which also edits iptables; without -w our
