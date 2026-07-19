@@ -1,0 +1,487 @@
+<title>route10 · IPv6 dual-stack scorecard</title>
+<style>
+  :root {
+    --paper: #eef3f3;
+    --card: #fbfdfd;
+    --ink: #0f1c1f;
+    --ink-soft: #33474b;
+    --muted: #5c7074;
+    --line: #d4dfde;
+    --line-soft: #e3ebea;
+    --teal: #0b6e77;
+    --teal-bright: #0f929e;
+    --teal-wash: #e2eeee;
+    --live: #1f9d57;
+    --live-bg: #e5f4ea;
+    --live-line: #b9e0c7;
+    --gap: #bd7a12;
+    --gap-bg: #f9efd6;
+    --gap-line: #ecd39a;
+    --opt: #5a7896;
+    --opt-bg: #e9eef4;
+    --opt-line: #c9d6e4;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Menlo", "Consolas", "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(120% 60% at 100% 0%, #e7f0f0 0%, var(--paper) 55%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: clamp(24px, 5vw, 60px) clamp(18px, 5vw, 40px) 72px;
+  }
+
+  /* ---- header / verdict ---- */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(30px, 6vw, 46px);
+    line-height: 1.04;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    text-wrap: balance;
+    margin: 0 0 18px;
+  }
+  h1 .thin { color: var(--muted); font-weight: 600; }
+
+  .verdict {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 16px;
+    margin-top: 22px;
+  }
+  .verdict-lead {
+    flex: 1 1 300px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--live);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .verdict-lead strong { color: var(--live); }
+  .verdict-lead p { margin: 6px 0 0; color: var(--ink-soft); font-size: 15px; }
+  .score {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 10px;
+  }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 18px;
+    min-width: 96px;
+    text-align: center;
+  }
+  .stat .n {
+    font-family: var(--mono);
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .stat.live .n { color: var(--live); }
+  .stat.gap .n { color: var(--gap); }
+  .stat .l {
+    display: block;
+    margin-top: 7px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ---- section titles ---- */
+  .sec {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin: 48px 0 18px;
+  }
+  .sec h2 {
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--teal);
+    font-family: var(--mono);
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+  }
+  .sec .rule { flex: 1; height: 1px; background: var(--line); }
+
+  /* ---- mental model ---- */
+  .model {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px 24px;
+  }
+  .model > p {
+    margin: 0 0 20px;
+    font-size: 16.5px;
+    color: var(--ink-soft);
+  }
+  .model > p b { color: var(--ink); }
+  .fams {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .fam {
+    border: 1px solid var(--line-soft);
+    border-top: 3px solid var(--teal);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: #fff;
+  }
+  .fam:nth-child(2) { border-top-color: var(--teal-bright); }
+  .fam:nth-child(3) { border-top-color: #6f8b90; }
+  .fam .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .fam .name { font-weight: 700; font-size: 16px; margin: 3px 0 8px; }
+  .fam .addr {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--teal);
+    background: var(--teal-wash);
+    padding: 3px 7px;
+    border-radius: 5px;
+    display: inline-block;
+    margin-bottom: 9px;
+    word-break: break-all;
+  }
+  .fam .role { font-size: 13.5px; color: var(--ink-soft); margin: 0; line-height: 1.5; }
+
+  /* ---- checkpoints ---- */
+  .checks { display: flex; flex-direction: column; gap: 12px; }
+  .check {
+    display: grid;
+    grid-template-columns: 118px 1fr;
+    gap: 4px 20px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--live);
+    border-radius: 10px;
+    padding: 16px 20px 17px;
+  }
+  .check.is-gap { border-left-color: var(--gap); }
+  .check .pill {
+    grid-row: 1 / 3;
+    align-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--live-line);
+    background: var(--live-bg);
+    color: var(--live);
+    white-space: nowrap;
+    height: fit-content;
+  }
+  .check.is-gap .pill {
+    border-color: var(--gap-line);
+    background: var(--gap-bg);
+    color: var(--gap);
+  }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .check .title {
+    font-weight: 700;
+    font-size: 16.5px;
+    letter-spacing: -0.01em;
+    margin: 1px 0 0;
+  }
+  .check .title .rfc {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+  .check .body { grid-column: 2; }
+  .check .means { margin: 4px 0 0; color: var(--ink-soft); font-size: 14.5px; }
+  .check .proof {
+    margin: 11px 0 0;
+    padding-top: 10px;
+    border-top: 1px dashed var(--line);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  .check .proof .k {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    font-size: 10.5px;
+    margin-right: 8px;
+  }
+  .check .proof em { color: var(--teal); font-style: normal; }
+
+  @media (max-width: 560px) {
+    .check { grid-template-columns: 1fr; }
+    .check .pill { grid-row: auto; margin-bottom: 4px; }
+    .check .body { grid-column: 1; }
+    .check .title .rfc { display: block; margin: 4px 0 0; }
+  }
+
+  /* ---- the open decision ---- */
+  .decision {
+    background: linear-gradient(180deg, #fdf7ea 0%, var(--card) 60%);
+    border: 1px solid var(--gap-line);
+    border-radius: 12px;
+    padding: 24px 26px;
+  }
+  .decision h3 {
+    margin: 0 0 4px;
+    font-size: 19px;
+    letter-spacing: -0.015em;
+  }
+  .decision > p { margin: 0 0 18px; color: var(--ink-soft); font-size: 15px; }
+  .decision > p code, .check code, .model code, .foot code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--teal-wash);
+    color: var(--teal);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .opt {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 15px 17px;
+  }
+  .opt .h {
+    display: flex; align-items: center; gap: 9px;
+    font-weight: 700; font-size: 15px; margin-bottom: 7px;
+  }
+  .opt .badge {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.06em; padding: 2px 7px; border-radius: 5px;
+    background: var(--teal); color: #fff;
+  }
+  .opt.b .badge { background: var(--opt); }
+  .opt p { margin: 0; font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; }
+  .decision .ask {
+    margin: 18px 0 0; padding: 13px 16px;
+    background: var(--card); border: 1px dashed var(--gap-line); border-radius: 8px;
+    font-size: 14.5px; color: var(--ink);
+  }
+  .decision .ask b { color: var(--gap); }
+
+  /* ---- footer: conscious non-requirements ---- */
+  .foot { margin-top: 40px; }
+  .notreq { display: flex; flex-direction: column; gap: 11px; }
+  .nr {
+    display: grid; grid-template-columns: 132px 1fr; gap: 16px;
+    padding: 13px 0; border-bottom: 1px solid var(--line-soft);
+    font-size: 14px;
+  }
+  .nr:last-child { border-bottom: none; }
+  .nr .label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--opt);
+    padding-top: 2px;
+  }
+  .nr .txt { color: var(--ink-soft); }
+  .nr .txt b { color: var(--ink); }
+
+  .sig {
+    margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 6px 18px;
+  }
+  @media (max-width: 560px) { .nr { grid-template-columns: 1fr; gap: 3px; } }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">route10 · brazilian fiber edge · verified 2026-07-18</p>
+  <h1>Your IPv6 dual-stack is <span class="thin">already at</span> gold standard.</h1>
+
+  <div class="verdict">
+    <div class="verdict-lead">
+      <strong>The LAN scores clean.</strong>
+      <p>Every gold-standard property that makes IPv6 <em>good</em> — real public addresses, no NAT, prefix-rotation survival, v6-preferred DNS — is live on the router right now. The single open item is a mesh egress feature, not the dual-stack itself.</p>
+    </div>
+    <div class="score">
+      <div class="stat live"><span class="n">7</span><span class="l">Live</span></div>
+      <div class="stat gap"><span class="n">1</span><span class="l">Open · mesh</span></div>
+    </div>
+  </div>
+
+  <div class="sec"><h2>The model in one breath</h2><div class="rule"></div></div>
+  <div class="model">
+    <p><b>Dual-stack</b> means every device speaks both IPv4 and IPv6 and picks the better one per destination. <b>Gold standard</b> means the IPv6 half is <b>first-class</b> — a real public address per device, secured by firewall instead of hidden behind NAT, and resilient when your ISP rotates the prefix. You run three address families, each with one job:</p>
+    <div class="fams">
+      <div class="fam">
+        <span class="tag">Public · from ISP</span>
+        <div class="name">GUA</div>
+        <span class="addr">2804:2488:5082:7300::/64</span>
+        <p class="role">Globally routable, one per device. The real internet address — but the ISP <b>rotates it</b>, so nothing durable is pinned to it.</p>
+      </div>
+      <div class="fam">
+        <span class="tag">Private · yours forever</span>
+        <div class="name">ULA</div>
+        <span class="addr">fd5f:d7ef:9c25:10::/64</span>
+        <p class="role">Stable, internal-only, provider-independent. The address services and the mesh point at, because it never changes when the ISP churns.</p>
+      </div>
+      <div class="fam">
+        <span class="tag">Overlay · Tailscale</span>
+        <div class="name">Tailnet</div>
+        <span class="addr">fd7a:115c:a1e0::/48</span>
+        <p class="role">Mesh identity for remote peers. Reaches your LAN through route10 as a subnet router — never touches the public internet.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec"><h2>Gold-standard checklist</h2><div class="rule"></div></div>
+  <div class="checks">
+
+    <div class="check">
+      <span class="pill"><span class="dot"></span>Live</span>
+      <p class="title">Real public address per device — no NAT</p>
+      <div class="body">
+        <p class="means">The whole point of IPv6: every LAN host SLAACs a genuine GUA from the delegated <code>/60</code> and reaches the internet end-to-end. No connection-sharing, no CGNAT on this side.</p>
+        <p class="proof"><span class="k">proof</span> <code>ping -6</code> from LAN GUA → Cloudflare: <em>0% loss, 9.5 ms</em>. Real egress, live.</p>
+      </div>
+    </div>
+
+    <div class="check">
+      <span class="pill"><span class="dot"></span>Live</span>
+      <p class="title">Security by firewall, not NAT <span class="rfc">default-deny inbound</span></p>
+      <div class="body">
+        <p class="means">In v6 you don't hide behind address translation — a real address is exposed only if you choose to open it. Everything inbound is denied unless it's a reply you asked for.</p>
+        <p class="proof"><span class="k">proof</span> <code>FORWARD policy DROP</code> · LAN→WAN allowed, WAN→LAN <em>denied</em> by default.</p>
+      </div>
+    </div>
+
+    <div class="check">
+      <span class="pill"><span class="dot"></span>Live</span>
+      <p class="title">Stable internal addressing alongside public <span class="rfc">RFC 4193 ULA</span></p>
+      <div class="body">
+        <p class="means">A second, private prefix that never changes. It's what you pin services and DNS to, so a churning ISP prefix can't break your internal wiring. Most home setups skip this — you didn't.</p>
+        <p class="proof"><span class="k">proof</span> br-lan carries GUA <em>and</em> <code>fd5f:…:10::1/64</code> · dual-prefix SLAAC to every client.</p>
+      </div>
+    </div>
+
+    <div class="check">
+      <span class="pill"><span class="dot"></span>Live</span>
+      <p class="title">Survives ISP prefix rotation <span class="rfc">RFC 9096 deprecation</span></p>
+      <div class="body">
+        <p class="means">The hard part of residential v6, and where nearly everyone fails: when the ISP swaps your prefix, the dead one must be actively <em>deprecated</em> or clients cling to it for up to 24 h and hang. Your router does this automatically.</p>
+        <p class="proof"><span class="k">proof</span> <code>lan-prefix-track</code> + <code>ra-deprecate</code> on a 1-min cron · current prefix tracked in state.</p>
+      </div>
+    </div>
+
+    <div class="check">
+      <span class="pill"><span class="dot"></span>Live</span>
+      <p class="title">IPv6 actually wins <span class="rfc">RFC 6724</span></p>
+      <div class="body">
+        <p class="means">Dual-stack only pays off if clients <em>prefer</em> v6. A ULA alone can't — the rules rank it below IPv4. A GUA service address outranks IPv4, so v6 becomes the default path. This just landed via the homelab GUA VIP.</p>
+        <p class="proof"><span class="k">proof</span> AAAA → GUA VIP (precedence <em>40 &gt; 35</em> for IPv4) · on-LAN clients now reach services over v6 first.</p>
+      </div>
+    </div>
+
+    <div class="check">
+      <span class="pill"><span class="dot"></span>Live</span>
+      <p class="title">DNS is dual-stack &amp; Android-safe <span class="rfc">RFC 8106 RDNSS</span></p>
+      <div class="body">
+        <p class="means">A truly dual-stack client needs a v6 resolver too — and Android refuses DHCPv6, so the resolver must also ride in the router advertisement. Both paths are covered here.</p>
+        <p class="proof"><span class="k">proof</span> v6 resolver <code>fd5f:…::241</code> handed via DHCPv6 <em>and</em> RDNSS-in-RA · split-horizon VIP per source.</p>
+      </div>
+    </div>
+
+    <div class="check">
+      <span class="pill"><span class="dot"></span>Live</span>
+      <p class="title">No MTU blackholes <span class="rfc">MSS clamp · PPPoE 1492</span></p>
+      <div class="body">
+        <p class="means">PPPoE caps the link below Ethernet's 1500. Without a guard, large v6 flows silently stall. The router rewrites the TCP segment size on the way through so nothing hangs.</p>
+        <p class="proof"><span class="k">proof</span> <code>TCPMSS --clamp-mss-to-pmtu</code> on <code>pppoe-wan3</code>, both directions · 1492 honored.</p>
+      </div>
+    </div>
+
+    <div class="check is-gap">
+      <span class="pill"><span class="dot"></span>Open</span>
+      <p class="title">IPv6 egress over the mesh <span class="rfc">exit node · v6</span></p>
+      <div class="body">
+        <p class="means">The one gap — and it's mesh-only, not your LAN. route10 advertises itself as a v6 exit but can't serve it: the ISP hands the WAN link no global address (delegation only), so there's nothing to translate to. A peer that picks route10 as its exit gets working v4 and silently dead v6.</p>
+        <p class="proof"><span class="k">status</span> raised with homelab-core (msg&nbsp;12) · <em>fix, or stop advertising it</em> — decision below.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="sec"><h2>The one open decision</h2><div class="rule"></div></div>
+  <div class="decision">
+    <h3>v6 exit node — close it one way or the other</h3>
+    <p>Advertising a capability the router can't fulfill is the real problem; both endings are clean, and the choice hinges on one question only you and the homelab can answer.</p>
+    <div class="opts">
+      <div class="opt a">
+        <div class="h"><span class="badge">A · Fix</span> Make v6 exit work</div>
+        <p>SNAT the tailnet prefix to an address out of the current <code>/60</code>, re-derived on each rotation. Cheap — it reuses the prefix-tracker you already run. All route10-side, no homelab change.</p>
+      </div>
+      <div class="opt b">
+        <div class="h"><span class="badge">B · Drop</span> Stop advertising it</div>
+        <p>Don't offer a v6 exit at all. Zero plumbing — but Tailscale bundles v4+v6 exit, so it depends on whether Headscale can advertise a v4-only exit. That's the question out to ops.</p>
+      </div>
+    </div>
+    <p class="ask"><b>Deciding question →</b> does anyone actually want to route their internet traffic <em>out through home over IPv6</em>? Yes → build A. Just aspirational → do B. Until then it's latent, not live-broken (nobody selects route10 as an exit today).</p>
+  </div>
+
+  <div class="sec foot"><h2>What gold standard does <em>not</em> require here</h2><div class="rule"></div></div>
+  <div class="notreq">
+    <div class="nr">
+      <div class="label">Conscious trade</div>
+      <div class="txt"><b>NAT66 on the mesh path.</b> Purists say never translate v6 — but advertising a <em>churning</em> GUA into the overlay is worse than one stable ULA hop. This is a deliberate, correct exception, not a lapse.</div>
+    </div>
+    <div class="nr">
+      <div class="label">Optional</div>
+      <div class="txt"><b>Inbound pinholes.</b> You can expose a specific service on its public v6 with a firewall hole. You have none yet — and default-deny is the right posture until you actually want to publish something. A feature to add, not a gap.</div>
+    </div>
+    <div class="nr">
+      <div class="label">Not your job</div>
+      <div class="txt"><b>Privacy / temporary addresses.</b> Rotating outbound addresses for privacy is handled by each client OS (on by default in modern ones), not the router.</div>
+    </div>
+  </div>
+
+  <div class="sig">
+    <span>route10 → ODI stick → GPON → ISP OLT</span>
+    <span>7 live · 1 open (mesh)</span>
+    <span>grounded on live router state</span>
+  </div>
+</div>
