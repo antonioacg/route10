@@ -364,11 +364,13 @@ fi
 #         forwarded to the homelab syslog collector once log_ip is set),
 #   BLOCK rejects further NEW flows so no single host can run the CGNAT table dry.
 # Only --ctstate NEW is matched, so ESTABLISHED flows are never touched and
-# under-limit hosts are unaffected — a capped host just can't open MORE. Applied
-# to BOTH families: v4 is the actual CGNAT fix; v6 has no CGNAT so its cap is
-# defense-in-depth (a rogue host still can't flood upstream / fill our conntrack).
-# v6 groups per /128, so a client spreading load across SLAAC privacy addresses
-# is undercounted — acceptable, since v6 is not the exhaustion vector.
+# under-limit hosts are unaffected — a capped host just can't open MORE. v4 ONLY:
+# the exhaustion vector is the ISP's per-subscriber CGNAT session table, which is
+# v4-only — v6 has native per-device GUAs and no CGNAT. We deliberately do NOT cap
+# v6: there is no upstream table to exhaust, route10's own conntrack is sized far
+# above any single host's swarm, and a per-/128 connlimit is trivially evaded via
+# SLAAC privacy addresses anyway (while a per-/64 mask would wrongly meter the whole
+# LAN as one host). v6 cap removed 2026-07-20 — it guarded a non-vector.
 #
 # Portal-inexpressible (advanced firewall) → belongs here, not the Alta dashboard
 # (portal-first rule). Implemented as direct iptables into a dedicated chain,
@@ -430,7 +432,6 @@ install_connlimit_guard() {
     fi
 }
 install_connlimit_guard iptables  32  icmp-port-unreachable
-install_connlimit_guard ip6tables 128 icmp6-port-unreachable
 
 # ── WAN default-route hook (netifd proto_set_keep reconnect bug) ─────────────
 # netifd drops the WAN default route on PPP reconnect: its cache still believes
