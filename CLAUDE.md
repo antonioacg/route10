@@ -73,18 +73,34 @@ telnet probes — they orphan the lock too.
      `route-defaultroute-hook.sh` ip-up.d symlink + `* * * * *` cron, and the
      `lan-prefix-track.sh` hotplug hook (`/etc/hotplug.d/iface/89-lan-prefix`,
      fires on `ifupdate`) + `* * * * *` cron backstop (stale-IPv6-prefix deprecation).
-  7. **Per-host connlimit guard** (`RT10_CONNLIMIT` chain, v4+v6): caps concurrent
+  7. **Per-host connlimit guard** (`RT10_CONNLIMIT` chain, per-family): caps concurrent
      NEW connections per LAN host on the `br-lan → pppoe-wan3` path (internet-bound
-     only; `--ctstate NEW`, so established/LAN/mesh traffic is untouched) — WARN 500
-     (LOG, tag `route10.connlimit`), BLOCK 800 (REJECT: TCP `tcp-reset` / else ICMP
-     `port-unreachable` → client sees "Connection refused", not the misleading "Host
-     unreachable"). Stops one rogue client (a torrent swarm) from exhausting the ISP
-     CGNAT NAT-session table and starving everyone else's v4 (EHOSTUNREACH). Thresholds
-     tunable at the top of the block; keep BLOCK <~900 (proven-safe ceiling — CGNAT
-     starved at ~1400). Direct iptables (no fw3 reload → no eth4 flap); `-w` on every
-     call (the backgrounded tailscale hook also edits iptables); a marker rule gates
-     the rebuild so a re-run doesn't reset the cap mid-flood. See
+     only; `--ctstate NEW`, so established/LAN/mesh traffic is untouched). REJECT is TCP
+     `tcp-reset` / else ICMP `port-unreachable` → client sees "Connection refused", not
+     the misleading "Host unreachable". **Per-family thresholds** (two families, two
+     jobs): **v4 WARN 300 / BLOCK 500** — tight, the real fix: stops a rogue client
+     (torrent swarm) from exhausting the ISP CGNAT NAT-session table and starving
+     everyone else's v4 (EHOSTUNREACH); keep BLOCK <~900 (800 caused an outage, CGNAT
+     starved at ~1400). **v6 WARN 1000 / BLOCK 2000** — loose, a pure anomaly *smell*
+     (route10 conntrack is 500k, never the bottleneck; v6 has no CGNAT): WARN logs a
+     wildly abnormal host, BLOCK is a runaway stop that ~never fires; per-/128 so SLAAC
+     privacy addresses evade it — fine for a smell, not a hard cap. Thresholds tunable at
+     the top of the block. Direct iptables (no fw3 reload → no eth4 flap); `-w` on every
+     call (the backgrounded tailscale hook also edits iptables); a per-family marker rule
+     gates the rebuild so a re-run doesn't reset the cap mid-flood. See
      `project_route10_cgnat_torrent_exhaustion.md`.
+  8. **LAN DNS — route10 as the sole resolver** (`dhcp.@dnsmasq[0]`): forwards
+     `strict-order` (allservers off) **AdGuard `.241`/`::241` first → encrypted DoH
+     (`127.0.0.1#505x`, Cloudflare/Google/OpenDNS) fallback**; pins `/net.aac.gd/` to
+     AdGuard only (inside names SERVFAIL, never leak the `192.0.2.1` stub, if AdGuard is
+     down); `add-subnet` (ECS, via a `/tmp/dnsmasq.d` drop-in — no uci mapping on this
+     build) so single-box AdGuard keeps per-client identity through the forwarder.
+     WAN-safe (`dnsmasq reload` only). Values `$LAN_DNS4`/`$LAN_DNS6`/`$SPLIT_DOMAIN`
+     come from `/cfg/seam.env` (contract §LAN DNS delegation), never hardcoded — absent
+     ⇒ clean no-op. Clients are pointed here via the **Alta portal DNS-Servers field left
+     BLANK** ⇒ router advertises v4 `.1` + v6 **link-local** (`fe80::…`, MAC-derived,
+     rotation-proof — NOT the GUA). Tailscale `accept-dns` devices bypass this (MagicDNS:
+     split `net.aac.gd`→AdGuard, global→Cloudflare). See `project_route10_dns_resolver.md`.
 
 ## Observability standard
 
