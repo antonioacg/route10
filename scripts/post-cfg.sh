@@ -364,13 +364,18 @@ fi
 #         forwarded to the homelab syslog collector once log_ip is set),
 #   BLOCK rejects further NEW flows so no single host can run the CGNAT table dry.
 # Only --ctstate NEW is matched, so ESTABLISHED flows are never touched and
-# under-limit hosts are unaffected — a capped host just can't open MORE. v4 ONLY:
-# the exhaustion vector is the ISP's per-subscriber CGNAT session table, which is
-# v4-only — v6 has native per-device GUAs and no CGNAT. We deliberately do NOT cap
-# v6: there is no upstream table to exhaust, route10's own conntrack is sized far
-# above any single host's swarm, and a per-/128 connlimit is trivially evaded via
-# SLAAC privacy addresses anyway (while a per-/64 mask would wrongly meter the whole
-# LAN as one host). v6 cap removed 2026-07-20 — it guarded a non-vector.
+# under-limit hosts are unaffected — a capped host just can't open MORE. Two
+# families, two jobs, so thresholds differ (set below):
+#   v4 = TIGHT CGNAT defense. The exhaustion vector is the ISP's per-subscriber
+#        CGNAT session table — v4-only (v6 has native per-device GUAs, no CGNAT).
+#   v6 = LOOSE anomaly SMELL. No CGNAT to protect, and route10's conntrack table is
+#        500k (verified 2026-07-20 — never the bottleneck), so the v6 tier exists
+#        only as a "something is very wrong" signal: WARN logs a host opening a
+#        wildly abnormal number of flows (compromised / runaway app), with a high
+#        BLOCK as a last-ditch runaway stop that ~never fires. Set well above any
+#        legit heavy host so it never false-positives. Per-/128 catches the common
+#        single-address case; a client spraying SLAAC privacy addresses evades it —
+#        fine for a smell heuristic, not a hard cap.
 #
 # Portal-inexpressible (advanced firewall) → belongs here, not the Alta dashboard
 # (portal-first rule). Implemented as direct iptables into a dedicated chain,
@@ -386,15 +391,15 @@ fi
 # heavy desktop rarely exceeds ~300. Going laxer trades LAN-wide CGNAT safety for
 # one host's torrent headroom — 800 was too lax and caused the outage above. The
 # durable fix is taming the client (peer-limit) or moving it to IPv6 (no CGNAT).
-CONNLIMIT_WARN=300
-CONNLIMIT_BLOCK=500
+CONNLIMIT_V4_WARN=300;  CONNLIMIT_V4_BLOCK=500    # v4: tight — ISP CGNAT ceiling (800 caused an outage; keep <~900)
+CONNLIMIT_V6_WARN=1000; CONNLIMIT_V6_BLOCK=2000   # v6: loose — anomaly smell only (conntrack_max is 500k)
 install_connlimit_guard() {
     # -w: wait for the xtables lock. post-cfg launches the tailscale boot hook in
     # the background (top of file), which also edits iptables; without -w our
     # calls race it, fail, and get swallowed by `|| true`, leaving the guard half
     # applied (confirmed 2026-07-18: missing v6 jump + duplicated rules).
-    ipt="$1 -w 10"; mask=$2; icmpreject=$3
-    mark="route10-connlimit-w${CONNLIMIT_WARN}b${CONNLIMIT_BLOCK}"
+    ipt="$1 -w 10"; mask=$2; icmpreject=$3; warn=$4; block=$5
+    mark="route10-connlimit-w${warn}b${block}"
     $ipt -N RT10_CONNLIMIT 2>/dev/null || true
     # Rebuild the chain ONLY when it is absent or the thresholds changed — the
     # trailing marker rule encodes the active WARN/BLOCK. Skipping an unchanged
@@ -405,7 +410,7 @@ install_connlimit_guard() {
         $ipt -F RT10_CONNLIMIT 2>/dev/null || true
         # WARN: log (rate-limited, non-terminating) — the "rogue client" smell signal.
         $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
-            -m connlimit --connlimit-above "$CONNLIMIT_WARN" --connlimit-mask "$mask" --connlimit-saddr \
+            -m connlimit --connlimit-above "$warn" --connlimit-mask "$mask" --connlimit-saddr \
             -m limit --limit 6/hour --limit-burst 5 \
             -j LOG --log-prefix "route10.connlimit warn: " --log-level warning 2>/dev/null || true
         # BLOCK: reject further NEW flows from an over-cap host (existing flows survive).
@@ -417,10 +422,10 @@ install_connlimit_guard() {
         # misleading "Host is unreachable" — the string the ISP CGNAT sent when IT
         # starved us. The real "why" lives in the route10.connlimit WARN log above.
         $ipt -A RT10_CONNLIMIT -p tcp -m conntrack --ctstate NEW \
-            -m connlimit --connlimit-above "$CONNLIMIT_BLOCK" --connlimit-mask "$mask" --connlimit-saddr \
+            -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
             -j REJECT --reject-with tcp-reset 2>/dev/null || true
         $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
-            -m connlimit --connlimit-above "$CONNLIMIT_BLOCK" --connlimit-mask "$mask" --connlimit-saddr \
+            -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
             -j REJECT --reject-with "$icmpreject" 2>/dev/null || true
         # Marker: encodes the active thresholds so the next run can skip an unchanged
         # rebuild. RETURN is a no-op (the chain returns at its end anyway).
@@ -431,7 +436,8 @@ install_connlimit_guard() {
         $ipt -I FORWARD 1 -i br-lan -o pppoe-wan3 -j RT10_CONNLIMIT 2>/dev/null || true
     fi
 }
-install_connlimit_guard iptables  32  icmp-port-unreachable
+install_connlimit_guard iptables  32  icmp-port-unreachable  "$CONNLIMIT_V4_WARN" "$CONNLIMIT_V4_BLOCK"
+install_connlimit_guard ip6tables 128 icmp6-port-unreachable "$CONNLIMIT_V6_WARN" "$CONNLIMIT_V6_BLOCK"
 
 # ── WAN default-route hook (netifd proto_set_keep reconnect bug) ─────────────
 # netifd drops the WAN default route on PPP reconnect: its cache still believes
