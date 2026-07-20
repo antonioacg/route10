@@ -252,6 +252,21 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
     if ! grep -qs '^add-subnet=32,128$' "$ECS_CONF"; then
         mkdir -p /tmp/dnsmasq.d && printf 'add-subnet=32,128\n' > "$ECS_CONF"; DNS_DIRTY=1
     fi
+    # Mesh split-DNS (seam point 3): let dnsmasq also ANSWER on tailscale0 so a mesh
+    # client pointed at route10 (Headscale split-DNS net.aac.gd -> 192.168.10.1, via
+    # the advertised subnet route) gets this same AdGuard-first + DoH chain instead of
+    # hitting AdGuard .241 directly with no fallback. dnsmasq is interface=br-lan +
+    # bind-dynamic, so it neither binds the tailnet address nor accepts a query that
+    # INGRESSES on tailscale0 (even one destined to the br-lan .1) — bind-dynamic does
+    # per-arrival-interface access control. Adding tailscale0 to the interface list
+    # fixes both (binds 100.64.0.2/fd7a::2 AND accepts .1-dest arrivals on tailscale0).
+    # Firewall already accepts it (-A INPUT -i tailscale0 -j ACCEPT). DNS-only — DHCP/RA
+    # is driven by the `config dhcp` sections (dhcp.lan->'lan'), not this list. Guarded
+    # on tailscale0 existing; bind-dynamic tolerates the iface coming/going.
+    if [ -d /sys/class/net/tailscale0 ] \
+       && ! uci -q get dhcp.@dnsmasq[0].interface 2>/dev/null | grep -qw tailscale0; then
+        uci add_list dhcp.@dnsmasq[0].interface='tailscale0'; DNS_DIRTY=1
+    fi
     if [ "$DNS_DIRTY" = "1" ]; then
         uci commit dhcp
         # reload, NOT restart — re-reads uci + conf-dir without an interface bounce.
