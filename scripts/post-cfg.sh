@@ -496,6 +496,22 @@ if [ -x "$TRACK" ]; then
     fi
 fi
 
+# ── mesh drift smoke tests (tailscale ACL enforcement) ───────────────────────
+# mesh-health.sh asserts every 5 min that (1) tailscaled isn't running a stale/
+# deleted binary and (2) the compiled ACL filter admits every advertised subnet
+# route. Catches the 2026-07-20 failure class — a stale daemon silently dropping
+# all mesh→subnet traffic while the policy still granted it (declared intent vs
+# live enforcement). Cron-driven, quiet when healthy, no daemon; reinstalled each
+# boot (/etc is tmpfs), same idiom as the hooks above. See scripts/mesh-health.sh
+# + project_route10_tailscale_stale_binary_filter.md.
+MESHHEALTH=/cfg/scripts/mesh-health.sh
+if [ -x "$MESHHEALTH" ]; then
+    if ! grep -qF "$MESHHEALTH" /etc/crontabs/root 2>/dev/null; then
+        echo "*/5 * * * * $MESHHEALTH" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── daemons ────────────────────────────────────────────────────────────────
 # Idempotent launchers — only start each daemon if not already running.
 # pgrep -f matches the full command line, including the script path, so the

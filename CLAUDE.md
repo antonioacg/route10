@@ -48,6 +48,15 @@ telnet probes — they orphan the lock too.
   *preferred* address for up to 24 h. Quiet when healthy. Log:
   `/cfg/scripts/prefix-track.log`. Sources: `scripts/lan-prefix-track.sh` +
   `scripts/ra-deprecate.py`. See `project_route10_stale_ipv6_prefix.md`.
+- `/cfg/scripts/mesh-health.sh` — `*/5` cron, no daemon. Tailscale mesh DRIFT smoke
+  tests (quiet when healthy, WARN on drift): (1) tailscaled isn't running a stale/
+  DELETED binary and running-version == on-disk-version; (2) the compiled ACL
+  packet filter admits every advertised subnet route (LAN /24 + ULA /64) — i.e. the
+  Headscale policy grant is actually *enforced* in the live filter, not silently
+  dropped. Expected grants are derived from route10's own `AdvertiseRoutes` (minus
+  the exit-node defaults), asserted on DSTs never SRCs (srcs churn). Guards against
+  the 2026-07-20 stale-daemon recurrence. Log: `/cfg/scripts/mesh-health.log`.
+  Source: `scripts/mesh-health.sh`. See `project_route10_tailscale_stale_binary_filter.md`.
 - `/cfg/post-cfg.sh` — runs after every Alta cloud-config reapply. Source:
   `scripts/post-cfg.sh`. **Idempotent**. Jobs:
   1. **MACVLAN mgmt-path** (`ont_mgmt0` on eth4, `192.168.1.2/24`,
@@ -123,7 +132,7 @@ functions would leak into sibling hooks); they call `logger` inline with the sam
 `route10.<component>` tag.
 
 Tag convention `route10.<component>`. On the standard: `prefix-track`, `route-hook`,
-`odi-health`, `dhcp-watchdog`, `w2-ddm`. Check:
+`odi-health`, `dhcp-watchdog`, `w2-ddm`, `mesh-health`. Check:
 `ssh route10 'grep route10. /var/log/messages | tail'`.
 
 ## Current open investigations
