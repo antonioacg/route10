@@ -194,6 +194,71 @@ if [ -n "$LAN_ULA" ] && ! uci -q get network.lan.ip6addr 2>/dev/null | grep -q "
     /etc/init.d/network reload >/dev/null 2>&1 || true
 fi
 
+# ── LAN DNS: route10 as the SOLE resolver — AdGuard-first, strict-order fallback ─
+# The Alta cloud hands clients TWO co-equal resolvers (AdGuard + Cloudflare). A
+# client-side secondary is NOT failover: OSes race / round-robin them, so a client
+# intermittently queries the public resolver directly and gets the split-horizon
+# STUB (e.g. searxng.$SPLIT_DOMAIN → 192.0.2.1 → hang — the "searxng drops" report).
+# Fix: advertise ONLY route10 as the resolver (Alta portal DNS-Servers field → the
+# router itself) and let route10 do deterministic failover here:
+#   - strict-order: AdGuard first for EVERYTHING (ad-block + split-horizon always
+#     win), then encrypted DoH (Cloudflare/Google/OpenDNS, route10-local) as a
+#     public-name availability net for when AdGuard is fully down.
+#   - pin $SPLIT_DOMAIN to AdGuard ONLY (v4+v6): inside-view names never reach a
+#     public resolver, so they SERVFAIL (not the misleading 192.0.2.1 stub/hang)
+#     during an AdGuard outage — the services behind them are down then anyway.
+#   - ECS (add-subnet): once route10 (.1) is the forwarder, single-box AdGuard would
+#     see one source and lose per-client identity; add-subnet re-injects the client
+#     subnet so AdGuard can identify clients again (ops enables ECS consumption).
+# WAN-safe: `dnsmasq reload` only (re-reads uci + conf-dir) — no fw3/network reload,
+# no eth4 flap. The cloud resets the upstream to DoH-only each boot, so this
+# re-asserts on every post-cfg run (idempotent; reloads only on a real diff).
+#
+# Contract values ($LAN_DNS4/$LAN_DNS6 = AdGuard resolver VIPs, $SPLIT_DOMAIN = the
+# split-horizon zone) come from /cfg/seam.env — NEVER hardcoded here (no second
+# authority; same rule as $LAN_ULA above). Absent → clean no-op: route10 keeps its
+# cloud-set upstream, exactly today's behaviour. The 127.0.0.1#505x DoH fallbacks
+# are route10-local (https-dns-proxy instances), not contract values.
+if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
+    # Upstream policy, in strict order (see above): pin(v4) pin(v6) AdGuard(v4)
+    # AdGuard(v6) DoH-cf DoH-google DoH-opendns.
+    set -- \
+        "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" \
+        "$LAN_DNS4" "$LAN_DNS6" \
+        "127.0.0.1#5054" "127.0.0.1#5053" "127.0.0.1#5055"
+    DNS_DIRTY=0
+    # server list — rewrite only if it differs (cloud resets it to DoH-only each boot).
+    want=$(printf '%s\n' "$@")
+    have=$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | tr ' ' '\n' || true)
+    if [ "$want" != "$have" ]; then
+        uci -q delete dhcp.@dnsmasq[0].server 2>/dev/null || true
+        for s in "$@"; do uci add_list dhcp.@dnsmasq[0].server="$s"; done
+        DNS_DIRTY=1
+    fi
+    # strict-order ON, allservers OFF. Cloud ships allservers='1' (parallel query) —
+    # that would let a DoH fallback beat AdGuard and return the stub. Both required.
+    [ "$(uci -q get dhcp.@dnsmasq[0].strictorder 2>/dev/null || true)" = "1" ] || { uci set dhcp.@dnsmasq[0].strictorder=1; DNS_DIRTY=1; }
+    [ "$(uci -q get dhcp.@dnsmasq[0].allservers  2>/dev/null || true)" = "0" ] || { uci set dhcp.@dnsmasq[0].allservers=0;  DNS_DIRTY=1; }
+    # rebind allow-list: AdGuard returns a PRIVATE v4 (.240) for the PUBLIC
+    # $SPLIT_DOMAIN — textbook DNS-rebind shape. Allow it so the answer survives if
+    # rebind_protection is ever enabled (keeps the cloud's /manage.alta.inc/ entry).
+    if ! uci -q get dhcp.@dnsmasq[0].rebind_domain 2>/dev/null | grep -qF "/$SPLIT_DOMAIN/"; then
+        uci add_list dhcp.@dnsmasq[0].rebind_domain="/$SPLIT_DOMAIN/"; DNS_DIRTY=1
+    fi
+    # ECS: no uci mapping for add-subnet on this dnsmasq build (only addmac), so
+    # write it into the conf-dir dnsmasq already includes (/tmp/dnsmasq.d). /tmp is
+    # tmpfs → recreate each run, same boot-reinstall idiom as the hooks below.
+    ECS_CONF=/tmp/dnsmasq.d/10-route10-ecs.conf
+    if ! grep -qs '^add-subnet=32,128$' "$ECS_CONF"; then
+        mkdir -p /tmp/dnsmasq.d && printf 'add-subnet=32,128\n' > "$ECS_CONF"; DNS_DIRTY=1
+    fi
+    if [ "$DNS_DIRTY" = "1" ]; then
+        uci commit dhcp
+        # reload, NOT restart — re-reads uci + conf-dir without an interface bounce.
+        /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── mwan3 flush_conntrack — drop 'connected' / 'disconnected' ──────────────
 # Alta ships `flush_conntrack = ['ifup','ifdown','connected','disconnected']`
 # in their cloud-config generator for every WAN interface. Upstream OpenWrt
