@@ -275,6 +275,12 @@ protocol = "udp"
 [groups.failback]
 type = "fail-back"
 resolvers = ["adguard", "doh-fallback"]
+# Default reset-after is 60s: ONE AdGuard timeout blackholes ALL DNS to DoH
+# (ad-block OFF) for a full minute. 10s bounds a residual transient blip's
+# ad-block bypass to seconds while still not hammering a genuinely-down AdGuard.
+# (The dominant timeout source — DNS-SD reverse junk — is now answered locally by
+# dnsmasq before it ever reaches here; see the REV_LOCAL zones in the DNS job.)
+reset-after = 10
 
 [listeners.local-udp]
 address = "127.0.0.1:5300"
@@ -331,10 +337,20 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
     # SERVFAIL, never a stub-leak, when AdGuard is down); everything else → routedns
     # (health-gated failover). If routedns is unavailable, degrade to the old direct
     # AdGuard+DoH chain rather than point dnsmasq at a dead upstream.
+    # Answer RFC1918 + link-local REVERSE zones locally (NXDOMAIN, never forward).
+    # `bogus-priv` already does this for CANONICAL reverse names, but Apple/Bonjour
+    # DNS-SD browse queries (`db._dns-sd._udp.87.64.189.10.in-addr.arpa`) carry a
+    # prefix that defeats bogus-priv's IP parser, so they leaked to routedns →
+    # AdGuard → a silent upstream → TIMEOUT. Each timeout tripped routedns's
+    # fail-back to DoH (ad-block OFF for reset-after), and these fire every few
+    # seconds → ad-block was near-permanently bypassed + the routedns log flooded
+    # (2026-07-22 finding). A suffix-match local zone catches the prefixed form the
+    # IP-parser misses. Empty server (`/zone/` with nothing after) = local-only.
+    REV_LOCAL="/10.in-addr.arpa/ /168.192.in-addr.arpa/ /254.169.in-addr.arpa/"
     if [ -n "$RDNS_GENERAL" ]; then
-        set -- "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" "$RDNS_GENERAL"
+        set -- $REV_LOCAL "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" "$RDNS_GENERAL"
     else
-        set -- \
+        set -- $REV_LOCAL \
             "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" \
             "$LAN_DNS4" "$LAN_DNS6" \
             "127.0.0.1#5054" "127.0.0.1#5053" "127.0.0.1#5055"
