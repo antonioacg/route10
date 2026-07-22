@@ -29,15 +29,21 @@ set -e
 # below is a clean no-op. Render it on the router from the contract; never here.
 [ -f /cfg/seam.env ] && . /cfg/seam.env
 
-# ── tailscale mesh boot hook (INFRA-68) ──────────────────────────────────────
-# Launch the Tailscale boot script if installed. It re-creates the tmpfs-wiped
-# /etc/init.d/tailscale, re-adds the tailscale0 firewall + WAN MASQUERADE
-# (WAN_IFACE=pppoe-wan3), and starts tailscaled — internet-waiting and
-# self-reverting on failure. Idempotent; absent file = clean no-op. Installed by
-# the route10-owned fork antonioacg/alta-route10-tailscale, whose installer also
-# adds this same line to the live /cfg/post-cfg.sh — keeping it here is what
-# survives a future post-cfg redeploy (drift protection).
-[ -x /cfg/tailscale-post-cfg.sh ] && /cfg/tailscale-post-cfg.sh &
+# ── tailscale mesh reconcile (native daemon, INFRA-68) ───────────────────────
+# Alta firmware (≥ the 2026-07-22 auto-update) ships tailscale natively
+# (/usr/sbin/tailscaled + /etc/init.d/tailscale, uci-configured; NOT cloud-
+# modeled, NOT rc.d-enabled — nothing starts it unless we do).
+# tailscale-reconcile.sh is the single owner of the integration: uci config
+# (state under persistent /cfg, advertised routes derived from br-lan +
+# seam.env), daemon start/reload via the FIRMWARE init, tailscale0 firewall
+# accepts + NAT both families, and the br-lan GRO fix. Idempotent, quiet
+# no-op when converged, and — deliberately — NO connectivity gate and NO
+# revert path: the retired sideload boot hook (/cfg/tailscale-post-cfg.sh,
+# fork alta-route10-tailscale) deleted all its rules when one ping to 8.8.8.8
+# failed, which caused the 2026-07-22 mesh outage (this ISP path ICMP-rate-
+# limits anycast). mesh-health.sh (*/5 cron) re-runs it as the self-heal
+# whenever it detects drift, so a mid-flap failure here converges in ≤5 min.
+[ -x /cfg/scripts/tailscale-reconcile.sh ] && /cfg/scripts/tailscale-reconcile.sh || true
 
 # ── network ────────────────────────────────────────────────────────────────
 uci set network.ont_mgmt_dev=device
@@ -469,10 +475,11 @@ fi
 CONNLIMIT_V4_WARN=300;  CONNLIMIT_V4_BLOCK=500    # v4: tight — ISP CGNAT ceiling (800 caused an outage; keep <~900)
 CONNLIMIT_V6_WARN=1000; CONNLIMIT_V6_BLOCK=2000   # v6: loose — anomaly smell only (conntrack_max is 500k)
 install_connlimit_guard() {
-    # -w: wait for the xtables lock. post-cfg launches the tailscale boot hook in
-    # the background (top of file), which also edits iptables; without -w our
-    # calls race it, fail, and get swallowed by `|| true`, leaving the guard half
-    # applied (confirmed 2026-07-18: missing v6 jump + duplicated rules).
+    # -w: wait for the xtables lock. tailscale-reconcile.sh also edits iptables
+    # (from post-cfg above AND from mesh-health's */5 cron, which can run
+    # concurrently with us); without -w our calls race it, fail, and get
+    # swallowed by `|| true`, leaving the guard half applied (confirmed
+    # 2026-07-18: missing v6 jump + duplicated rules).
     ipt="$1 -w 10"; mask=$2; icmpreject=$3; warn=$4; block=$5
     mark="route10-connlimit-w${warn}b${block}"
     $ipt -N RT10_CONNLIMIT 2>/dev/null || true
