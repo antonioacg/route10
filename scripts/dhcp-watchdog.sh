@@ -48,7 +48,7 @@ while :; do
     mv "$LOG" "$LOG.1" 2>/dev/null
   fi
 
-  cap=$(timeout "$SAMPLE_SECS" tcpdump -i "$IFACE" -n -l 'udp port 67 or udp port 68' 2>/dev/null)
+  cap=$(timeout "$SAMPLE_SECS" tcpdump -p -i "$IFACE" -n -l 'udp port 67 or udp port 68' 2>/dev/null)
   req=$(cnt "$cap" '\.68 >')   # client -> server (DISCOVER/REQUEST)
   rep=$(cnt "$cap" '\.67 >')   # server -> client (OFFER/ACK/NAK)
   checks=$((checks + 1))
@@ -62,7 +62,7 @@ while :; do
       /etc/init.d/dnsmasq restart >/dev/null 2>&1
       fixes=$((fixes + 1)); last_fix=$now; bad=0
       sleep 5
-      v=$(timeout 10 tcpdump -i "$IFACE" -n -l 'udp port 67 or udp port 68' 2>/dev/null)
+      v=$(timeout 10 tcpdump -p -i "$IFACE" -n -l 'udp port 67 or udp port 68' 2>/dev/null)
       log "EVENT dhcp_post_restart replies=$(cnt "$v" '\.67 >') dnsmasq_pid=$(pgrep dnsmasq | tr '\n' ' ')"
     fi
   else

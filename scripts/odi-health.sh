@@ -154,6 +154,11 @@ except: print('-')" 2>/dev/null)
     PREV_CRC="$CRC"
 
     # Full verbose line -> persistent file (all 13 thermal zones + full DDM + CRC).
+    # Size-rotate at 2 MiB (keep .1): this append bypasses obs_file, and /cfg is
+    # only 26 MB — the unrotated log had grown to 7.4 MB by 2026-07-22.
+    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 2097152 ]; then
+        mv "$LOG" "$LOG.1" 2>/dev/null
+    fi
     LINE="wan3_up=$WAN3_UP ip=$WAN3_IP pppd=$PPPD carrier=$CARRIER speed=$SPEED $PING $R10_THERM $L4_DDM $W2_DDM $CRC"
     echo "$TS $LINE" >> $LOG
     # Compact line -> syslog: busybox syslogd truncates ~256B, which would drop the

@@ -57,6 +57,22 @@ if [ "$(uci -q get system.@system[0].cronloglevel)" != "9" ]; then
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 fi
 
+# ── dropbear ed25519 host key (kills a per-connection authpriv.warn) ─────────
+# Alta's apply restores only the RSA host key into tmpfs /etc/dropbear; this
+# dropbear build probes for an ed25519 key on EVERY connection and logs
+# "Failed loading ... dropbear_ed25519_host_key" at warn. Persist ONE stable
+# key in /cfg (generated once, never rotated — a churning host key would trip
+# clients' known_hosts) and copy it in on each boot/reapply. Existing clients
+# keep their pinned RSA key (OpenSSH prefers known types); only the warn stops.
+if [ ! -f /cfg/dropbear_ed25519_host_key ] && command -v dropbearkey >/dev/null 2>&1; then
+    dropbearkey -t ed25519 -f /cfg/dropbear_ed25519_host_key >/dev/null 2>&1 || true
+fi
+if [ -f /cfg/dropbear_ed25519_host_key ] && [ ! -f /etc/dropbear/dropbear_ed25519_host_key ]; then
+    cp /cfg/dropbear_ed25519_host_key /etc/dropbear/dropbear_ed25519_host_key
+    chmod 600 /etc/dropbear/dropbear_ed25519_host_key
+    /etc/init.d/dropbear restart >/dev/null 2>&1 || true
+fi
+
 # ── tailscale mesh reconcile (native daemon, INFRA-68) ───────────────────────
 # Alta firmware (≥ the 2026-07-22 auto-update) ships tailscale natively
 # (/usr/sbin/tailscaled + /etc/init.d/tailscale, uci-configured; NOT cloud-
