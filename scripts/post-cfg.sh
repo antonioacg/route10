@@ -267,6 +267,11 @@ if [ -x "$RDNS_BIN" ] && [ -n "$LAN_DNS4" ]; then
 [resolvers.adguard]
 address = "$LAN_DNS4:53"
 protocol = "udp"
+# Wait up to 5s for AdGuard. A cache-miss makes AdGuard fetch from ITS upstream
+# (1–3s is normal); a short timeout would mis-read that as a failure → needless
+# DoH failover + a late "unexpected answer" once AdGuard finally replies. 5s lets
+# normal upstream latency through, so only a genuine AdGuard stall fails over.
+query-timeout = 5
 
 [resolvers.doh-fallback]
 address = "127.0.0.1:5054"
@@ -299,11 +304,22 @@ RDNSCFG
         kill "$(pidof routedns)" 2>/dev/null || true
     fi
     # Launch if not running; only point dnsmasq at it once it's actually up.
-    # Output goes to syslog (route10.routedns) — routedns is quiet in steady
-    # state (startup + upstream-failure lines only), and a silent DNS component
-    # is undebuggable from Grafana.
+    # routedns logs a structured stream (level=INFO|WARN|ERROR) to stderr; map
+    # each line's level to the matching syslog severity (was a flat daemon.info,
+    # so a routedns WARN showed as syslog info — wrong for severity-based views).
+    # Quiet in steady state (junk reverse now answered by dnsmasq before it ever
+    # reaches here), so the per-line logger is cheap; a silent DNS component is
+    # undebuggable from Grafana.
     if ! pidof routedns >/dev/null 2>&1; then
-        setsid sh -c "\"$RDNS_BIN\" \"$RDNS_CFG\" 2>&1 | logger -t route10.routedns -p daemon.info" </dev/null >/dev/null 2>&1 &
+        setsid sh -c "\"$RDNS_BIN\" \"$RDNS_CFG\" 2>&1 | while IFS= read -r ln; do
+            case \"\$ln\" in
+                *level=ERROR*) sev=err ;;
+                *level=WARN*)  sev=warning ;;
+                *level=DEBUG*|*level=TRACE*) sev=debug ;;
+                *) sev=info ;;
+            esac
+            logger -t route10.routedns -p \"daemon.\$sev\" -- \"\$ln\"
+        done" </dev/null >/dev/null 2>&1 &
         sleep 1
     fi
     pidof routedns >/dev/null 2>&1 && RDNS_GENERAL="127.0.0.1#5300"
