@@ -528,7 +528,9 @@ install_connlimit_guard() {
     # swallowed by `|| true`, leaving the guard half applied (confirmed
     # 2026-07-18: missing v6 jump + duplicated rules).
     ipt="$1 -w 10"; mask=$2; icmpreject=$3; warn=$4; block=$5
-    mark="route10-connlimit-w${warn}b${block}"
+    # -l1 suffix: layout v1 with the BLOCK-level LOG rule — bumping the suffix
+    # forces a one-time rebuild on chains built from the older layout.
+    mark="route10-connlimit-w${warn}b${block}-l1"
     $ipt -N RT10_CONNLIMIT 2>/dev/null || true
     # Rebuild the chain ONLY when it is absent or the thresholds changed — the
     # trailing marker rule encodes the active WARN/BLOCK. Skipping an unchanged
@@ -550,6 +552,12 @@ install_connlimit_guard() {
         # We deliberately do NOT use admin/host-unreachable: those surface as the
         # misleading "Host is unreachable" — the string the ISP CGNAT sent when IT
         # starved us. The real "why" lives in the route10.connlimit WARN log above.
+        # BLOCK is also LOGGED (rate-limited) before the rejects — a silently
+        # capping firewall is un-alertable; ops keys an ntfy alert on this line.
+        $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
+            -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
+            -m limit --limit 6/hour --limit-burst 5 \
+            -j LOG --log-prefix "route10.connlimit block: " --log-level warning 2>/dev/null || true
         $ipt -A RT10_CONNLIMIT -p tcp -m conntrack --ctstate NEW \
             -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
             -j REJECT --reject-with tcp-reset 2>/dev/null || true
