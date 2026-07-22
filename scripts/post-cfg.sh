@@ -29,6 +29,34 @@ set -e
 # below is a clean no-op. Render it on the router from the contract; never here.
 [ -f /cfg/seam.env ] && . /cfg/seam.env
 
+# ── observability: post-cfg itself must not fail silently ────────────────────
+# `set -e` means any job's failure aborts the REST of this script — without a
+# trap that is an invisible half-configured router. One completion line per run
+# (cheap; proves post-cfg ran after each reapply), an err line on abort.
+. /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init post-cfg \
+  || { OBS_LOG=/cfg/scripts/post-cfg.log; log(){ echo "$(date '+%F %T') $*" >>"$OBS_LOG"; }; \
+       event(){ log "$@"; }; warn(){ log "$@"; }; err(){ log "$@"; }; obs_syslog(){ :; }; }
+post_cfg_exit() {
+    rc=$?
+    [ "$rc" -eq 0 ] && log "post-cfg completed" \
+        || err "post-cfg ABORTED rc=$rc (set -e) — router may be HALF-CONFIGURED, check which job died"
+}
+trap post_cfg_exit EXIT
+
+# ── crond log level: stop per-job spam at cron.err ───────────────────────────
+# busybox crond at OpenWrt's default level (5) logs EVERY cron execution as
+# "USER root pid N cmd ..." at cron.err severity — our `* * * * *` self-heal
+# crons make that ~4.3k fake-ERROR lines/day in syslog→Loki, drowning
+# severity-based alerting. Level 9 keeps real crond warnings/errors and drops
+# the per-job lines; the scripts carry their own heartbeats (odi-health,
+# dhcp-watchdog), so no liveness signal is lost. uci system is tmpfs/cloud-
+# rebuilt → re-asserted here each reapply/boot.
+if [ "$(uci -q get system.@system[0].cronloglevel)" != "9" ]; then
+    uci set system.@system[0].cronloglevel='9'
+    uci commit system
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
+fi
+
 # ── tailscale mesh reconcile (native daemon, INFRA-68) ───────────────────────
 # Alta firmware (≥ the 2026-07-22 auto-update) ships tailscale natively
 # (/usr/sbin/tailscaled + /etc/init.d/tailscale, uci-configured; NOT cloud-
@@ -249,8 +277,11 @@ RDNSCFG
         kill "$(pidof routedns)" 2>/dev/null || true
     fi
     # Launch if not running; only point dnsmasq at it once it's actually up.
+    # Output goes to syslog (route10.routedns) — routedns is quiet in steady
+    # state (startup + upstream-failure lines only), and a silent DNS component
+    # is undebuggable from Grafana.
     if ! pidof routedns >/dev/null 2>&1; then
-        setsid "$RDNS_BIN" "$RDNS_CFG" </dev/null >/dev/null 2>&1 &
+        setsid sh -c "\"$RDNS_BIN\" \"$RDNS_CFG\" 2>&1 | logger -t route10.routedns -p daemon.info" </dev/null >/dev/null 2>&1 &
         sleep 1
     fi
     pidof routedns >/dev/null 2>&1 && RDNS_GENERAL="127.0.0.1#5300"

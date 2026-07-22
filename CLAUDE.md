@@ -149,7 +149,12 @@ functions would leak into sibling hooks); they call `logger` inline with the sam
 `route10.<component>` tag.
 
 Tag convention `route10.<component>`. On the standard: `prefix-track`, `route-hook`,
-`odi-health`, `dhcp-watchdog`, `w2-ddm`, `mesh-health`, `ts-reconcile`. Check:
+`odi-health`, `dhcp-watchdog`, `w2-ddm`, `mesh-health`, `ts-reconcile`, `post-cfg`
+(completion heartbeat / ABORTED line — set -e failures are not silent), `routedns`
+(daemon stdout piped to logger). crond runs at `cronloglevel 9` (post-cfg asserts
+it): busybox level 5 logged every cron exec at cron.err (~4.3k fake-ERROR
+lines/day to Loki). tailscaled is SILENCED via uci log flags (its full verbose
+stream went to syslog as daemon.err; mesh-health is the health signal). Check:
 `ssh route10 'grep route10. /var/log/messages | tail'`.
 
 ## Current open investigations

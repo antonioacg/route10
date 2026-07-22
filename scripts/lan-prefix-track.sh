@@ -76,28 +76,9 @@ if [ "$prev" != "$net" ]; then
     printf "LAN_PREFIX='%s'\n" "$net" > "$STATE"
 fi
 
-# --- Tailscale v6 exit-node egress SNAT (mesh internet-out over IPv6) ---------
-# A mesh peer that selects route10 as its exit node sends v6 sourced from the
-# tailnet ULA (fd7a:…), which is NOT in our delegated /60 → the ISP drops it.
-# MASQUERADE can't fix this: the ISP does IA_PD only, so pppoe-wan3 carries just a
-# link-local and there is no global on the egress iface to masquerade to. Instead
-# SNAT to our current br-lan GUA (::1 of the live /64 — a /60 address the ISP
-# routes replies back to). That source rotates with the PD, so WE own keeping it
-# current: this runs on every ifupdate/cron tick, re-points the rule on a GUA
-# rotation, and self-installs it on boot. Guarded on tailscale0 so a stick-only
-# router no-ops. Direct ip6tables, -w for the lock (post-cfg's tailscale hook also
-# edits nat) — no fw3 reload, so no eth4 flap.
-if [ -d /sys/class/net/tailscale0 ]; then
-    ts_ula6="fd7a:115c:a1e0::/48"; wan6_if="pppoe-wan3"; want="${cur_addr%/*}"
-    line=$(ip6tables -t nat -S POSTROUTING 2>/dev/null \
-             | grep -F -- "-s ${ts_ula6} -o ${wan6_if} -j SNAT" | head -1)
-    have=${line##*--to-source }; have=${have%% *}
-    if [ "$have" != "$want" ]; then
-        [ -n "$have" ] && ip6tables -w -t nat -D POSTROUTING -s "$ts_ula6" \
-            -o "$wan6_if" -j SNAT --to-source "$have" 2>/dev/null
-        ip6tables -w -t nat -A POSTROUTING -s "$ts_ula6" -o "$wan6_if" \
-            -j SNAT --to-source "$want" 2>/dev/null \
-          && event "v6 exit-node SNAT ${have:+re}set: $ts_ula6 -o $wan6_if --to $want"
-    fi
-fi
+# NOTE (2026-07-22): the "Tailscale v6 exit-node egress SNAT" job that lived here
+# is REMOVED. Its premise no longer holds — pppoe-wan3 now carries its own global
+# SLAAC address, so tailscale-reconcile.sh's plain MASQUERADE handles v6 exit
+# egress rotation-proof with no per-tick upkeep (verified live: exit-node curl -6
+# egresses from the WAN GUA and round-trips). Single owner = the reconcile.
 exit 0

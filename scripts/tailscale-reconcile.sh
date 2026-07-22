@@ -135,12 +135,12 @@ ens6 FORWARD -o tailscale0 -j ACCEPT
 ens6nat POSTROUTING -s fd7a:115c:a1e0::/48 -o br-lan     -j MASQUERADE
 ens6nat POSTROUTING -s fd7a:115c:a1e0::/48 -o pppoe-wan3 -j MASQUERADE
 
-# NOTE: Alta's patched tailscaled APPENDS its own v6 exit SNAT on every start
-# (`-s fd7a::/48 -o pppoe-wan3 -j SNAT --to-source <boot-time GUA>`). We don't
-# delete it (the daemon would just re-add it — an unwinnable loop); our
-# MASQUERADE above is INSERTED so it always precedes and shadows the SNAT.
-# MASQUERADE tracks the live WAN address, so a GPON prefix rotation can't
-# silently break v6 exit traffic the way the pinned GUA would.
+# v6 exit-node egress: the wan MASQUERADE above is the SOLE owner. It replaces
+# lan-prefix-track's old pinned-GUA SNAT job (removed 2026-07-22 — my earlier
+# "Alta's daemon appends it" attribution was wrong, it was that cron job): the
+# ISP now provides pppoe-wan3 its own global SLAAC address, so MASQUERADE
+# sources from the live WAN GUA per-packet — rotation-proof, no upkeep
+# (verified: exit-node curl -6 egresses the WAN GUA and round-trips).
 
 [ "$FW_ADDED" = 1 ] && event "tailscale0 firewall/NAT rules re-added (fw3 reload had flushed them)"
 
