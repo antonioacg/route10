@@ -53,29 +53,49 @@ ROUTES="$LAN4 $ULA6"          # whitespace-separated, either may be empty
 ROUTES=$(echo $ROUTES)        # normalize spacing
 
 # ── 1. uci intent ─────────────────────────────────────────────────────────────
-UCI_DIRTY=0
-uci -q get tailscale.settings >/dev/null 2>&1 || { uci set tailscale.settings=settings; UCI_DIRTY=1; }
+# DAEMON_DIRTY = daemon-level opts (need a stop/start to take effect);
+# ROUTES_DIRTY = runtime prefs (a `reload` re-applies via `tailscale set`).
+DAEMON_DIRTY=0; ROUTES_DIRTY=0
+uci -q get tailscale.settings >/dev/null 2>&1 || { uci set tailscale.settings=settings; DAEMON_DIRTY=1; }
 [ "$(uci -q get tailscale.settings.state_file)" = "/cfg/tailscaled.state" ] \
-  || { uci set tailscale.settings.state_file='/cfg/tailscaled.state'; UCI_DIRTY=1; }
+  || { uci set tailscale.settings.state_file='/cfg/tailscaled.state'; DAEMON_DIRTY=1; }
 [ "$(uci -q get tailscale.settings.port)" = "41641" ] \
-  || { uci set tailscale.settings.port='41641'; UCI_DIRTY=1; }
+  || { uci set tailscale.settings.port='41641'; DAEMON_DIRTY=1; }
+# Silence the daemon's stdout/stderr: with logtail disabled (--no-logs-no-support)
+# tailscaled emits its FULL verbose stream ([v1] per-packet Accepts, disco, wg
+# keepalives) which procd would pump into syslog at daemon.err — churning the
+# 64 KiB ring and flooding Loki. mesh-health (*/5) is the health monitor; flip
+# these to 1 + restart only for ad-hoc daemon debugging.
+[ "$(uci -q get tailscale.settings.log_stdout)" = "0" ] \
+  || { uci set tailscale.settings.log_stdout='0'; DAEMON_DIRTY=1; }
+[ "$(uci -q get tailscale.settings.log_stderr)" = "0" ] \
+  || { uci set tailscale.settings.log_stderr='0'; DAEMON_DIRTY=1; }
 [ "$(uci -q get tailscale.settings.advertise_exit_node)" = "1" ] \
-  || { uci set tailscale.settings.advertise_exit_node='1'; UCI_DIRTY=1; }
+  || { uci set tailscale.settings.advertise_exit_node='1'; ROUTES_DIRTY=1; }
 if [ "$(uci -q get tailscale.settings.advertise_routes)" != "$ROUTES" ]; then
     uci -q delete tailscale.settings.advertise_routes
     for r in $ROUTES; do uci add_list tailscale.settings.advertise_routes="$r"; done
-    UCI_DIRTY=1
+    ROUTES_DIRTY=1
 fi
-[ "$UCI_DIRTY" = 1 ] && { uci commit tailscale; event "uci tailscale config converged (routes: $ROUTES + exit-node)"; }
+if [ "$DAEMON_DIRTY" = 1 ] || [ "$ROUTES_DIRTY" = 1 ]; then
+    uci commit tailscale
+    event "uci tailscale config converged (routes: $ROUTES + exit-node)"
+fi
 
 # ── 2. daemon running + prefs match ───────────────────────────────────────────
-# The firmware init's reload: daemon-level opts changed -> restart; otherwise
-# apply_runtime_config re-runs `tailscale set` from uci (non-disruptive).
 NEED_APPLY=0
 if ! pidof tailscaled >/dev/null 2>&1; then
     event "tailscaled not running — starting via firmware init"
     /etc/init.d/tailscale start >/dev/null 2>&1
-elif [ "$UCI_DIRTY" = 1 ]; then
+elif [ "$DAEMON_DIRTY" = 1 ]; then
+    # The init's reload->restart does NOT reliably re-apply procd params when
+    # stop/start happen back-to-back (observed 2026-07-22: log flags ignored);
+    # an explicit stop, settle, start does.
+    event "daemon-level uci changed — restarting tailscaled (stop/settle/start)"
+    /etc/init.d/tailscale stop >/dev/null 2>&1
+    sleep 2
+    /etc/init.d/tailscale start >/dev/null 2>&1
+elif [ "$ROUTES_DIRTY" = 1 ]; then
     NEED_APPLY=1
 else
     # Daemon up and uci already correct — but did something (e.g. the firmware
@@ -115,13 +135,12 @@ ens6 FORWARD -o tailscale0 -j ACCEPT
 ens6nat POSTROUTING -s fd7a:115c:a1e0::/48 -o br-lan     -j MASQUERADE
 ens6nat POSTROUTING -s fd7a:115c:a1e0::/48 -o pppoe-wan3 -j MASQUERADE
 
-# Retire any pinned-GUA SNAT for the tailnet ULA (a rotated-away GUA breaks v6
-# exit traffic silently; MASQUERADE above tracks the live WAN address instead).
-ip6tables -w -t nat -S POSTROUTING 2>/dev/null | grep -- "-s fd7a:115c:a1e0::/48" | grep -- "-j SNAT" | \
-while read -r rule; do
-    ip6tables -w -t nat $(echo "$rule" | sed 's/^-A/-D/') 2>/dev/null \
-      && event "removed stale pinned-GUA SNAT rule: $rule"
-done
+# NOTE: Alta's patched tailscaled APPENDS its own v6 exit SNAT on every start
+# (`-s fd7a::/48 -o pppoe-wan3 -j SNAT --to-source <boot-time GUA>`). We don't
+# delete it (the daemon would just re-add it — an unwinnable loop); our
+# MASQUERADE above is INSERTED so it always precedes and shadows the SNAT.
+# MASQUERADE tracks the live WAN address, so a GPON prefix rotation can't
+# silently break v6 exit traffic the way the pinned GUA would.
 
 [ "$FW_ADDED" = 1 ] && event "tailscale0 firewall/NAT rules re-added (fw3 reload had flushed them)"
 
