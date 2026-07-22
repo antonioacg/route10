@@ -48,15 +48,32 @@ telnet probes — they orphan the lock too.
   *preferred* address for up to 24 h. Quiet when healthy. Log:
   `/cfg/scripts/prefix-track.log`. Sources: `scripts/lan-prefix-track.sh` +
   `scripts/ra-deprecate.py`. See `project_route10_stale_ipv6_prefix.md`.
+- `/cfg/scripts/tailscale-reconcile.sh` — single owner of the **firmware-native
+  Tailscale** integration (Alta's 2026-07-22 firmware auto-update ships
+  `/usr/sbin/tailscaled` 1.98.4-1 + uci `/etc/config/tailscale`; NOT cloud-modeled,
+  NOT rc.d-enabled — nothing runs it unless we do). Converges: uci (state under
+  `/cfg/tailscaled.state`, exit-node + routes = LAN /24 derived from br-lan + ULA
+  /64 from seam.env, daemon logs silenced — the Alta build dumps its full verbose
+  stream to stderr), daemon via the FIRMWARE init (stop/settle/start for
+  daemon-level changes; `reload` for routes), tailscale0 firewall accepts + NAT
+  both families (fw3 reloads flush them; our inserted v6 MASQUERADE shadows the
+  pinned-GUA SNAT Alta's daemon appends), br-lan GRO off. Idempotent, quiet,
+  **no connectivity gate / no revert** (the retired sideload hook's one-ping
+  revert caused the 2026-07-22 outage). Called by post-cfg (every boot/reapply)
+  and mesh-health (heal). The old sideload (`/a/tailscale` + fork
+  `alta-route10-tailscale`) is RETIRED. Log: `/cfg/scripts/ts-reconcile.log`.
+  Source: `scripts/tailscale-reconcile.sh`. See `project_route10_native_tailscale.md`.
 - `/cfg/scripts/mesh-health.sh` — `*/5` cron, no daemon. Tailscale mesh DRIFT smoke
-  tests (quiet when healthy, WARN on drift): (1) tailscaled isn't running a stale/
-  DELETED binary and running-version == on-disk-version; (2) the compiled ACL
-  packet filter admits every advertised subnet route (LAN /24 + ULA /64) — i.e. the
-  Headscale policy grant is actually *enforced* in the live filter, not silently
-  dropped. Expected grants are derived from route10's own `AdvertiseRoutes` (minus
-  the exit-node defaults), asserted on DSTs never SRCs (srcs churn). Guards against
-  the 2026-07-20 stale-daemon recurrence. Log: `/cfg/scripts/mesh-health.log`.
-  Source: `scripts/mesh-health.sh`. See `project_route10_tailscale_stale_binary_filter.md`.
+  tests + SELF-HEAL (quiet when healthy; WARN + heal via tailscale-reconcile.sh
+  where route10-local): (1) tailscaled running, not a stale/DELETED binary,
+  running-version == on-disk; (2) live `AdvertiseRoutes` == intended set, derived
+  INDEPENDENTLY of prefs (br-lan + seam.env) — catches the firmware-init
+  boot-time route reset (2026-07-22 class); (3) compiled ACL filter admits every
+  advertised subnet route, asserted on DSTs never SRCs (2026-07-20 stale-daemon
+  class; QUIET on Alta's slimmed build — `debug netmap` is compiled out/404);
+  (4) tailscale0 firewall accepts + NAT present in both families (fw3-flush
+  class). Log: `/cfg/scripts/mesh-health.log`. Source: `scripts/mesh-health.sh`.
+  See `project_route10_tailscale_stale_binary_filter.md`, `project_route10_native_tailscale.md`.
 - `/cfg/post-cfg.sh` — runs after every Alta cloud-config reapply. Source:
   `scripts/post-cfg.sh`. **Idempotent**. Jobs:
   1. **MACVLAN mgmt-path** (`ont_mgmt0` on eth4, `192.168.1.2/24`,
@@ -132,7 +149,7 @@ functions would leak into sibling hooks); they call `logger` inline with the sam
 `route10.<component>` tag.
 
 Tag convention `route10.<component>`. On the standard: `prefix-track`, `route-hook`,
-`odi-health`, `dhcp-watchdog`, `w2-ddm`, `mesh-health`. Check:
+`odi-health`, `dhcp-watchdog`, `w2-ddm`, `mesh-health`, `ts-reconcile`. Check:
 `ssh route10 'grep route10. /var/log/messages | tail'`.
 
 ## Current open investigations
