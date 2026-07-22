@@ -194,25 +194,79 @@ if [ -n "$LAN_ULA" ] && ! uci -q get network.lan.ip6addr 2>/dev/null | grep -q "
     /etc/init.d/network reload >/dev/null 2>&1 || true
 fi
 
-# ── LAN DNS: route10 as the SOLE resolver — AdGuard-first, strict-order fallback ─
+# ── routedns: health-gated AdGuard-primary / DoH-fallback (dnsmasq's upstream) ──
+# dnsmasq CANNOT do "AdGuard-first with a public fallback" itself: `strict-order`
+# does not apply to `server=` config lines (only /etc/resolv.conf — confirmed by the
+# dnsmasq author), so the ~0 ms loopback DoH wins dnsmasq's periodic re-race and
+# AdGuard gets bypassed entirely (blocks never apply); and any co-equal DoH sibling
+# leaks blocks regardless. routedns (folbricht/routedns — a single static aarch64 Go
+# binary sideloaded to /a like tailscaled) fixes it: a `fail-back` group forwards to
+# AdGuard (primary) and fails over to the route10-local DoH proxy ONLY on
+# no-response/SERVFAIL. A block (0.0.0.0 / NXDOMAIN) is a valid answer, never a
+# failure (empty-error/servfail-error default false), so it is NEVER undone; it fails
+# back to AdGuard ~60 s after recovery (reset-after default). dnsmasq's GENERAL
+# upstream then becomes just 127.0.0.1#5300 (routedns). If the binary is absent or
+# fails to come up, RDNS_GENERAL stays unset and the DNS job below degrades to the old
+# direct AdGuard+DoH chain — leaky, but never a dead upstream. See
+# project_route10_dns_resolver.md.
+RDNS_BIN=/a/routedns/routedns
+RDNS_CFG=/a/routedns/routedns.toml
+RDNS_GENERAL=
+if [ -x "$RDNS_BIN" ] && [ -n "$LAN_DNS4" ]; then
+    rdns_want=$(cat <<RDNSCFG
+[resolvers.adguard]
+address = "$LAN_DNS4:53"
+protocol = "udp"
+
+[resolvers.doh-fallback]
+address = "127.0.0.1:5054"
+protocol = "udp"
+
+[groups.failback]
+type = "fail-back"
+resolvers = ["adguard", "doh-fallback"]
+
+[listeners.local-udp]
+address = "127.0.0.1:5300"
+protocol = "udp"
+resolver = "failback"
+
+[listeners.local-tcp]
+address = "127.0.0.1:5300"
+protocol = "tcp"
+resolver = "failback"
+RDNSCFG
+)
+    # Re-render from the seam AdGuard VIP; restart routedns only on a real diff.
+    if [ "$rdns_want" != "$(cat "$RDNS_CFG" 2>/dev/null || true)" ]; then
+        printf '%s\n' "$rdns_want" > "$RDNS_CFG"
+        kill "$(pidof routedns)" 2>/dev/null || true
+    fi
+    # Launch if not running; only point dnsmasq at it once it's actually up.
+    if ! pidof routedns >/dev/null 2>&1; then
+        setsid "$RDNS_BIN" "$RDNS_CFG" </dev/null >/dev/null 2>&1 &
+        sleep 1
+    fi
+    pidof routedns >/dev/null 2>&1 && RDNS_GENERAL="127.0.0.1#5300"
+fi
+
+# ── LAN DNS: route10 as the SOLE resolver ────────────────────────────────────
 # The Alta cloud hands clients TWO co-equal resolvers (AdGuard + Cloudflare). A
 # client-side secondary is NOT failover: OSes race / round-robin them, so a client
 # intermittently queries the public resolver directly and gets the split-horizon
 # STUB (e.g. searxng.$SPLIT_DOMAIN → 192.0.2.1 → hang — the "searxng drops" report).
 # Fix: advertise ONLY route10 as the resolver (Alta portal DNS-Servers field → the
-# router itself) and let route10 do deterministic failover here:
-#   - strict-order: AdGuard first for EVERYTHING (ad-block + split-horizon always
-#     win), then encrypted DoH (Cloudflare/Google/OpenDNS, route10-local) as a
-#     public-name availability net for when AdGuard is fully down.
-#   - pin $SPLIT_DOMAIN to AdGuard ONLY (v4+v6): inside-view names never reach a
-#     public resolver, so they SERVFAIL (not the misleading 192.0.2.1 stub/hang)
-#     during an AdGuard outage — the services behind them are down then anyway.
+# router itself) and forward from here:
+#   - GENERAL names → routedns (127.0.0.1#5300, health-gated AdGuard/DoH failover).
+#   - pin $SPLIT_DOMAIN → AdGuard-direct (v4+v6), NO fallback: inside-view names never
+#     reach a public resolver, so they SERVFAIL (not the misleading 192.0.2.1 stub/
+#     hang) during an AdGuard outage — the services behind them are down then anyway.
 #   - ECS (add-subnet): once route10 (.1) is the forwarder, single-box AdGuard would
 #     see one source and lose per-client identity; add-subnet re-injects the client
 #     subnet so AdGuard can identify clients again (ops enables ECS consumption).
 # WAN-safe: `dnsmasq reload` only (re-reads uci + conf-dir) — no fw3/network reload,
-# no eth4 flap. The cloud resets the upstream to DoH-only each boot, so this
-# re-asserts on every post-cfg run (idempotent; reloads only on a real diff).
+# no eth4 flap. The cloud resets the upstream each boot, so this re-asserts on every
+# post-cfg run (idempotent; reloads only on a real diff).
 #
 # Contract values ($LAN_DNS4/$LAN_DNS6 = AdGuard resolver VIPs, $SPLIT_DOMAIN = the
 # split-horizon zone) come from /cfg/seam.env — NEVER hardcoded here (no second
@@ -220,12 +274,18 @@ fi
 # cloud-set upstream, exactly today's behaviour. The 127.0.0.1#505x DoH fallbacks
 # are route10-local (https-dns-proxy instances), not contract values.
 if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
-    # Upstream policy, in strict order (see above): pin(v4) pin(v6) AdGuard(v4)
-    # AdGuard(v6) DoH-cf DoH-google DoH-opendns.
-    set -- \
-        "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" \
-        "$LAN_DNS4" "$LAN_DNS6" \
-        "127.0.0.1#5054" "127.0.0.1#5053" "127.0.0.1#5055"
+    # Upstream: pin(v4)+pin(v6) → AdGuard-direct for $SPLIT_DOMAIN (no fallback →
+    # SERVFAIL, never a stub-leak, when AdGuard is down); everything else → routedns
+    # (health-gated failover). If routedns is unavailable, degrade to the old direct
+    # AdGuard+DoH chain rather than point dnsmasq at a dead upstream.
+    if [ -n "$RDNS_GENERAL" ]; then
+        set -- "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" "$RDNS_GENERAL"
+    else
+        set -- \
+            "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" \
+            "$LAN_DNS4" "$LAN_DNS6" \
+            "127.0.0.1#5054" "127.0.0.1#5053" "127.0.0.1#5055"
+    fi
     DNS_DIRTY=0
     # server list — rewrite only if it differs (cloud resets it to DoH-only each boot).
     want=$(printf '%s\n' "$@")
