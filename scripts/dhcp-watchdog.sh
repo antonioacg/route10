@@ -32,6 +32,9 @@ obs_syslog() { :; }
 . /cfg/scripts/lib-observability.sh 2>/dev/null && obs_init dhcp-watchdog "$LOG"
 ts()  { date '+%Y-%m-%d %H:%M:%S'; }
 log() { obs_syslog notice "$*"; echo "$(ts) $*" >> "$LOG"; }
+# heartbeat: full line to the file, syslog at DEBUG — proof-of-life counters are
+# not a state change; at notice they polluted severity-based Loki views.
+hb()  { obs_syslog debug  "$*"; echo "$(ts) $*" >> "$LOG"; }
 # count lines in $1 matching BRE $2
 cnt() { printf '%s\n' "$1" | grep -c "$2"; }
 
@@ -68,7 +71,7 @@ while :; do
   fi
 
   if [ $((now - last_hb)) -ge "$HEARTBEAT" ]; then
-    log "heartbeat checks=$checks fixes=$fixes last=req:$req/rep:$rep dnsmasq_pid=$(pgrep dnsmasq | tr '\n' ' ')"
+    hb "heartbeat checks=$checks fixes=$fixes last=req:$req/rep:$rep dnsmasq_pid=$(pgrep dnsmasq | tr '\n' ' ')"
     last_hb=$now
   fi
 

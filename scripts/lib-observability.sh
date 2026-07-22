@@ -19,7 +19,8 @@
 #
 # API:
 #   obs_init <component> [logfile] [rotate_bytes]   # once, up front
-#   log   "msg"   # daemon.info    — routine / metrics
+#   debug "msg"   # daemon.debug   — heartbeats / only-when-debugging detail
+#   log   "msg"   # daemon.info    — routine / metrics (dashboards read these)
 #   event "msg"   # daemon.notice  — a state change worth capturing
 #   warn  "msg"   # daemon.warning
 #   err   "msg"   # daemon.err
@@ -53,6 +54,7 @@ obs_file() {
 }
 
 obs_emit() { _sev="$1"; shift; obs_syslog "$_sev" "$*"; obs_file "$*"; }
+debug() { obs_emit debug   "$*"; }
 log()   { obs_emit info    "$*"; }
 event() { obs_emit notice  "$*"; }
 warn()  { obs_emit warning "$*"; }
