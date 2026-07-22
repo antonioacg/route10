@@ -336,9 +336,14 @@ fi
 #   - pin $SPLIT_DOMAIN → AdGuard-direct (v4+v6), NO fallback: inside-view names never
 #     reach a public resolver, so they SERVFAIL (not the misleading 192.0.2.1 stub/
 #     hang) during an AdGuard outage — the services behind them are down then anyway.
-#   - ECS (add-subnet): once route10 (.1) is the forwarder, single-box AdGuard would
-#     see one source and lose per-client identity; add-subnet re-injects the client
-#     subnet so AdGuard can identify clients again (ops enables ECS consumption).
+#   - ECS (add-subnet): re-injects each client's subnet once route10 (.1) is the
+#     sole forwarder. NOTE (researched 2026-07-22): AdGuard Home does NOT use ECS
+#     for client identity/stats in ANY released version — it buckets by transport
+#     source IP, so "Top Clients" shows .1 regardless (feature request AdGuardTeam/
+#     AdGuardHome#1727, still OPEN; impl PR #8408 unmerged). So today this ECS buys
+#     only PER-QUERY visibility in AdGuard's query log (confirmed on-wire, real
+#     client /32), NOT dashboard attribution. Kept because it's near-free and
+#     future-proofs #8408; do NOT claim it restores per-client identity.
 # WAN-safe: `dnsmasq reload` only (re-reads uci + conf-dir) — no fw3/network reload,
 # no eth4 flap. The cloud resets the upstream each boot, so this re-asserts on every
 # post-cfg run (idempotent; reloads only on a real diff).
