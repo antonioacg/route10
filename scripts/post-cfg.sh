@@ -57,6 +57,31 @@ if [ "$(uci -q get system.@system[0].cronloglevel)" != "9" ]; then
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 fi
 
+# ── LAN NTP server ───────────────────────────────────────────────────────────
+# Serve time on the LAN so a client without a battery-backed RTC can seed its
+# clock at boot without a WAN round-trip. Requested via the seam; the value
+# lives in ops/NETWORK-CONTRACT.md (§LAN time source), not here.
+# Not portal-modeled (no ntp keys anywhere in /cfg/config.json) and uci system
+# is tmpfs/cloud-rebuilt, so it is asserted here on every boot/reapply.
+# Caveat: route10 has NO RTC either (/dev/rtc* absent) — it serves time only
+# once its own client has synced over the WAN, so this is a latency/
+# availability win, not a correctness guarantee.
+# LAN-ONLY via TWO independent guards: `interface lan` makes busybox ntpd bind
+# the server socket to br-lan (-I, SO_BINDTODEVICE) so it never listens on
+# pppoe-wan3, AND the wan zone stays input=DROP. udp/123 is a classic
+# amplification vector and this box holds a public IP. The NTP *client* keeps
+# syncing over WAN — -I binds only the server socket.
+# DHCP option 42 deliberately NOT advertised: consumers point at .1 explicitly;
+# handing a time server to every LAN client is broader than the need.
+if [ "$(uci -q get system.ntp.enable_server)" != "1" ] \
+   || [ "$(uci -q get system.ntp.interface)" != "lan" ]; then
+    uci set system.ntp.enable_server='1'
+    uci set system.ntp.interface='lan'
+    uci commit system
+    /etc/init.d/sysntpd restart >/dev/null 2>&1 || true
+    event "LAN NTP server enabled (br-lan only, udp/123)"
+fi
+
 # ── dropbear ed25519 host key (kills a per-connection authpriv.warn) ─────────
 # Alta's apply restores only the RSA host key into tmpfs /etc/dropbear; this
 # dropbear build probes for an ed25519 key on EVERY connection and logs

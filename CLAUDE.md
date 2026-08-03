@@ -127,6 +127,16 @@ telnet probes — they orphan the lock too.
      BLANK** ⇒ router advertises v4 `.1` + v6 **link-local** (`fe80::…`, MAC-derived,
      rotation-proof — NOT the GUA). Tailscale `accept-dns` devices bypass this (MagicDNS:
      split `net.aac.gd`→AdGuard, global→Cloudflare). See `project_route10_dns_resolver.md`.
+  9. **LAN NTP server** (`system.ntp.enable_server=1` + `interface='lan'`) — serves
+     udp/123 on `192.168.10.1` / the LAN ULA for clients with no battery-backed RTC.
+     **LAN-only via two guards**: busybox ntpd binds the server socket to br-lan
+     (`-I br-lan`, so it never listens on `pppoe-wan3` — verified: the router's own
+     WAN IP and loopback get no answer) *and* the wan zone stays `input=DROP`.
+     Side effect of the bind: **mesh (tailscale0) clients are not served** — a host
+     that routes the LAN ULA over the tailnet times out; that is deliberate.
+     No DHCP option 42 — consumers point at `.1` explicitly. Route10 has **no RTC**
+     (`/dev/rtc*` absent), so it serves time only once its own client has synced over
+     the WAN. Requested via the seam (contract §LAN time source).
 
 ## Observability standard
 
