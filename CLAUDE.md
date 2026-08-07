@@ -52,7 +52,11 @@ telnet probes — they orphan the lock too.
   Tailscale** integration (Alta's 2026-07-22 firmware auto-update ships
   `/usr/sbin/tailscaled` 1.98.4-1 + uci `/etc/config/tailscale`; NOT cloud-modeled,
   NOT rc.d-enabled — nothing runs it unless we do). Converges: uci (state under
-  `/cfg/tailscaled.state`, exit-node + routes = LAN /24 derived from br-lan + ULA
+  `/cfg/tailscaled.state`, **`login_url` from seam.env `TS_LOGIN_URL`** — the
+  2026-08-07 firmware added that option defaulting to Tailscale SaaS and the init
+  LOGS THE NODE OUT whenever live `.ControlURL` != uci value, so we must set it in
+  the uci-intent pass *before* the daemon is started; absent ⇒ warn, don't guess,
+  exit-node + routes = LAN /24 derived from br-lan + ULA
   /64 from seam.env, daemon logs silenced — the Alta build dumps its full verbose
   stream to stderr), daemon via the FIRMWARE init (stop/settle/start for
   daemon-level changes; `reload` for routes), tailscale0 firewall accepts + NAT

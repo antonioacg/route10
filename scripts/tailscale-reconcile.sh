@@ -59,6 +59,22 @@ DAEMON_DIRTY=0; ROUTES_DIRTY=0
 uci -q get tailscale.settings >/dev/null 2>&1 || { uci set tailscale.settings=settings; DAEMON_DIRTY=1; }
 [ "$(uci -q get tailscale.settings.state_file)" = "/cfg/tailscaled.state" ] \
   || { uci set tailscale.settings.state_file='/cfg/tailscaled.state'; DAEMON_DIRTY=1; }
+# Control plane. The firmware init defaults login_url to Tailscale SaaS
+# (DEFAULT_LOGIN_URL=https://controlplane.tailscale.com) and, on every start,
+# compares it against the live .ControlURL — on a mismatch it LOGS THE NODE OUT
+# ("control URL changed ...; logging out first") and re-registers against the
+# uci value. The 2026-08-07 firmware update introduced that option, so the next
+# daemon start logged us out of Headscale and wiped the node key. Setting this
+# here in section 1 — BEFORE section 2 ever starts the daemon — is what makes
+# the boot path safe: the init never sees a mismatch, so it never logs out.
+# Value is ops-owned (contract §mesh control plane); absent ⇒ leave the firmware
+# default untouched rather than guess a control plane.
+if [ -n "$TS_LOGIN_URL" ]; then
+    [ "$(uci -q get tailscale.settings.login_url)" = "$TS_LOGIN_URL" ] \
+      || { uci set tailscale.settings.login_url="$TS_LOGIN_URL"; DAEMON_DIRTY=1; }
+else
+    warn "TS_LOGIN_URL unset in /cfg/seam.env — leaving firmware login_url as-is (it defaults to Tailscale SaaS, which logs this node out of Headscale)"
+fi
 [ "$(uci -q get tailscale.settings.port)" = "41641" ] \
   || { uci set tailscale.settings.port='41641'; DAEMON_DIRTY=1; }
 # Silence the daemon's stdout/stderr: with logtail disabled (--no-logs-no-support)
