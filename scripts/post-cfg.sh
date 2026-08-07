@@ -21,6 +21,51 @@
 
 set -e
 
+# ── clock sanity: this box has no RTC ────────────────────────────────────────
+# /dev/rtc* is absent, so at boot the clock reads the FIRMWARE BUILD DATE
+# (2021-10-24) until htpdate syncs over the WAN — which cannot happen until
+# PPPoE is up. OpenWrt's sysfixtime is present and works exactly as designed,
+# which is the problem: it seeds from the newest mtime in /etc, but / is tmpfs
+# regenerated from the image, so every file there IS the build date and it
+# faithfully restores it.
+#
+# Consequence: every boot-time line in /cfg/scripts/*.log lands under 2021, so
+# grepping those logs by today's date silently HIDES the boot window — the one
+# window where the firmware resets things and this script repairs them. On
+# 2026-08-07 that nearly produced a wrong conclusion about whether reconcile had
+# converged at boot. (The syslog/Loki copy is unaffected: RFC 3164 carries no
+# year and the collector stamps receive time — this is purely on-box forensics.)
+#
+# Seed from /cfg instead: the ONLY persistent filesystem (ext4 on loop0,
+# everything else is tmpfs), so its newest log mtime is a real "last known
+# good" time. Runs before obs_init so this script's own first line is sane.
+# Only ever moves the clock FORWARD, and only from an implausibly old one —
+# once htpdate has synced, this is a no-op.
+CLOCK_FLOOR=1750000000                       # 2025-06-15; below this at boot is bogus
+if [ "$(date +%s)" -lt "$CLOCK_FLOOR" ]; then
+    # NOTE: every statement here must be set -e safe. A bare `[ x ] && y` whose
+    # test is FALSE returns non-zero and would abort the whole script — and the
+    # comparison below is false on most loop iterations by construction.
+    _seed=0
+    for _f in /cfg/scripts/*.log /cfg/dhcp.leases /cfg/config.json; do
+        [ -f "$_f" ] || continue
+        _m=$(stat -c %Y "$_f" 2>/dev/null) || continue
+        if [ "$_m" -gt "$_seed" ] 2>/dev/null; then _seed=$_m; fi
+    done
+    # Re-test the floor against the seed: a seed no better than the bogus clock
+    # is not worth applying, and never move backwards.
+    if [ "$_seed" -ge "$CLOCK_FLOOR" ] && [ "$_seed" -gt "$(date +%s)" ]; then
+        if date -s "$(date -d "@$_seed" '+%Y-%m-%d %H:%M:%S')" >/dev/null 2>&1; then
+            logger -t route10.post-cfg -p daemon.notice \
+                "no-RTC boot clock seeded from newest /cfg mtime ($(date '+%F %T')) — htpdate will correct it once the WAN is up" || true
+        else
+            logger -t route10.post-cfg -p daemon.warn \
+                "no-RTC boot clock seed FAILED (date -s rejected); boot-time log timestamps will read as the firmware build date" || true
+        fi
+    fi
+    unset _f _m _seed
+fi
+
 # ── seam values (rendered from ops/NETWORK-CONTRACT.md; router-local, NOT in repo) ─
 # /cfg/seam.env carries the shared LAN/mesh contract values (e.g. the LAN ULA)
 # so they are never committed into this repo — a committed copy of a contract
