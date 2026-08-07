@@ -28,6 +28,12 @@
 #      all mesh->LAN traffic with WG up and packets arriving on the tun — every
 #      layer above looked healthy. Heal: reconcile re-adds them.
 #
+#   5. ACL TAG — this node must still carry its ops-owned tag (seam.env
+#      TS_NODE_TAG). On 2026-08-07 a firmware-forced logout + re-registration
+#      came back UNTAGGED while assertions 1-4 all read green; the tag is the dst
+#      of ops's split-DNS ACL rule and the autoApprovers key, so mesh DNS was
+#      silently dead. Server-side state — WARN only, not healable from here.
+#
 # Design notes:
 #   - Assertion 3's expected grants are DERIVED from AdvertiseRoutes (minus the
 #     exit-node defaults, which the filter fragments); assertion 2 is what makes
@@ -190,6 +196,36 @@ if [ -d /sys/class/net/tailscale0 ]; then
         else
             err "heal FAILED: tailscale0 firewall rules still missing"
         fi
+    fi
+fi
+
+# ===== Assertion 5: node still carries its ACL tag ==============================
+# 2026-08-07: after the firmware-forced logout, re-registration came back with an
+# EMPTY tag set. Everything above was green — daemon up, all four routes advertised
+# and Serving, filter fine, kernel path fine — but the tag drives ops's ACL, where
+# `tag:home-router` is the dst of the split-DNS rule and the key for autoApprovers.
+# Untagged, that expands to zero nodes: mesh clients silently cannot resolve the
+# split domain, and a genuinely new node record would come back with NOTHING
+# approved. Mesh "up", DNS over mesh dead — the exact 2026-07-22 outage shape, and
+# no assertion here caught it. Server-side state, NOT healable from the router
+# (ops made it a forced tag, which is why it now survives a re-join) — WARN only.
+# Tag name is ops-owned (contract §mesh); absent from seam.env ⇒ clean no-op.
+if [ -n "$TS_NODE_TAG" ] && [ -x "$TS" ]; then
+    TAGS=$($TS status --json 2>/dev/null | python3 -c '
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+print(" ".join((d.get("Self") or {}).get("Tags") or []))
+' 2>/dev/null)
+    # Distinguish "definitely untagged" from "could not read" — only the former
+    # is the outage signature; a failed read must not masquerade as healthy.
+    if [ -z "$TAGS" ]; then
+        warn "cannot read this node's ACL tags (status --json unreadable) — tag membership is UNVERIFIED, expected '$TS_NODE_TAG'"
+    else
+        case " $TAGS " in
+            *" $TS_NODE_TAG "*) : ;;
+            *) warn "node is MISSING its ACL tag '$TS_NODE_TAG' (has: $TAGS) — ops's split-DNS rule and autoApprovers key on it, so mesh clients cannot resolve the split domain and new routes would not auto-approve. Server-side: ask ops to re-apply the forced tag." ;;
+        esac
     fi
 fi
 
