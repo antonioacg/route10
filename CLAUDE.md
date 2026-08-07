@@ -162,6 +162,13 @@ must NOT source the lib** (they are SOURCED into the dispatcher — defining
 functions would leak into sibling hooks); they call `logger` inline with the same
 `route10.<component>` tag.
 
+**Clocks disagree — always state which you mean.** syslog stamps in
+`/var/log/messages` are **UTC**; `date`, `ls -l` and script `date '+%F %T'` output
+are **local (UTC-3)**. Reading an `ls -l` mtime and quoting it as UTC is a 3-hour
+error — it produced a bogus timeline in the 2026-08-07 mesh incident and an
+apparent contradiction with ops's control-plane logs. For an incident timeline
+use `/proc/uptime` for boot and `date -u -d @$(stat -c %Y <file>)` for mtimes.
+
 Tag convention `route10.<component>`. On the standard: `prefix-track`, `route-hook`,
 `odi-health`, `dhcp-watchdog`, `w2-ddm`, `mesh-health`, `ts-reconcile`, `post-cfg`
 (completion heartbeat / ABORTED line — set -e failures are not silent), `routedns`
