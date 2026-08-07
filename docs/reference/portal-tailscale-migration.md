@@ -84,7 +84,46 @@ search filter. The ULA is *accepted*; what it *writes* is unverified (see below)
    with `Enable` **off** may stop the daemon.
 4. **Reversibility.** Unknown whether a cloud-modeled tailscale block can be un-modeled.
    Today the block is absent and the agent provably leaves our uci alone; after a save it
-   may be permanent. Assume **one-way** until proven otherwise.
+   may be permanent. Assume **one-way** until proven otherwise. Ops has **no Alta cloud
+   visibility** and cannot answer this — it is an Alta support question, worth asking
+   *before* the experiment.
+5. **Can `login_url` be saved without the card also writing `advertiseSubnets`?**
+   This is the one to test first — it decides whether a good version of this exists at
+   all. See the flap analysis below.
+
+### The route-flap problem with a login_url-only migration
+
+The attractive shape is *portal owns `login_url`, routes stay reconcile-derived, the ULA
+never enters the portal* — it keeps the contract-owned value with a deriving agent and
+makes unknown 4 irrelevant by design rather than by information.
+
+But the card's fields commit as a unit, and the agent rebuilds the route list
+destructively:
+
+```
+uci delete   tailscale.settings.advertise_routes
+uci add_list tailscale.settings.advertise_routes='%s'    (per entry)
+```
+
+So if a save writes `advertiseSubnets` as **empty**, every cloud reapply deletes our
+advertised routes. `post-cfg.sh` calls `tailscale-reconcile.sh` in the **foreground**
+after every reapply, so reconcile re-adds them seconds later and mesh-health assertion 2
+covers the gap — but the steady state becomes a **route flap plus uci ping-pong on every
+reapply, permanently**, visible as repeated converge events in `ts-reconcile.log`.
+
+That is only avoided if unknown 5 resolves favourably — i.e. the card omits the
+`advertiseSubnets` key entirely when untouched, rather than writing it empty.
+
+### Three-way comparison
+
+| Option | Cost |
+|---|---|
+| **A. Full portal ownership** | ULA becomes a hand-typed second authority, stops tracking the contract. **Ops veto, independent of all unknowns.** |
+| **B. Portal owns `login_url` only** | If unknown 5 resolves badly: route flap + uci ping-pong on *every* reapply, forever. |
+| **C. Stay on reconcile** | The boot race — rare, only on firmware update, now alarmed on both sides. |
+
+B trades a rare, bounded, alarmed failure for frequent permanent churn. That is a bad
+trade **unless** unknown 5 resolves favourably, which is why it is the first test.
 
 ## Gaps worth raising with Alta
 
