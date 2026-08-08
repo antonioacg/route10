@@ -1,0 +1,71 @@
+#!/bin/sh
+# metrics-cgi.sh — Prometheus text exposition for route10 (spec: seam mail #103).
+#
+# ⛔ NOT DEPLOYED until the ops NETWORK-CONTRACT.md entry for the metrics
+# endpoint exists (contract-first — the endpoint is a shared value). Deploy:
+#   scp -> /cfg/scripts/metrics-www/metrics  (chmod +x)
+#   uhttpd -p 192.168.10.1:9100 -h /cfg/scripts/metrics-www -x /metrics
+#     (LAN-only bind; launched by post-cfg once the contract entry is in)
+#
+# Design: serves from data that already exists — the newest /a/stats.sql minute
+# (Alta rcstats) and the newest /a/obs/rt.sql sample (obs-collect.sh). NO live
+# probing from the request path: no i2c, no Boa, no stick telnet, no ubus. A
+# scrape can never perturb the box; staleness is exposed as *_timestamp_seconds
+# so the scraper alerts on it instead of us lying with old numbers.
+# Both DBs are opened read-only with a busy timeout.
+#
+# The scrape is trending/slow-degradation telemetry ONLY — it is pull over the
+# LAN and dies with it. The unconditional /cfg + /a records are the outage
+# telemetry. (Contract framing agreed in seam mail #101/#103.)
+
+printf 'Content-Type: text/plain; version=0.0.4\r\n\r\n'
+
+q() { sqlite3 -readonly -init /dev/null -cmd ".timeout 3000" "$1" "$2" 2>/dev/null; }
+
+# ── Alta rcstats: newest minute ─────────────────────────────────────────────
+q "file:/a/stats.sql?mode=ro" "
+SELECT
+  'route10_stats_minute_timestamp_seconds ' || ts || char(10) ||
+  'route10_load{stat=\"min\"} '  || json_extract(json,'\$.load.<') || char(10) ||
+  'route10_load{stat=\"avg\"} '  || json_extract(json,'\$.load.a') || char(10) ||
+  'route10_load{stat=\"max\"} '  || json_extract(json,'\$.load.>') || char(10) ||
+  'route10_mem_used_ratio{stat=\"min\"} ' || json_extract(json,'\$.mem.<') || char(10) ||
+  'route10_mem_used_ratio{stat=\"avg\"} ' || json_extract(json,'\$.mem.a') || char(10) ||
+  'route10_mem_used_ratio{stat=\"max\"} ' || json_extract(json,'\$.mem.>') || char(10) ||
+  'route10_temp_celsius{stat=\"min\"} '   || json_extract(json,'\$.temp.<') || char(10) ||
+  'route10_temp_celsius{stat=\"avg\"} '   || json_extract(json,'\$.temp.a') || char(10) ||
+  'route10_temp_celsius{stat=\"max\"} '   || json_extract(json,'\$.temp.>')
+FROM minutes ORDER BY ts DESC LIMIT 1;
+SELECT
+  'route10_switch_port_tx_bytes{port=\"' || je.key || '\"} ' || json_extract(je.value,'\$.tx') || char(10) ||
+  'route10_switch_port_rx_bytes{port=\"' || je.key || '\"} ' || json_extract(je.value,'\$.rx')
+FROM minutes m, json_each(m.json,'\$.ports') je
+WHERE m.ts = (SELECT max(ts) FROM minutes)
+  AND json_extract(je.value,'\$.tx') IS NOT NULL;
+"
+
+# ── obs-collect: newest per-minute sample ───────────────────────────────────
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT
+  'route10_rt_sample_timestamp_seconds ' || ts || char(10) ||
+  'route10_eth_carrier{iface=\"eth4\"} ' || COALESCE(json_extract(json,'\$.carrier.eth4'),'NaN') || char(10) ||
+  'route10_eth_carrier{iface=\"eth5\"} ' || COALESCE(json_extract(json,'\$.carrier.eth5'),'NaN') || char(10) ||
+  'route10_brlan_addr_present{family=\"ipv4\"} '     || COALESCE(json_extract(json,'\$.addr.v4'),'NaN')  || char(10) ||
+  'route10_brlan_addr_present{family=\"ipv6_gua\"} ' || COALESCE(json_extract(json,'\$.addr.gua'),'NaN') || char(10) ||
+  'route10_brlan_addr_present{family=\"ipv6_ula\"} ' || COALESCE(json_extract(json,'\$.addr.ula'),'NaN') || char(10) ||
+  'route10_wan3_up ' || COALESCE(json_extract(json,'\$.addr.wan3'),'NaN') || char(10) ||
+  'route10_conntrack_entries ' || COALESCE(json_extract(json,'\$.ct.n'),'NaN')   || char(10) ||
+  'route10_conntrack_limit '   || COALESCE(json_extract(json,'\$.ct.max'),'NaN') || char(10) ||
+  'route10_softnet_dropped_total '     || COALESCE(json_extract(json,'\$.softnet.drop'),'NaN')    || char(10) ||
+  'route10_softnet_timesqueeze_total ' || COALESCE(json_extract(json,'\$.softnet.squeeze'),'NaN') || char(10) ||
+  'route10_optical_power_dbm{module=\"L4\",dir=\"tx\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_tx'),'NaN') || char(10) ||
+  'route10_optical_power_dbm{module=\"L4\",dir=\"rx\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_rx'),'NaN') || char(10) ||
+  'route10_optical_power_dbm{module=\"W2\",dir=\"tx\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_tx'),'NaN') || char(10) ||
+  'route10_optical_power_dbm{module=\"W2\",dir=\"rx\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_rx'),'NaN') || char(10) ||
+  'route10_optical_temp_celsius{module=\"L4\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_t'),'NaN') || char(10) ||
+  'route10_optical_temp_celsius{module=\"W2\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_t'),'NaN')
+FROM samples ORDER BY ts DESC LIMIT 1;
+"
+
+# ── live, but read-only-cheap ───────────────────────────────────────────────
+echo "route10_pstore_files $(ls /sys/fs/pstore 2>/dev/null | wc -l)"
