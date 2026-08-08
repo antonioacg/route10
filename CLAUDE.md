@@ -48,6 +48,30 @@ telnet probes — they orphan the lock too.
   *preferred* address for up to 24 h. Quiet when healthy. Log:
   `/cfg/scripts/prefix-track.log`. Sources: `scripts/lan-prefix-track.sh` +
   `scripts/ra-deprecate.py`. See `project_route10_stale_ipv6_prefix.md`.
+- **Observability stack on `/a` (2026-08-08, post-wedge)** — Alta's firmware
+  `rcstats` daemon writes per-minute load/mem/temp (min-avg-max), per-switch-port
+  and per-client DPI counters to the SQLite DB **`/a/stats.sql`** (`/a` = 3.1 G
+  persistent ext4, survives reboots AND firmware updates; on-box `sqlite3` 3.40
+  with JSON1). Its `minutes` table is a rolling ~60-min window, so:
+  - `/cfg/scripts/stats-archive.sh` (`*/30` cron) — copies rows into
+    `/a/obs/stats-archive.sql`; 60-day minute retention. Source: `scripts/stats-archive.sh`.
+  - `/cfg/scripts/obs-collect.sh` (`* * * * *` cron, ~50 ms) — per-minute samples
+    of the CPU-side counters rcstats can't see (CPU/softirq, softnet, br-lan/
+    pppoe-wan3/tailscale0/eth4/eth5 counters + carriers, br-lan addr presence,
+    conntrack, L4+W2 DDM) → `/a/obs/rt.sql`, 90-day retention. Also drains the
+    kernel ring persistently to `/a/obs/kernel-ring.log` and harvests pstore
+    crash records to `/a/obs/pstore/` with an `err` line (alertable ops-side).
+    NEVER touches stick telnet/Boa. Source: `scripts/obs-collect.sh`.
+  - **`/metrics` exporter** — second uhttpd on **`192.168.10.1:9100`** (LAN-only
+    bind, relaunched by post-cfg), CGI at `/cfg/scripts/metrics-www/metrics`
+    serving newest stats.sql + rt.sql rows (no live probing in the request
+    path). Shared value — governed by ops `NETWORK-CONTRACT.md` §"route10
+    metrics scrape"; ops scrapes every 2 min, trending telemetry ONLY (dies with
+    the LAN; the `/cfg` + `/a` records are the outage complement). Source:
+    `scripts/metrics-cgi.sh`.
+  - Syslog app names **`route10.odi-health` and `route10.dhcp-watchdog` are
+    FROZEN** — ops's `Route10SyslogSilent` dead-man alert keys on their absence
+    (contract-recorded). Never rename/retire them without telling ops first.
 - `/cfg/scripts/tailscale-reconcile.sh` — single owner of the **firmware-native
   Tailscale** integration (Alta's 2026-07-22 firmware auto-update ships
   `/usr/sbin/tailscaled` 1.98.4-1 + uci `/etc/config/tailscale`; NOT cloud-modeled,
