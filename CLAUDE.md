@@ -75,9 +75,13 @@ telnet probes — they orphan the lock too.
     SFF-8472 DDM can't show. Diag batch goes through `diag` **stdin + `exit`**
     (never bare `diag <subcmd>`, which strands the interactive prompt and wedges
     the single CLI); atomic `mkdir` overlap lock; raw blob stored only on a parse
-    anomaly. Sole stick-CLI user, so 1-min is safe. Source: `scripts/pon-collect.sh`.
-    Recover a wedged CLI with `scripts/stick-unwedge.sh` (no reboot; kills the
-    orphaned login/sh session, not just cli.pid). See `reference_odi_stick_arch_no_ssh.md`.
+    anomaly. Sole stick-CLI user, so 1-min is safe. **Self-heals a wedge**: on a
+    detected wedge it runs `stick-unwedge.sh` once (rate-limited 1/5min) and
+    re-polls, so a wedge costs ~1 cycle (<90 s staleness), not an open-ended
+    stall — only a wedge that needs a stick reboot stays stale. Source:
+    `scripts/pon-collect.sh`. Manual recovery: `scripts/stick-unwedge.sh` (no
+    reboot; kills the orphaned login/sh session, not just cli.pid). See
+    `reference_odi_stick_arch_no_ssh.md`.
   - **`/metrics` exporter** — second uhttpd on **`192.168.10.1:9100`** (LAN-only
     bind, relaunched by post-cfg), CGI at `/cfg/scripts/metrics-www/metrics`
     serving newest stats.sql + rt.sql rows (no live probing in the request
