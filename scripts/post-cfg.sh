@@ -634,23 +634,51 @@ install_connlimit_guard() {
     # concurrently with us); without -w our calls race it, fail, and get
     # swallowed by `|| true`, leaving the guard half applied (confirmed
     # 2026-07-18: missing v6 jump + duplicated rules).
-    ipt="$1 -w 10"; mask=$2; icmpreject=$3; warn=$4; block=$5
-    # -l1 suffix: layout v1 with the BLOCK-level LOG rule — bumping the suffix
-    # forces a one-time rebuild on chains built from the older layout.
-    mark="route10-connlimit-w${warn}b${block}-l1"
+    ipt="$1 -w 10"; mask=$2; icmpreject=$3; warn=$4; block=$5; rlist=$6
+    # -l2 suffix: layout v2 — per-SOURCE log gating via xt_recent. Bumping the
+    # suffix forces a one-time rebuild on chains built from the older layout.
+    #
+    # Why per-source: layout v1 rate-limited each LOG rule with a single shared
+    # `-m limit 6/hour` budget. 2026-08-08 CGNAT brownout: the offender (.200,
+    # 787 UDP packets rejected at the BLOCK tier) burned the budget silently
+    # while the victim's retry storm (.141, 5 TCP blocks) caught the logging
+    # window — so ops's Route10ConnlimitBlock alert NAMED THE VICTIM and the
+    # offender never reached Loki. With a per-source gate every over-cap host
+    # logs at most once per 10 min (sustained floods re-fire each window), and
+    # one host's flood can never consume another host's visibility.
+    # hashlimit would be the textbook tool but Alta ships the kernel module
+    # without libxt_hashlimit.so; xt_recent (both halves present) does the job.
+    mark="route10-connlimit-w${warn}b${block}-l2"
     $ipt -N RT10_CONNLIMIT 2>/dev/null || true
-    # Rebuild the chain ONLY when it is absent or the thresholds changed — the
+    $ipt -N RT10_CL_LOGW 2>/dev/null || true
+    $ipt -N RT10_CL_LOGB 2>/dev/null || true
+    # Rebuild the chains ONLY when absent or the thresholds changed — the
     # trailing marker rule encodes the active WARN/BLOCK. Skipping an unchanged
     # rebuild preserves connlimit's live accounting, so a post-cfg re-run (e.g.
     # after a cloud reapply) never flushes the counters and briefly un-protects a
     # host mid-flood. A real threshold edit changes the marker → clean rebuild.
     if ! $ipt -S RT10_CONNLIMIT 2>/dev/null | grep -q -- "$mark"; then
         $ipt -F RT10_CONNLIMIT 2>/dev/null || true
-        # WARN: log (rate-limited, non-terminating) — the "rogue client" smell signal.
+        $ipt -F RT10_CL_LOGW 2>/dev/null || true
+        $ipt -F RT10_CL_LOGB 2>/dev/null || true
+        # Logging subchains: skip a source already logged in the last 10 min,
+        # else mark it (targetless rule — match side effect only) and log. The
+        # trailing shared `-m limit` is only a kernel-log flood backstop (e.g. a
+        # storm of spoofed sources thrashing the 100-entry recent list); in
+        # normal operation the per-source gate bounds volume by itself. Caveat:
+        # a source suppressed by the backstop is still marked, so its line waits
+        # for the next 10-min window — visibility deferred, never stolen.
+        for _tier in "W route10.connlimit warn: " "B route10.connlimit block: "; do
+            _c="RT10_CL_LOG${_tier%% *}"; _pfx="${_tier#* }"; _rl="${rlist}$(echo "${_tier%% *}" | tr 'WB' 'wb')"
+            $ipt -A "$_c" -m recent --name "$_rl" --rcheck --seconds 600 -j RETURN 2>/dev/null || true
+            $ipt -A "$_c" -m recent --name "$_rl" --set 2>/dev/null || true
+            $ipt -A "$_c" -m limit --limit 240/hour --limit-burst 30 \
+                -j LOG --log-prefix "$_pfx" --log-level warning 2>/dev/null || true
+        done
+        # WARN: log (per-source gated, non-terminating) — the "rogue client" smell.
         $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
             -m connlimit --connlimit-above "$warn" --connlimit-mask "$mask" --connlimit-saddr \
-            -m limit --limit 6/hour --limit-burst 5 \
-            -j LOG --log-prefix "route10.connlimit warn: " --log-level warning 2>/dev/null || true
+            -j RT10_CL_LOGW 2>/dev/null || true
         # BLOCK: reject further NEW flows from an over-cap host (existing flows survive).
         # A firewall reject can't carry text — the client only gets an errno — so pick
         # the one that reads as "something said no", not "the network is broken":
@@ -659,12 +687,11 @@ install_connlimit_guard() {
         # We deliberately do NOT use admin/host-unreachable: those surface as the
         # misleading "Host is unreachable" — the string the ISP CGNAT sent when IT
         # starved us. The real "why" lives in the route10.connlimit WARN log above.
-        # BLOCK is also LOGGED (rate-limited) before the rejects — a silently
+        # BLOCK is also LOGGED (per-source gated) before the rejects — a silently
         # capping firewall is un-alertable; ops keys an ntfy alert on this line.
         $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
             -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
-            -m limit --limit 6/hour --limit-burst 5 \
-            -j LOG --log-prefix "route10.connlimit block: " --log-level warning 2>/dev/null || true
+            -j RT10_CL_LOGB 2>/dev/null || true
         $ipt -A RT10_CONNLIMIT -p tcp -m conntrack --ctstate NEW \
             -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
             -j REJECT --reject-with tcp-reset 2>/dev/null || true
@@ -680,8 +707,8 @@ install_connlimit_guard() {
         $ipt -I FORWARD 1 -i br-lan -o pppoe-wan3 -j RT10_CONNLIMIT 2>/dev/null || true
     fi
 }
-install_connlimit_guard iptables  32  icmp-port-unreachable  "$CONNLIMIT_V4_WARN" "$CONNLIMIT_V4_BLOCK"
-install_connlimit_guard ip6tables 128 icmp6-port-unreachable "$CONNLIMIT_V6_WARN" "$CONNLIMIT_V6_BLOCK"
+install_connlimit_guard iptables  32  icmp-port-unreachable  "$CONNLIMIT_V4_WARN" "$CONNLIMIT_V4_BLOCK" cl4
+install_connlimit_guard ip6tables 128 icmp6-port-unreachable "$CONNLIMIT_V6_WARN" "$CONNLIMIT_V6_BLOCK" cl6
 
 # ── WAN default-route hook (netifd proto_set_keep reconnect bug) ─────────────
 # netifd drops the WAN default route on PPP reconnect: its cache still believes
