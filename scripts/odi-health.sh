@@ -153,6 +153,47 @@ except: print('-')" 2>/dev/null)
     fi
     PREV_CRC="$CRC"
 
+    # --- WAN / stick alerting (added after the 2026-08-08 outage) ------------
+    # Both signals below were already being emitted, correctly, every cycle for
+    # 24 min — at `info`, the same severity as a healthy line, so nothing
+    # downstream could act on them. Severity is what makes them alertable.
+    # See docs/postmortems/2026-08-08-ipstack-wedge-lan-outage.md.
+    #
+    # wan3 warns EVERY cycle while down (not just on the edge): a continuous
+    # signal is what a `count_over_time`/`present` rule can fire on, it shows
+    # the outage duration, and it survives a collector that missed the single
+    # transition line. At a 300 s interval that is 12 lines/h — not noisy.
+    # `carrier`+`pppd` ride along because that is the whole diagnosis: carrier=1
+    # with pppd=1 and no IP means the PPPoE SESSION died, not the link.
+    if [ "$WAN3_UP" != "true" ]; then
+        # Only claim "session-layer" when the link is actually still up — with
+        # carrier=0 this is a plain link drop and that hint would be wrong.
+        WAN3_HINT=""
+        [ "$CARRIER" = "1" ] && WAN3_HINT=" (carrier up => PPPoE session died, not a link drop)"
+        warn "wan3 DOWN — ip=$WAN3_IP pppd=$PPPD carrier=$CARRIER speed=$SPEED $PING$WAN3_HINT"
+    elif [ -n "$PREV_WAN3_UP" ] && [ "$PREV_WAN3_UP" != "true" ]; then
+        event "wan3 recovered — ip=$WAN3_IP"
+    fi
+    PREV_WAN3_UP="$WAN3_UP"
+
+    # Stick mgmt path warns on TRANSITION only — it is the corroborating signal,
+    # and edge-triggering keeps a long outage from emitting two near-identical
+    # warns per cycle alongside the wan3 one above.
+    #
+    # Deliberately states the OBSERVATION, not a cause: on 2026-08-08 this fired
+    # together with wan3-down and it was tempting to call it "the stick wedged",
+    # but the same pair is equally consistent with a host-side datapath fault —
+    # both these probes leave via eth4. Don't let an alert assert a diagnosis the
+    # evidence doesn't carry.
+    if [ "$W2_DDM" = "W2_mgmt_path_down" ]; then
+        [ "$PREV_W2_DOWN" = 1 ] || \
+            warn "W2 stick mgmt path DOWN (192.168.1.2 -> 192.168.1.1 unreachable via eth4 macvlan) — stick-side OR host-side eth4 datapath; check wan3 state to narrow"
+        PREV_W2_DOWN=1
+    else
+        [ "$PREV_W2_DOWN" = 1 ] && event "W2 stick mgmt path recovered"
+        PREV_W2_DOWN=0
+    fi
+
     # Full verbose line -> persistent file (all 13 thermal zones + full DDM + CRC).
     # Size-rotate at 2 MiB (keep .1): this append bypasses obs_file, and /cfg is
     # only 26 MB — the unrotated log had grown to 7.4 MB by 2026-07-22.

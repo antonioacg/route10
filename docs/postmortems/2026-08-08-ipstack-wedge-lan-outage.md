@@ -1,0 +1,206 @@
+# Post-mortem — 2026-08-08 whole-LAN outage (route10 IP-stack wedge; switch ASIC kept forwarding)
+
+**Status:** root cause **LOCALIZED with packet-level evidence** — route10's **CPU-mediated network
+stack** wedged while the **switch ASIC kept forwarding**. Onset bracketed to a **~98-second
+window**. The precise kernel fault is not identified and, absent a repeat with better
+instrumentation, may not be identifiable.
+
+**One-line:** In a ~98 s window ending by 19:20:23 UTC, route10 stopped answering for **its own
+IP** — LAN ARP, the eth4 management MACVLAN and the PPPoE session all died together — while the
+hardware switch provably continued flooding broadcast and forwarding unicast between wired ports.
+Userspace (cron, odi-health) ran throughout. Only a power cycle recovered it.
+
+Sibling incidents: [`2026-07-08-wan3-route-loss.md`](2026-07-08-wan3-route-loss.md),
+[`2026-06-24-power-surge-dhcp.md`](2026-06-24-power-surge-dhcp.md).
+
+---
+
+## 1. Impact
+
+- **27.0 minutes** of total LAN isolation — `19:18:45Z → 19:45:45Z` (16:18–16:45 local, UTC−3).
+- Whole LAN lost internet **and** DNS; clients resolve via route10.
+- **WiFi clients were more isolated than wired ones** (§4) — wired hosts could still reach each
+  other, WiFi hosts lost broadcast into the wired segment.
+- Recovered only by operator power cycle. No config change involved. No data loss.
+
+---
+
+## 2. Timeline
+
+Two independent clocks, reconciled. route10's `/cfg/scripts/*.log` stamp **LOCAL (UTC−3)**;
+the ops collector stamps **receive time in UTC** and is the authority for cross-host correlation.
+All times below are **UTC**.
+
+| UTC | Event | Source |
+|---|---|---|
+| 19:16:58 | odi-health healthy — **reached the collector** | ops Loki |
+| 19:15:08 | `dhcp-watchdog` heartbeat `checks=2942`; cadence ~5 m15 s ⇒ next due **~19:20:23** | ops Loki |
+| 19:18:44–45 | **Full dual-stack DHCP negotiation completes** for the operator's Mac — v6 SOLICIT→ADVERTISE→REQUEST→REPLY *and* v4 DISCOVER→OFFER→REQUEST→ACK, in the final 1.0 s | ops Loki |
+| **19:18:45.0946** | **LAST line ever received.** A `DHCPACK(br-lan) 192.168.10.140` | ops Loki |
+| **(19:18:45.09 , ~19:20:23]** | **LAN forwarding path dies — ~98 s bracket.** Next heartbeat never arrives | ops Loki |
+| 19:21:58 | odi-health records `wan3_up=false ip=- pppd=1 carrier=1 ping_fail` + `W2_mgmt_path_down` — **written to `/cfg`, never delivered** | route10 `/cfg` |
+| 19:26–19:42 | Four more identical cycles, all logged locally, none delivered | route10 `/cfg` |
+| 19:36:24 | Headscale marks route10 offline (keepalive reap — lags the fault) | Headscale |
+| **19:45:22** | Operator power cycle; reset reason `Power on Reset [0x20]` | `/proc/uptime`, SCM |
+| 19:45:45.8548 | **First line after the gap** — boot config replay. Gap = **1620.8 s** | ops Loki |
+| 19:49:41 | mesh-health self-heals tailscaled (stopped by the cloud reapply at 19:45:37) | route10 `/cfg` |
+| 19:50:01 | route10 back on the mesh, `tag:home-router` intact, all four routes serving | Headscale |
+
+**The asymmetry that closes the bracket:** the 19:16:58 odi-health line reached the collector; the
+19:21:58 one did not. It exists on `/cfg` but never crossed the LAN — independently confirming the
+LAN path was already dead by 19:21:58, from a source that knows nothing about DHCP.
+
+---
+
+## 3. What failed, and what did not
+
+| Died in the ~98 s window | Ran normally throughout |
+|---|---|
+| ARP replies for `192.168.10.1` (LAN) | odi-health cron, every 5 min, writing to `/cfg` |
+| PPPoE session (`ip=-`, **`pppd=1`**, **`carrier=1`**) | `pppd` process alive; PHY carrier up at 1000 |
+| eth4 management MACVLAN (`192.168.1.2 → .1`) | i2c/DDM reads, all 13 thermal zones |
+| WiFi→wired broadcast/flood path | **Switch ASIC: broadcast flooding + unicast forwarding** |
+| Syslog egress to `.242:514` | dnsmasq had been serving leases 1 s earlier |
+
+**br-lan was not degrading — it was perfect, then gone.** A complete dual-stack lease negotiation
+finished 1.0 s before the last line. At 19:18:45.094 `br-lan` held its address, dnsmasq was bound
+and answering broadcast, and the forwarding path to the collector was intact.
+
+**Zero interface events preceded it.** A query of 19:00–19:19Z for
+`netifd|pppd|padt|auth|eth4|eth5|carrier|link up/down|br-lan: port|interface down` returned **five
+matches, none of them an event** — four odi-health lines merely *reporting* state, one connlimit
+warn. No netifd, no PADT, no AUTH, no link transition, no bridge port state change. The LAN died
+without the stack emitting a single interface event.
+
+---
+
+## 4. The decisive evidence — packet capture during the outage
+
+`tcpdump -e arp` on a wired host's bridge, mid-outage:
+
+```
+16:36:24  .200 > ff:ff:ff:ff:ff:ff   who-has 192.168.10.1  tell 192.168.10.200   (no reply)
+16:36:27  .72  > ff:ff:ff:ff:ff:ff   who-has 192.168.10.1  tell 192.168.10.72    (no reply)
+16:36:28  .11  > e6:35:…             who-has 192.168.10.200 tell 192.168.10.11
+16:36:28  e6:35:… > .11              Reply  192.168.10.200 is-at e6:35:…         ← ANSWERED
+16:36:28  .11  > e6:35:…             who-has 192.168.10.241 tell 192.168.10.11
+16:36:28  e6:35:… > .11              Reply  192.168.10.241 is-at e6:35:…         ← ANSWERED
+```
+
+Three independent wired hosts broadcast for `.1` → **zero replies, ever**. In the same capture
+window, broadcasts for `.200` and for the `.240`/`.241` VIPs were **flooded and answered normally**.
+
+**The switch ASIC was provably still flooding broadcast and forwarding unicast between wired
+ports. Only route10's own IP stack stopped answering for its own address.**
+
+A second observation constrains it further: a WiFi client stayed associated and kept passing
+**unicast** over already-learned MAC paths (its ICMP to `.200` was answered), but a forced
+**broadcast** ARP never appeared on the wired segment at all, while a wired host's did in the same
+window. Broadcast/flood between the WiFi and wired domains is **CPU-mediated**; unicast over
+learned ASIC paths is not. That is why WiFi clients were more isolated than wired ones.
+
+---
+
+## 5. Root cause
+
+**route10's kernel network stack — the CPU-mediated datapath — wedged.** One fault took
+`br-lan`'s IP stack, the eth4 management MACVLAN and the PPPoE session together, left the switch
+ASIC forwarding, and left userspace scheduling normally. It did not clear itself in 27 minutes and
+required a power cycle.
+
+Supporting detail, from route10's own thermals: **`tz_max` stepped 58.9 → 60.2 °C at the failure
+cycle and stayed at 59.8–60.5 for the whole outage, then fell back to 58.9 after recovery — while
+traffic was zero.** An idle box cools. Temperature *rising* under no load means something was
+spinning, which points at a kernel livelock/spin rather than a clean hang or a thermal event.
+
+The specific kernel fault is **not identified**. The QCA NSS/PPE datapath driver is the leading
+candidate on shape alone (it owns exactly the CPU-path plumbing that failed while the ASIC it
+programs kept running), but there is **no direct evidence** — `pstore` is empty, the kernel ring is
+volatile and was destroyed by the reboot, and `route-swd` keeps no persistent log.
+
+### Ruled out
+
+| Hypothesis | Why it's dead |
+|---|---|
+| **ODI stick wedge** (the original call in this document) | A stick fault cannot stop `br-lan` answering ARP — the stick is not on the LAN. It explains the WAN and mgmt symptoms only because **both those probes leave via eth4**. It was a symptom, named as a cause. |
+| **Power loss / crash / reboot** | odi-health logged to `/cfg` every 5 min throughout; SCM reset reason is `Power on Reset [0x20]`, i.e. the operator's unplug, not a watchdog. |
+| **Office fibre (eth5) optical** | `L4_rx_dBm` held −15.7 with zero CRC growth — **but note this alone proves nothing** (§7). It is excluded by the packet capture: the wired segment was still being flooded and answered. |
+| **Switch ASIC failure** | Directly refuted by the capture — it was forwarding and flooding correctly. |
+| **Memory pressure / OOM** | 705 MB free of 1 GB; `/` tmpfs 21%; no OOM in dmesg. |
+| **`route-defaultroute-hook.sh`** | Runs `* * * * *` and touches WAN state, but only ever calls `ip route replace default`. Cannot affect `br-lan`. |
+| **Loki ingest artifact** (would have invalidated the whole timeline) | Ruled out three ways, decisively by **route10's own monotonic `checks=` counter**: 268 heartbeats in 24 h, every consecutive delta exactly 7, one anomaly = the reboot reset. Nothing was dropped. |
+
+### Unproven contributing factor
+
+A LAN host was driving a BitTorrent swarm before and after the outage (`RT10_CONNLIMIT` firing on
+6881/51413). High concurrent-flow load is a plausible stressor for the offload path, but **nothing
+links it to the fault** and it should not be presented as a cause.
+
+---
+
+## 6. Why nothing alerted
+
+- `wan3_up=false`, `ping_fail` and `W2_mgmt_path_down` were emitted **every cycle for 24 minutes**
+  at `info` — the same severity as a healthy line — so nothing downstream could distinguish them.
+  Fixed in this change (§8).
+- It would not have mattered on the night: **the alert path is syslog over the LAN**, and the LAN
+  was the casualty. See §7.
+
+---
+
+## 7. The systemic findings
+
+**(a) Telemetry cannot survive the failure it needs to report.** Syslog forwards
+fire-and-forget UDP over the LAN to `.242:514` — no buffering, no retry, no store-and-forward. The
+27 minutes of local evidence were written to `/cfg` and **dropped at source**. `/var/log/messages`
+is a 64 KiB volatile ring destroyed by the recovery reboot. At the moment the box had most to say,
+it could neither send nor remember.
+
+The one thing that *did* survive is what made this RCA possible: **odi-health's persistent `/cfg`
+log**. It is the control that proved the box never died — and it disproved the ops side's initial
+"power loss or CPU hang" reading, which rested on syslog silence. Both sides independently made
+the same error today: **treating the silence of a channel as evidence about the health of its
+source, when the silence was the symptom.**
+
+**(b) Optical power is not link state.** `L4_rx_dBm` is an i2c read of the module; it reports
+**light**, not link, and reads normally across a port that is down or wedged. This document's first
+draft used it to "exonerate the fibre" — unsupported. Carrier/operstate are the load-bearing
+fields, and odi-health records them for **eth4 only**; `eth5` and `br-lan` are not instrumented at
+all. That gap is why the LAN failure could not be explained from route10's own logs.
+
+**(c) There is no out-of-band access, and an ACL change would not have created one.** Mid-outage
+route10 was `online=False` on the mesh (19:36:24Z → 19:50:01Z). A mesh `:22` grant would **not**
+have helped: tailscaled needs the WAN, which had died. **Every remote path shares the WAN.** A
+lifeline that survives this class of fault must not depend on it — a physically separate path, not
+a policy change.
+
+---
+
+## 8. Actions
+
+**Done in this change:**
+
+- `scripts/odi-health.sh` — escalate WAN/stick signals to `warn` so they are alertable:
+  `wan3_up != true` warns every cycle (continuous signal a rule can fire on, and it shows outage
+  duration); `W2_mgmt_path_down` warns on transition only. The wan3 message distinguishes
+  session-layer failure from a link drop via `carrier`. Deliberately **states observation, not
+  cause** — both probes leave via eth4, so the pair is equally consistent with stick-side and
+  host-side faults.
+
+**Recommended, not done here:**
+
+1. **Instrument `eth5` and `br-lan`** (carrier, operstate, address presence). Not in odi-health —
+   that script owns the ODI/GPON/WAN path and LAN link state is not its job. This wants its own
+   small collector.
+2. **Metrics, not just logs.** route10 already computes ~20 useful values every 5 min; only
+   `tz_max`, `L4_rx`, `W2_rx` and a CRC token reach the stack, as text, retained ~4 days on a
+   26 MB `/cfg`. Today's most diagnostic signal — `tz_max` rising while traffic was zero — is
+   invisible to the stack. Proposed: expose what odi-health already computes as Prometheus
+   metrics. Prometheus/Grafana are ops-side ⇒ **contract-first**.
+3. **A lifeline independent of the WAN** (§7c).
+4. **Alert rules on `route10.*` at `warning`+.** Emitted errors are safe to alert on; silence is
+   not health.
+
+**Watch item:** office fibre Rx **−15.69 dBm**, 0.31 dB from the −16.0 low-warning threshold and
+~1 dB down from the −14.69 measured after the 2026-08-07 reseat. Not implicated here, but trending
+the wrong way. `L4_temp_C` runs **69.4–70.3 °C**, at/above the usual 70 °C commercial SFP limit.
