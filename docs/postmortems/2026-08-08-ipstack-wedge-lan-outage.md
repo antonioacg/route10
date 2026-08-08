@@ -108,15 +108,58 @@ learned ASIC paths is not. That is why WiFi clients were more isolated than wire
 ASIC forwarding, and left userspace scheduling normally. It did not clear itself in 27 minutes and
 required a power cycle.
 
-Supporting detail, from route10's own thermals: **`tz_max` stepped 58.9 → 60.2 °C at the failure
-cycle and stayed at 59.8–60.5 for the whole outage, then fell back to 58.9 after recovery — while
-traffic was zero.** An idle box cools. Temperature *rising* under no load means something was
-spinning, which points at a kernel livelock/spin rather than a clean hang or a thermal event.
+What the box's own flight data says about the mechanism: **the box was idle, not spinning.**
+Alta's `rcstats` daemon keeps per-minute min/avg/max samples in `/a/stats.sql`, and the wedge
+window was preserved from it before the rolling 60-minute window aged out:
+
+| | inside the wedge (19:37–19:44 UTC) | after recovery (19:45–20:52) |
+|---|---|---|
+| load | avg **0.031**, peak **0.188** | avg 0.018, peak **0.500** |
+| temp | avg 57.4 °C, range 55.6–62.1 | avg 56.6 °C, range 54.7–63.7 |
+
+Load through the outage was indistinguishable from idle — it peaked *higher* after recovery than
+during it — and the temperature bands overlap completely. **An earlier draft of this document
+claimed the opposite** ("`tz_max` rose 58.9 → 60.2 °C at zero traffic; an idle box cools, so
+something was spinning ⇒ livelock"). That single-sensor step sits well inside the 54.7–63.7 °C
+band the same sensor wandered through the following idle hour: it was noise, read as signal. The
+retraction sharpens the finding rather than weakening it — an idle CPU with a dead network stack
+is a **deadlock / stuck state, a wait that never returns — not a livelock** — which also fits
+pstore's silence and the absence of any RCU-stall report.
+
+The same source adds one hard datum route10's own logs never carried: **switch port 5 (eth4)
+counted zero received bytes for every minute of the wedge while the box kept transmitting
+51–56 KB/min out of it.** At the ASIC counter this cannot discriminate "host ingress path dead"
+from "stick stopped transmitting" — but a stick-only fault is already excluded by the LAN evidence,
+so it reads as the WAN-side face of the same one-sided stop. Ports 1 and 4 (LAN) passed traffic in
+**both** directions every minute throughout — the ASIC-keeps-forwarding conclusion confirmed a
+second time, from the box's own counters, independent of the packet capture.
 
 The specific kernel fault is **not identified**. The QCA NSS/PPE datapath driver is the leading
 candidate on shape alone (it owns exactly the CPU-path plumbing that failed while the ASIC it
-programs kept running), but there is **no direct evidence** — `pstore` is empty, the kernel ring is
-volatile and was destroyed by the reboot, and `route-swd` keeps no persistent log.
+programs kept running), but there is **no direct evidence**.
+
+Why no evidence — and one correction to an earlier draft of this document:
+
+- **`pstore` is empty, and that is a FINDING, not a gap.** It is ramoops-backed and functional
+  (`pstore: Registered ramoops as persistent store backend`, `0x40000@0x41000000`, deflate
+  compression) and it *does* survive reboot. Empty therefore means **no kernel panic and no oops
+  occurred** — positive evidence for a livelock/wedge over a crash. An earlier draft listed it as
+  a missing capability; that was wrong.
+- **This kernel has no soft-lockup or hung-task detector.** `/proc/sys/kernel/` exposes only
+  `panic`, `panic_on_oops`, `panic_on_rcu_stall`, `panic_on_warn`, `panic_print` — no `watchdog`,
+  no `soft_watchdog`, no `hung_task_*`. **A CPU spinning in kernel space produces no message at
+  all**, so even a perfectly preserved kernel ring would have been silent about it. RCU-stall
+  detection *is* compiled in, so that class would have been reported and was not.
+- The **kernel ring is volatile** (~36 KB) and was destroyed by the recovery reboot — a real gap,
+  and the one of these three that is fixable.
+- **`route-swd` keeps no persistent log**, and it is Alta's production switch daemon — capturing
+  its stderr would mean restarting the process that runs the switch. Accepted, not fixed.
+
+The practical consequence is narrower than an earlier draft stated: the spin question **was**
+answered — by Alta's per-minute `rcstats` sampling, which showed idle (§5 table) — but nothing on
+the box can say *what* the stack was blocked on. The mechanism is bounded (deadlock-class, not
+spin, not crash), not identified. What nearly lost the evidence was retention, not sampling:
+the `minutes` window is ~60 minutes and survived only as a hand-taken copy. Addressed in §8.
 
 ### Ruled out
 
@@ -186,17 +229,25 @@ a policy change.
   session-layer failure from a link drop via `carrier`. Deliberately **states observation, not
   cause** — both probes leave via eth4, so the pair is equally consistent with stick-side and
   host-side faults.
+- `scripts/stats-archive.sh` — **flight recorder**. Alta's `rcstats` already samples this box
+  per-minute (load/mem/temp min-avg-max, per-port and per-client counters) into `/a/stats.sql`;
+  it is the data that settled §5, and its `minutes` table is a rolling ~60-min window. The
+  archiver copies it every 30 min into `/a/obs/stats-archive.sql` (persistent 3.1 G partition,
+  60-day minute retention ≈ 175 MB) so the next incident's evidence doesn't depend on a human
+  taking a copy within the hour. `*/30` cron, reinstalled by post-cfg.
 
 **Recommended, not done here:**
 
 1. **Instrument `eth5` and `br-lan`** (carrier, operstate, address presence). Not in odi-health —
-   that script owns the ODI/GPON/WAN path and LAN link state is not its job. This wants its own
-   small collector.
-2. **Metrics, not just logs.** route10 already computes ~20 useful values every 5 min; only
-   `tz_max`, `L4_rx`, `W2_rx` and a CRC token reach the stack, as text, retained ~4 days on a
-   26 MB `/cfg`. Today's most diagnostic signal — `tz_max` rising while traffic was zero — is
-   invisible to the stack. Proposed: expose what odi-health already computes as Prometheus
-   metrics. Prometheus/Grafana are ops-side ⇒ **contract-first**.
+   that script owns the ODI/GPON/WAN path and LAN link state is not its job. A first cut
+   (`lan-health.sh`) was built and then deliberately reverted: 5-min cron sampling structurally
+   cannot see a ~98 s onset, and Alta's own per-minute sampling already covers most of it. The
+   redesign builds on `stats.sql` instead of adding parallel collectors.
+2. **Metrics, not just logs.** Expose what the box already knows — the latest `stats.sql` minute
+   (load/mem/temp/ports), live optical DDM, carrier/wan3 state — as a Prometheus endpoint, rather
+   than re-sampling anything. Prometheus/Grafana are ops-side ⇒ **contract-first**; a scrape is
+   also pull-over-LAN, so it dies with the LAN — it buys trending and slow-degradation alerting,
+   never outage telemetry. The unconditional `/cfg` + `/a` records are the complement.
 3. **A lifeline independent of the WAN** (§7c).
 4. **Alert rules on `route10.*` at `warning`+.** Emitted errors are safe to alert on; silence is
    not health.
