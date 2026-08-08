@@ -741,6 +741,20 @@ if [ -x "$MESHHEALTH" ]; then
     fi
 fi
 
+# ── Alta stats flight recorder ───────────────────────────────────────────────
+# rcstats (Alta firmware) keeps per-minute load/mem/temp min-avg-max, per-port
+# and per-client counters in /a/stats.sql — but `minutes` is a rolling ~60-min
+# window. stats-archive.sh copies the rows into /a/obs/stats-archive.sql every
+# 30 min so incident evidence outlives the window (the 2026-08-08 RCA hinged on
+# a hand-taken copy). See scripts/stats-archive.sh.
+STATSARCHIVE=/cfg/scripts/stats-archive.sh
+if [ -x "$STATSARCHIVE" ]; then
+    if ! grep -qF "$STATSARCHIVE" /etc/crontabs/root 2>/dev/null; then
+        echo "*/30 * * * * $STATSARCHIVE" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── daemons ────────────────────────────────────────────────────────────────
 # Idempotent launchers — only start each daemon if not already running.
 # pgrep -f matches the full command line, including the script path, so the
