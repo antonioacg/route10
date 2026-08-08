@@ -1,5 +1,8 @@
 #!/bin/sh
-# stats-archive.sh — persist Alta's own telemetry beyond its rolling windows.
+# stats-archive.sh — persist Alta's own telemetry beyond its rolling windows,
+# and enforce the hard storage cap for everything under /a/obs (see the cap
+# section at the foot of the file — it's the single janitor for the whole dir,
+# not just this DB).
 #
 # Alta's rcstats daemon already samples this box better than anything we could
 # bolt on: /a/stats.sql gets a per-minute row with intra-minute min/avg/max for
@@ -71,11 +74,72 @@ set -- $(echo "$OUT" | tail -n1)
 SIZE=$(wc -c < "$DST" 2>/dev/null)
 log "archived: minutes=$1 hours=$2 days=$3 db_bytes=$SIZE"
 
-# Belt-and-suspenders on the disk itself: /a also hosts a 2G swap file and
-# routedns. If free space decays toward nothing the prune horizon must shrink
-# BEFORE writes start failing — warn at 200 MB so a human decides.
+# ── hard storage cap for /a/obs ─────────────────────────────────────────────
+# The per-table time prunes above (and in obs-collect/pon-collect) bound row
+# AGE. This bounds total BYTES — a safety net against row-size growth beyond
+# projection (a stats.sql per-client DPI balloon, an obs-collect regression, a
+# pstore crash-loop) filling /a, which it shares with the 2G swap + routedns.
+#
+# Projected steady state is ~300 MB (stats-archive ~175 + rt.sql samples ~90 +
+# pon ~33). Cap at 500 MB: generous headroom over projection, and /a has ~960 MB
+# free so this still leaves a wide margin. A normal run is a no-op — the trim
+# only fires on a genuine overrun, and it WARNS when it does because a breach
+# means a projection was wrong and a human should see why.
+#
+# When breached: cap the pstore dir (crash-loop guard), hard-rotate the ring
+# log, then delete the oldest ~25% of every table in each DB and VACUUM to
+# actually reclaim the file (SQLite reuses freed pages but never shrinks the
+# file on its own). Loop a few times; if still over, escalate to err.
+#
+# NOTE: trimming is oldest-first, so preserved incident data (deliberately the
+# oldest rows) is the first thing a cap breach — or the routine time-prune —
+# sacrifices. That's acceptable BY DESIGN: this is a forensic buffer, not a
+# permanent archive. An incident's *conclusions* belong in a committed
+# postmortem well within the 60/90-day window; the raw rows are only needed
+# long enough to reach them. Don't rely on this DB to hold evidence forever.
+OBS_DIR=/a/obs
+OBS_CAP_KB=512000
+
+obs_usage_kb() { du -sk "$OBS_DIR" 2>/dev/null | awk '{print $1}'; }
+trim_db_oldest() {   # $1=db — drop oldest ~25% of every table, then reclaim
+    _db=$1; [ -f "$_db" ] || return 0
+    for _t in $(sqlite3 "$_db" "SELECT name FROM sqlite_master WHERE type='table';" 2>/dev/null); do
+        # OFFSET count/4 => the 25th-percentile ts; deletes rows older than it.
+        # count/4==0 on a tiny table => OFFSET 0 => deletes nothing (safe no-op).
+        sqlite3 "$_db" "DELETE FROM $_t WHERE ts < (SELECT ts FROM $_t ORDER BY ts LIMIT 1 OFFSET (SELECT count(*)/4 FROM $_t));" 2>/dev/null
+    done
+    sqlite3 "$_db" "VACUUM;" 2>/dev/null
+}
+
+USED_KB=$(obs_usage_kb)
+if [ -n "$USED_KB" ] && [ "$USED_KB" -gt "$OBS_CAP_KB" ]; then
+    warn "/a/obs at ${USED_KB}KB > cap ${OBS_CAP_KB}KB — trimming oldest data + reclaiming"
+    # pstore crash-loop guard: keep only the 20 newest harvested dirs.
+    if [ -d "$OBS_DIR/pstore" ]; then
+        ls -1t "$OBS_DIR/pstore" 2>/dev/null | tail -n +21 | while read -r _d; do
+            rm -rf "$OBS_DIR/pstore/$_d" 2>/dev/null
+        done
+    fi
+    [ -f "$OBS_DIR/kernel-ring.log" ] && mv "$OBS_DIR/kernel-ring.log" "$OBS_DIR/kernel-ring.log.1" 2>/dev/null
+    _pass=0
+    while [ "$_pass" -lt 4 ]; do
+        trim_db_oldest "$OBS_DIR/rt.sql"
+        trim_db_oldest "$DST"
+        USED_KB=$(obs_usage_kb)
+        [ -n "$USED_KB" ] && [ "$USED_KB" -le "$OBS_CAP_KB" ] && break
+        _pass=$((_pass + 1))
+    done
+    if [ -n "$USED_KB" ] && [ "$USED_KB" -le "$OBS_CAP_KB" ]; then
+        event "/a/obs trimmed to ${USED_KB}KB (under ${OBS_CAP_KB}KB cap)"
+    else
+        err "/a/obs STILL ${USED_KB}KB after 4 trim passes — investigate a runaway writer under $OBS_DIR"
+    fi
+fi
+
+# Additional early signal on the disk as a WHOLE (catches swap/routedns growth,
+# not just ours): warn if free space falls below 200 MB regardless of the cap.
 FREE_KB=$(df -k /a | awk 'NR==2{print $4}')
 [ -n "$FREE_KB" ] && [ "$FREE_KB" -lt 204800 ] && \
-    warn "/a free space low: ${FREE_KB}KB — shrink the 60-day minutes prune or clean /a"
+    warn "/a free space low: ${FREE_KB}KB free — something beyond /a/obs may be growing (swap? routedns?)"
 
 exit 0
