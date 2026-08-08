@@ -74,16 +74,37 @@ TS=$(date +%s)
 
 # One clean session: uptime (reboot detection) + the diag batch via stdin pipe.
 DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\nexit\n" | diag'
-RAW=$(python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" 2>&1)
+poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" 2>&1; }
+is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
-case "$RAW" in
-    *WEDGED*|*"ERR:"*|'')
-        if [ ! -f "$STATE" ]; then
-            warn "stick CLI unreachable ($(printf '%s' "$RAW" | head -c 80)) — PON telemetry paused; will event on recovery"
-            touch "$STATE"
-        fi
-        exit 0 ;;
-esac
+RAW=$(poll_stick)
+
+# ── self-heal on a wedged CLI ───────────────────────────────────────────────
+# A wedge (an orphaned /bin/login+/bin/sh session — see project_odi_cli_pid_lock)
+# otherwise stales PON indefinitely until a human runs stick-unwedge. At 1-min
+# unattended cadence that's the wrong failure mode: bound it. On a detected
+# wedge, run the no-reboot unwedge ONCE and re-poll. Rate-limited to one attempt
+# per 5 min (a persistent wedge that unwedge can't fix — e.g. needs a reboot —
+# must not hammer Boa), tracked in .pon-collect.heal. The overlap lock is still
+# held across this, so the extra ~15 s can't stack with the next cron tick.
+if is_wedged "$RAW" && [ -x /cfg/scripts/stick-unwedge.sh ]; then
+    _last_heal=$(cat /var/run/.pon-collect.heal 2>/dev/null || echo 0)
+    case "$_last_heal" in *[!0-9]*|'') _last_heal=0 ;; esac
+    if [ $(( $(date +%s) - _last_heal )) -ge 300 ]; then
+        date +%s > /var/run/.pon-collect.heal
+        /cfg/scripts/stick-unwedge.sh >/dev/null 2>&1
+        RAW=$(poll_stick)
+        is_wedged "$RAW" || event "stick CLI recovered via auto-unwedge"
+    fi
+fi
+
+if is_wedged "$RAW"; then
+    if [ ! -f "$STATE" ]; then
+        warn "stick CLI wedged, auto-unwedge did not recover ($(printf '%s' "$RAW" | head -c 60)) — PON paused; will event on recovery"
+        touch "$STATE"
+    fi
+    exit 0
+fi
 [ -f "$STATE" ] && { rm -f "$STATE"; event "stick CLI recovered — PON telemetry resumed"; }
 
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
@@ -126,6 +147,11 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
 # numbers and needs no raw copy — which keeps the 1-min cadence cheap: a clean
 # row is ~200 B (≈0.3 MB/day, ~9 MB over the 30-day window) instead of ~6 KB.
 # A parse anomaly is exactly the case worth keeping full context for.
+#
+# Wedge handling: on a wedged CLI, self-heal via stick-unwedge (no reboot),
+# rate-limited to once/5min; if that fails, warn on TRANSITION to unreachable
+# and event on recovery (never every cycle). So a healthy steady state is a
+# 60-s cadence; a wedge costs ~1-2 cycles, not an open-ended stall.
 case "$JSON" in
     *null*) RAW_COL=$(printf '%s' "$RAW" | head -c 6000 | sed "s/'/''/g") ;;
     *)      RAW_COL='' ;;
