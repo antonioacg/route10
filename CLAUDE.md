@@ -61,7 +61,20 @@ telnet probes — they orphan the lock too.
     conntrack, L4+W2 DDM) → `/a/obs/rt.sql`, 90-day retention. Also drains the
     kernel ring persistently to `/a/obs/kernel-ring.log` and harvests pstore
     crash records to `/a/obs/pstore/` with an `err` line (alertable ops-side).
-    NEVER touches stick telnet/Boa. Source: `scripts/obs-collect.sh`.
+    Also carries the **wedge tripwire**: 2 consecutive min of zero br-lan rx with
+    carrier up ⇒ sysrq `w`+`l` into the (now-persisted) ring, so a repeat of the
+    IP-stack wedge names its own stuck task. NEVER touches stick telnet/Boa.
+    Source: `scripts/obs-collect.sh`.
+  - `/cfg/scripts/pon-collect.sh` (`* * * * *` cron) — PON-layer telemetry from
+    the ODI stick via `stick-exec` clean-telnet (PLOAM state, LOS/LOF/SD alarms,
+    BIP/FEC error counters, rogue-SD, stick uptime) → `/a/obs/rt.sql` `pon` table
+    → 19 `route10_pon_*` metrics. The **leading** fibre-degradation signal the
+    SFF-8472 DDM can't show. Diag batch goes through `diag` **stdin + `exit`**
+    (never bare `diag <subcmd>`, which strands the interactive prompt and wedges
+    the single CLI); atomic `mkdir` overlap lock; raw blob stored only on a parse
+    anomaly. Sole stick-CLI user, so 1-min is safe. Source: `scripts/pon-collect.sh`.
+    Recover a wedged CLI with `scripts/stick-unwedge.sh` (no reboot; kills the
+    orphaned login/sh session, not just cli.pid). See `reference_odi_stick_arch_no_ssh.md`.
   - **`/metrics` exporter** — second uhttpd on **`192.168.10.1:9100`** (LAN-only
     bind, relaunched by post-cfg), CGI at `/cfg/scripts/metrics-www/metrics`
     serving newest stats.sql + rt.sql rows (no live probing in the request
