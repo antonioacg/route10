@@ -769,6 +769,20 @@ if [ -x "$OBSCOLLECT" ]; then
     fi
 fi
 
+# ── PON-layer poller (ODI stick, via clean-telnet stick-exec) ───────────────
+# pon-collect.sh polls the stick's diag CLI every 15 min for PLOAM state,
+# LOS/LOF/SD alarms, BIP/FEC error counters and rogue-SD — the fibre-degradation
+# signal we can't see from the SFF-8472 DDM. Conservative cadence: single telnet
+# session/cycle via the stdin-pipe diag form (never bare `diag <subcmd>`, which
+# wedges the single CLI). See scripts/pon-collect.sh.
+PONCOLLECT=/cfg/scripts/pon-collect.sh
+if [ -x "$PONCOLLECT" ]; then
+    if ! grep -qF "$PONCOLLECT" /etc/crontabs/root 2>/dev/null; then
+        echo "*/15 * * * * $PONCOLLECT" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── Prometheus metrics endpoint (ops NETWORK-CONTRACT "route10 metrics scrape") ──
 # Second uhttpd instance, LAN-only bind on 192.168.10.1:9100, serving the
 # /metrics CGI at /cfg/scripts/metrics-www/metrics. Trending telemetry only —

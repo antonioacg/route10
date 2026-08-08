@@ -81,5 +81,33 @@ FROM samples s, json_each(s.json,'\$.if') je
 WHERE s.ts = (SELECT max(ts) FROM samples);
 "
 
+# ── PON layer (pon-collect.sh, every 15 min) ────────────────────────────────
+# Own staleness guard (900s cadence): route10_pon_sample_timestamp_seconds.
+# NaN for any field the parser couldn't read this cycle, so a partial diag read
+# never silently reports 0 counters.
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT
+  'route10_pon_sample_timestamp_seconds ' || ts || char(10) ||
+  'route10_pon_uptime_seconds '  || COALESCE(json_extract(json,'\$.uptime'),'NaN')     || char(10) ||
+  'route10_pon_onu_state '       || COALESCE(json_extract(json,'\$.onu_state'),'NaN')  || char(10) ||
+  'route10_pon_alarm{type=\"los\"} '         || COALESCE(json_extract(json,'\$.alarm.los'),'NaN')         || char(10) ||
+  'route10_pon_alarm{type=\"lof\"} '         || COALESCE(json_extract(json,'\$.alarm.lof'),'NaN')         || char(10) ||
+  'route10_pon_alarm{type=\"lom\"} '         || COALESCE(json_extract(json,'\$.alarm.lom'),'NaN')         || char(10) ||
+  'route10_pon_alarm{type=\"sf\"} '          || COALESCE(json_extract(json,'\$.alarm.sf'),'NaN')          || char(10) ||
+  'route10_pon_alarm{type=\"sd\"} '          || COALESCE(json_extract(json,'\$.alarm.sd'),'NaN')          || char(10) ||
+  'route10_pon_alarm{type=\"tx_too_long\"} ' || COALESCE(json_extract(json,'\$.alarm.tx_too_long'),'NaN') || char(10) ||
+  'route10_pon_alarm{type=\"tx_mismatch\"} ' || COALESCE(json_extract(json,'\$.alarm.tx_mismatch'),'NaN') || char(10) ||
+  'route10_pon_ds_bip_error_bits_total '        || COALESCE(json_extract(json,'\$.ds.bip_bits'),'NaN')    || char(10) ||
+  'route10_pon_ds_bip_error_blocks_total '      || COALESCE(json_extract(json,'\$.ds.bip_blocks'),'NaN')  || char(10) ||
+  'route10_pon_ds_fec_corrected_codewords_total '   || COALESCE(json_extract(json,'\$.ds.fec_cor_cw'),'NaN')   || char(10) ||
+  'route10_pon_ds_fec_uncorrectable_codewords_total ' || COALESCE(json_extract(json,'\$.ds.fec_uncor_cw'),'NaN') || char(10) ||
+  'route10_pon_ds_superframe_los_total ' || COALESCE(json_extract(json,'\$.ds.sf_los'),'NaN')    || char(10) ||
+  'route10_pon_ds_ploam_received_total ' || COALESCE(json_extract(json,'\$.ds.ploam_rx'),'NaN')  || char(10) ||
+  'route10_pon_ds_ploam_crc_error_total ' || COALESCE(json_extract(json,'\$.ds.ploam_crc'),'NaN') || char(10) ||
+  'route10_pon_rogue_sd_too_long_total ' || COALESCE(json_extract(json,'\$.rogue.sd_too_long'),'NaN') || char(10) ||
+  'route10_pon_rogue_sd_mismatch_total ' || COALESCE(json_extract(json,'\$.rogue.sd_mismatch'),'NaN')
+FROM pon ORDER BY ts DESC LIMIT 1;
+"
+
 # ── live, but read-only-cheap ───────────────────────────────────────────────
 echo "route10_pstore_files $(ls /sys/fs/pstore 2>/dev/null | wc -l)"
