@@ -741,31 +741,6 @@ if [ -x "$MESHHEALTH" ]; then
     fi
 fi
 
-# ── LAN link/address recorder ───────────────────────────────────────────────
-# lan-health.sh appends eth1/eth2/eth5 link state and br-lan's operstate +
-# address ownership to a PERSISTENT /cfg log every 5 min, healthy or not, and
-# warns only on change.
-#
-# Added after the 2026-08-08 IP-stack wedge, where route10 stopped answering ARP
-# for its own 192.168.10.1 for 27 min while the switch ASIC kept forwarding and
-# userspace kept running — and nothing on the box had recorded LAN-side state, so
-# it could not be explained afterwards. odi-health covers the ODI/GPON/WAN path
-# and logs carrier for eth4 only; eth5 and br-lan were uninstrumented.
-#
-# Deliberately a periodic recorder, not an event tap: that incident emitted ZERO
-# netifd/kernel interface events (verified against the collector), so an event
-# stream would have caught nothing. An unconditional line on /cfg keeps being
-# written while the box is cut off, which is exactly what made odi-health the
-# control that salvaged the RCA. Same tmpfs-reinstall idiom as the hooks above.
-# See scripts/lan-health.sh + docs/postmortems/2026-08-08-ipstack-wedge-lan-outage.md.
-LANHEALTH=/cfg/scripts/lan-health.sh
-if [ -x "$LANHEALTH" ]; then
-    if ! grep -qF "$LANHEALTH" /etc/crontabs/root 2>/dev/null; then
-        echo "*/5 * * * * $LANHEALTH" >> /etc/crontabs/root
-        /etc/init.d/cron reload >/dev/null 2>&1 || true
-    fi
-fi
-
 # ── daemons ────────────────────────────────────────────────────────────────
 # Idempotent launchers — only start each daemon if not already running.
 # pgrep -f matches the full command line, including the script path, so the
