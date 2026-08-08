@@ -54,11 +54,14 @@ telnet probes — they orphan the lock too.
   persistent ext4, survives reboots AND firmware updates; on-box `sqlite3` 3.40
   with JSON1). Its `minutes` table is a rolling ~60-min window, so:
   - `/cfg/scripts/stats-archive.sh` (`*/30` cron) — copies rows into
-    `/a/obs/stats-archive.sql`; 60-day minute retention. Source: `scripts/stats-archive.sh`.
+    `/a/obs/stats-archive.sql`; **30-day** minute retention, hours/days rollups kept
+    ~2 y (fine-grained recent + downsampled long-term). Also the single **hard-cap
+    janitor** for all of `/a/obs` (500 MB byte budget, trims oldest + VACUUMs on
+    breach). Source: `scripts/stats-archive.sh`.
   - `/cfg/scripts/obs-collect.sh` (`* * * * *` cron, ~50 ms) — per-minute samples
     of the CPU-side counters rcstats can't see (CPU/softirq, softnet, br-lan/
     pppoe-wan3/tailscale0/eth4/eth5 counters + carriers, br-lan addr presence,
-    conntrack, L4+W2 DDM) → `/a/obs/rt.sql`, 90-day retention. Also drains the
+    conntrack, L4+W2 DDM) → `/a/obs/rt.sql`, 30-day retention. Also drains the
     kernel ring persistently to `/a/obs/kernel-ring.log` and harvests pstore
     crash records to `/a/obs/pstore/` with an `err` line (alertable ops-side).
     Also carries the **wedge tripwire**: 2 consecutive min of zero br-lan rx with

@@ -31,7 +31,7 @@
 # see reference_odi_stick_arch_no_ssh.
 #
 # Row: pon(ts, json, raw) in /a/obs/rt.sql. Clean rows are ~200 B (raw stored
-# ONLY on a parse anomaly, see below) ⇒ ≈0.3 MB/day, ~26 MB over the 90-day
+# ONLY on a parse anomaly, see below) ⇒ ≈0.3 MB/day, ~9 MB over the 30-day
 # prune even at 1-min. Wedge handling: warn on TRANSITION to unreachable, event
 # on recovery — a wedged CLI fails fast (empty banner) and probing it via
 # stick-exec does not deepen the wedge.
@@ -124,7 +124,7 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
 # Store the raw diag blob ONLY when a field failed to parse (JSON contains a
 # null). Parsers are verified against real output, so a healthy row is all
 # numbers and needs no raw copy — which keeps the 1-min cadence cheap: a clean
-# row is ~200 B (≈0.3 MB/day, ~26 MB over the 90-day window) instead of ~6 KB.
+# row is ~200 B (≈0.3 MB/day, ~9 MB over the 30-day window) instead of ~6 KB.
 # A parse anomaly is exactly the case worth keeping full context for.
 case "$JSON" in
     *null*) RAW_COL=$(printf '%s' "$RAW" | head -c 6000 | sed "s/'/''/g") ;;
@@ -134,7 +134,7 @@ sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS pon (ts INTEGER PRIMARY KEY, json TEXT, raw TEXT);
 INSERT OR IGNORE INTO pon VALUES ($TS, '$JSON', '$RAW_COL');
-DELETE FROM pon WHERE ts < $TS - 90*86400;
+DELETE FROM pon WHERE ts < $TS - 30*86400;
 " 2>&1 | grep -qi error && err "pon insert issue (see stderr)"
 
 # Stick reboot: uptime going backwards is worth a line (and resets the counters).

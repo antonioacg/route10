@@ -21,7 +21,7 @@
 #
 # Storage is the same fashion as Alta's own: SQLite rows of (ts, json) in
 # /a/obs/rt.sql on the persistent 3.1 G partition. ~0.7 KB/row → ~1 MB/day →
-# 90-day prune ≈ 90 MB. Query like the rcstats archive; JSON keys are stable.
+# 30-day prune ≈ 30 MB. Query like the rcstats archive; JSON keys are stable.
 #
 # Also owns two persistence jobs no sampler can replace:
 #   - KERNEL RING DRAIN → /a/obs/kernel-ring.log. The ring is a ~36 KB volatile
@@ -155,7 +155,7 @@ OUT=$(sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS samples (ts INTEGER PRIMARY KEY, json TEXT);
 INSERT OR IGNORE INTO samples VALUES ($TS, '$JSON');
-DELETE FROM samples WHERE ts < $TS - 90*86400;
+DELETE FROM samples WHERE ts < $TS - 30*86400;
 " 2>&1) || err "sample insert FAILED: $(echo "$OUT" | head -1)"
 
 # ── wedge tripwire ──────────────────────────────────────────────────────────

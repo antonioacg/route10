@@ -17,8 +17,10 @@
 # window) it INSERT OR IGNOREs the source rows into /a/obs/stats-archive.sql.
 # /a is a 3.1G persistent ext4 (964M free, survives reboots AND firmware
 # updates — routedns/ predates the 2026-07-22 update). Measured row sizes:
-# minutes ~2 KB -> ~2.9 MB/day -> 60-day prune ≈ 175 MB steady-state.
-# hours/days/speed_tests are negligible and kept ~2 years.
+# minutes ~2 KB -> ~2.9 MB/day -> 30-day prune ≈ 87 MB steady-state.
+# hours/days/speed_tests are negligible and kept ~2 years — and those two
+# rollup tiers ARE the long-term view, so trimming minutes to 30d loses almost
+# nothing (fine-grained recent, downsampled long-term, black-style, for free).
 #
 # Read-only on the source (URI mode=ro) + busy_timeout so we never block or
 # corrupt rcstats' own writes (journal_mode=delete on its side).
@@ -56,7 +58,7 @@ INSERT OR IGNORE INTO hours       SELECT ts, json FROM src.hours;
 INSERT OR IGNORE INTO days        SELECT ts, json FROM src.days;
 INSERT OR IGNORE INTO speed_tests SELECT ts, json FROM src.speed_tests;
 DETACH src;
-DELETE FROM minutes WHERE ts < strftime('%s','now') - 60*86400;
+DELETE FROM minutes WHERE ts < strftime('%s','now') - 30*86400;
 DELETE FROM hours   WHERE ts < strftime('%s','now') - 730*86400;
 DELETE FROM days    WHERE ts < strftime('%s','now') - 730*86400;
 SELECT (SELECT count(*) FROM minutes)||' '||(SELECT count(*) FROM hours)||' '||(SELECT count(*) FROM days);
@@ -80,10 +82,10 @@ log "archived: minutes=$1 hours=$2 days=$3 db_bytes=$SIZE"
 # projection (a stats.sql per-client DPI balloon, an obs-collect regression, a
 # pstore crash-loop) filling /a, which it shares with the 2G swap + routedns.
 #
-# Projected steady state is ~300 MB (stats-archive ~175 + rt.sql samples ~90 +
-# pon ~33). Cap at 500 MB: generous headroom over projection, and /a has ~960 MB
-# free so this still leaves a wide margin. A normal run is a no-op — the trim
-# only fires on a genuine overrun, and it WARNS when it does because a breach
+# Projected steady state is ~130 MB (stats-archive ~87 + rt.sql samples ~30 +
+# pon ~9, all at 30-day retention). Cap at 500 MB: generous headroom over
+# projection, and /a has ~960 MB free so this leaves a wide margin. A normal run
+# is a no-op — the trim only fires on a genuine overrun, and it WARNS then because a breach
 # means a projection was wrong and a human should see why.
 #
 # When breached: cap the pstore dir (crash-loop guard), hard-rotate the ring
@@ -95,7 +97,7 @@ log "archived: minutes=$1 hours=$2 days=$3 db_bytes=$SIZE"
 # oldest rows) is the first thing a cap breach — or the routine time-prune —
 # sacrifices. That's acceptable BY DESIGN: this is a forensic buffer, not a
 # permanent archive. An incident's *conclusions* belong in a committed
-# postmortem well within the 60/90-day window; the raw rows are only needed
+# postmortem well within the 30-day window; the raw rows are only needed
 # long enough to reach them. Don't rely on this DB to hold evidence forever.
 OBS_DIR=/a/obs
 OBS_CAP_KB=512000
