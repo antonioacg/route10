@@ -235,6 +235,14 @@ a policy change.
   archiver copies it every 30 min into `/a/obs/stats-archive.sql` (persistent 3.1 G partition,
   60-day minute retention ≈ 175 MB) so the next incident's evidence doesn't depend on a human
   taking a copy within the hour. `*/30` cron, reinstalled by post-cfg.
+- `scripts/obs-collect.sh` — **per-minute collector for the CPU-mediated side** rcstats can't
+  see: CPU/softirq + `softnet_stat` counters, br-lan/pppoe-wan3/tailscale0 interface counters,
+  eth4/eth5 carrier, br-lan address presence, conntrack, optical DDM → `/a/obs/rt.sql` (90-day
+  retention). Also closes two §5 gaps directly: a **persistent kernel-ring drain** to
+  `/a/obs/kernel-ring.log` (the ring the recovery reboot destroyed), and a **pstore harvest**
+  that logs at `error` severity if a crash record ever appears — making a future panic
+  alertable through the existing ops-side rule. A repeat of this incident now leaves a
+  minute-resolution record of exactly the counters this RCA had to reconstruct or do without.
 
 **Recommended, not done here:**
 

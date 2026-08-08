@@ -755,6 +755,20 @@ if [ -x "$STATSARCHIVE" ]; then
     fi
 fi
 
+# ── per-minute host collector (CPU-side counters rcstats can't see) ──────────
+# obs-collect.sh samples the CPU-mediated datapath every minute into
+# /a/obs/rt.sql — CPU/softirq, softnet drop+time_squeeze, br-lan/pppoe-wan3/
+# tailscale0 counters, carriers, br-lan address presence, conntrack, DDM —
+# plus the persistent kernel-ring drain and the pstore crash-record harvest
+# (err on non-empty => alertable). See scripts/obs-collect.sh.
+OBSCOLLECT=/cfg/scripts/obs-collect.sh
+if [ -x "$OBSCOLLECT" ]; then
+    if ! grep -qF "$OBSCOLLECT" /etc/crontabs/root 2>/dev/null; then
+        echo "* * * * * $OBSCOLLECT" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── daemons ────────────────────────────────────────────────────────────────
 # Idempotent launchers — only start each daemon if not already running.
 # pgrep -f matches the full command line, including the script path, so the
