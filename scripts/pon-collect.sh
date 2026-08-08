@@ -134,6 +134,39 @@ PLOAM_CRC=$(val "CRC Err RX PLOAM")
 ROGUE_LONG=$(val "SD too long count")
 ROGUE_MIS=$(val "SD mismatch count")
 
+# ── accumulate the ds counters into running totals ──────────────────────────
+# The stick's ds-phy/ds-plm counters RESET ON EVERY READ (proven 2026-08-08:
+# two reads 1 s apart returned 60 then 0) — each poll's value is "count since
+# the last read", NOT a running total. The /metrics exporter publishes these
+# fields as Prometheus *_total counters, and a reset-every-scrape value makes
+# rate() hallucinate (the phantom humps on the first PON Grafana panel), so
+# accumulate here. State is the pon_totals table of the same DB: written in
+# the same sqlite3 invocation as the row insert and reboot-proof (/a). A
+# missed cycle loses nothing (the next read carries the whole gap); a stick
+# reboot loses at most one interval — inherent to reset-on-read. An
+# out-of-band manual `gpon show counter` also steals one interval's delta;
+# acceptable, pon-collect is the sole CLI user. A field that fails to parse
+# stays null in the row (preserving the raw-blob anomaly trigger below) and
+# leaves its total untouched. Rogue-SD counters come from a `get` (not a
+# resetting `show counter`) and are stored raw. NOTE: rows before 2026-08-09
+# hold the raw per-read deltas, not totals.
+eval "$(sqlite3 -readonly "$DB" "SELECT 'T_'||k||'='||v FROM pon_totals;" 2>/dev/null | grep -E '^T_[a-z_]+=[0-9]+$')"
+TOTAL_SQL=""
+acc() {   # $1=key $2=per-read delta → sets ACC to the new total ('' if unparsable)
+    ACC=''
+    case "$2" in ''|*[!0-9]*) return ;; esac
+    eval "_t=\${T_$1:-0}"
+    ACC=$((_t + $2))
+    TOTAL_SQL="${TOTAL_SQL}INSERT OR REPLACE INTO pon_totals VALUES ('$1',$ACC);"
+}
+acc bip_bits     "$BIP_BITS";  BIP_BITS=$ACC
+acc bip_blocks   "$BIP_BLK";   BIP_BLK=$ACC
+acc fec_cor_cw   "$FEC_COR";   FEC_COR=$ACC
+acc fec_uncor_cw "$FEC_UNC";   FEC_UNC=$ACC
+acc sf_los       "$SF_LOS";    SF_LOS=$ACC
+acc ploam_rx     "$PLOAM_RX";  PLOAM_RX=$ACC
+acc ploam_crc    "$PLOAM_CRC"; PLOAM_CRC=$ACC
+
 JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
@@ -159,7 +192,9 @@ esac
 sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS pon (ts INTEGER PRIMARY KEY, json TEXT, raw TEXT);
+CREATE TABLE IF NOT EXISTS pon_totals (k TEXT PRIMARY KEY, v INTEGER);
 INSERT OR IGNORE INTO pon VALUES ($TS, '$JSON', '$RAW_COL');
+$TOTAL_SQL
 DELETE FROM pon WHERE ts < $TS - 30*86400;
 " 2>&1 | grep -qi error && err "pon insert issue (see stderr)"
 
