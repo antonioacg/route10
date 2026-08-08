@@ -769,6 +769,18 @@ if [ -x "$OBSCOLLECT" ]; then
     fi
 fi
 
+# ── Prometheus metrics endpoint (ops NETWORK-CONTRACT "route10 metrics scrape") ──
+# Second uhttpd instance, LAN-only bind on 192.168.10.1:9100, serving the
+# /metrics CGI at /cfg/scripts/metrics-www/metrics. Trending telemetry only —
+# per contract it dies with the LAN and the /cfg + /a records are the outage
+# complement. Relaunched here each boot (the process does not survive reboot).
+METRICS_WWW=/cfg/scripts/metrics-www
+if [ -x "$METRICS_WWW/metrics" ]; then
+    if ! pgrep -f "uhttpd -p 192.168.10.1:9100" >/dev/null 2>&1; then
+        /usr/sbin/uhttpd -p 192.168.10.1:9100 -h "$METRICS_WWW" -x /metrics
+    fi
+fi
+
 # ── daemons ────────────────────────────────────────────────────────────────
 # Idempotent launchers — only start each daemon if not already running.
 # pgrep -f matches the full command line, including the script path, so the

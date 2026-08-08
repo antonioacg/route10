@@ -1,11 +1,11 @@
 #!/bin/sh
 # metrics-cgi.sh — Prometheus text exposition for route10 (spec: seam mail #103).
 #
-# ⛔ NOT DEPLOYED until the ops NETWORK-CONTRACT.md entry for the metrics
-# endpoint exists (contract-first — the endpoint is a shared value). Deploy:
+# Contract: ops NETWORK-CONTRACT.md "route10 metrics scrape (:9100)" (drafted
+# 1839954, confirmed via seam mail — the endpoint is a shared value). Deploy:
 #   scp -> /cfg/scripts/metrics-www/metrics  (chmod +x)
 #   uhttpd -p 192.168.10.1:9100 -h /cfg/scripts/metrics-www -x /metrics
-#     (LAN-only bind; launched by post-cfg once the contract entry is in)
+#     (LAN-only bind; relaunched each boot by post-cfg)
 #
 # Design: serves from data that already exists — the newest /a/stats.sql minute
 # (Alta rcstats) and the newest /a/obs/rt.sql sample (obs-collect.sh). NO live
@@ -65,6 +65,20 @@ SELECT
   'route10_optical_temp_celsius{module=\"L4\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_t'),'NaN') || char(10) ||
   'route10_optical_temp_celsius{module=\"W2\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_t'),'NaN')
 FROM samples ORDER BY ts DESC LIMIT 1;
+"
+
+# Monotonic /proc/net/dev counters for the CPU-side interfaces (ops #104 ask).
+# NOT available for LAN switch ports: ASIC-forwarded frames bypass those
+# netdevs (measured — Alta ports 1/4 carry traffic while eth0/eth3 count 0),
+# so the rcstats per-minute deltas above remain the only source for ports.
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT
+  'route10_interface_receive_bytes_total{iface=\"'  || je.key || '\"} ' || json_extract(je.value,'\$.rxb') || char(10) ||
+  'route10_interface_transmit_bytes_total{iface=\"' || je.key || '\"} ' || json_extract(je.value,'\$.txb') || char(10) ||
+  'route10_interface_receive_packets_total{iface=\"'  || je.key || '\"} ' || json_extract(je.value,'\$.rxp') || char(10) ||
+  'route10_interface_transmit_packets_total{iface=\"' || je.key || '\"} ' || json_extract(je.value,'\$.txp')
+FROM samples s, json_each(s.json,'\$.if') je
+WHERE s.ts = (SELECT max(ts) FROM samples);
 "
 
 # ── live, but read-only-cheap ───────────────────────────────────────────────
