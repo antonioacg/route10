@@ -81,8 +81,8 @@ FROM samples s, json_each(s.json,'\$.if') je
 WHERE s.ts = (SELECT max(ts) FROM samples);
 "
 
-# ── PON layer (pon-collect.sh, every 15 min) ────────────────────────────────
-# Own staleness guard (900s cadence): route10_pon_sample_timestamp_seconds.
+# ── PON layer (pon-collect.sh, every 1 min) ─────────────────────────────────
+# Own staleness guard (60s cadence): route10_pon_sample_timestamp_seconds.
 # NaN for any field the parser couldn't read this cycle, so a partial diag read
 # never silently reports 0 counters.
 q "file:/a/obs/rt.sql?mode=ro" "
