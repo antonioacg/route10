@@ -158,4 +158,54 @@ INSERT OR IGNORE INTO samples VALUES ($TS, '$JSON');
 DELETE FROM samples WHERE ts < $TS - 90*86400;
 " 2>&1) || err "sample insert FAILED: $(echo "$OUT" | head -1)"
 
+# ── wedge tripwire ──────────────────────────────────────────────────────────
+# The 2026-08-08 IP-stack wedge left no mechanism evidence because a deadlocked
+# kernel emits nothing and nobody can SSH in to ask (the fault kills the LAN).
+# So the diagnostic must be PRE-ARMED: if br-lan receives ZERO packets for two
+# consecutive minutes while its carrier is up — impossible on this LAN's
+# background chatter (ARP/mDNS/DHCP) unless the CPU-side rx path is dead — dump
+# the kernel's own view via sysrq into the ring, which this script persists:
+#   'w' = show blocked (D-state) tasks — names what a deadlock is stuck on
+#   'l' = backtrace all active CPUs
+# Diagnostic-only characters; kernel.sysrq=1 verified on this build. One shot
+# per 30-min cooldown so a sustained wedge doesn't spam the ring. cron kept
+# running through the real wedge, so this path is expected to execute.
+BRLAN_RXP=$(echo "$IFJSON" | sed -n 's/.*"br-lan":{"rxb":[0-9]*,"rxp":\([0-9]*\).*/\1/p')
+PREV_RXP=$(sqlite3 -readonly "$DB" "SELECT json_extract(json,'\$.if.\"br-lan\".rxp') FROM samples WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
+STALLS=$(cat /var/run/.obs-wedge.stalls 2>/dev/null)
+case "$STALLS" in ''|*[!0-9]*) STALLS=0 ;; esac
+case "$BRLAN_RXP$PREV_RXP" in *[!0-9]*|'') STALLS=0 ;; *)
+    if [ "$BRLAN_RXP" -eq "$PREV_RXP" ] && [ "${CBR:-0}" = "1" ]; then
+        STALLS=$((STALLS+1))
+    else
+        STALLS=0
+    fi ;;
+esac
+printf '%s' "$STALLS" > /var/run/.obs-wedge.stalls
+if [ "$STALLS" -ge 2 ]; then
+    COOL=/var/run/.obs-wedge.fired
+    NOW_OK=1
+    if [ -f "$COOL" ]; then
+        AGE=$(( TS - $(date -r "$COOL" +%s 2>/dev/null || echo 0) ))
+        [ "$AGE" -lt 1800 ] && NOW_OK=0
+    fi
+    if [ "$NOW_OK" = 1 ]; then
+        touch "$COOL"
+        echo w > /proc/sysrq-trigger 2>/dev/null
+        echo l > /proc/sysrq-trigger 2>/dev/null
+        sleep 2
+        # Re-drain immediately so the dump reaches /a even if the box degrades
+        # further before the next cycle.
+        _max=$(dmesg 2>/dev/null | sed -n 's/^\[ *\([0-9]*\)\.[0-9]*\].*/\1/p' | tail -1)
+        _last=$(cat /var/run/.kring.offset 2>/dev/null || echo -1)
+        dmesg 2>/dev/null | awk -v last="$_last" -v d="$(date '+%F %T')" '
+            match($0, /^\[ *[0-9]+\.[0-9]+\]/) {
+                t = $0; sub(/^\[ */, "", t); sub(/\..*/, "", t)
+                if (t+0 > last+0) print d " " $0
+            }' >> "$KLOG"
+        [ -n "$_max" ] && printf '%s' "$_max" > /var/run/.kring.offset
+        err "WEDGE SIGNATURE: br-lan rx frozen ${STALLS} min with carrier up — sysrq w+l dumped to kernel ring (persisted $KLOG)"
+    fi
+fi
+
 exit 0
