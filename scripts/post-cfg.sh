@@ -810,14 +810,14 @@ if [ -x "$PONCOLLECT" ]; then
     fi
 fi
 
-# ── external dead-man beat B (ops NETWORK-CONTRACT "route10 heartbeat") ─────
-# route10 → WAN → ntfy, every 2 min, never touching opi5pro — so a stopped beat
-# tells ops whether the fault is theirs or ours (see scripts/heartbeat.sh for
-# the full matrix). 2 min, not 5: detection latency is set by ops's 15-min poll
-# window, so a faster beat costs nothing there and buys 7 chances instead of 3 —
-# margin our WAN demonstrably needs (CGNAT brownouts, PPP reconnects). Inert
-# until NTFY_HEARTBEAT_TOPIC exists in /cfg/seam.env (the topic IS the
-# credential, so it is never committed).
+# ── external dead-man: "Router + internet" / "Router's home network" ────────
+# (ops NETWORK-CONTRACT "Dead-man heartbeats"). route10 → WAN → healthchecks.io
+# every 2 min, never touching opi5pro — so a stopped beat tells ops whether the
+# fault is theirs or ours (see scripts/heartbeat.sh for the full matrix). 2 min,
+# not 5: with a 150s timeout / 180s grace, a faster beat buys retries our WAN
+# demonstrably needs (CGNAT brownouts, PPP reconnects) and costs nothing against
+# the 5-ping/min provider limit. Inert until HC_URL_ALIVE and HC_URL_LAN exist in
+# /cfg/seam.env (the ping URL IS the credential, so it is never committed).
 HEARTBEAT=/cfg/scripts/heartbeat.sh
 if [ -x "$HEARTBEAT" ]; then
     if ! grep -qF "$HEARTBEAT" /etc/crontabs/root 2>/dev/null; then
