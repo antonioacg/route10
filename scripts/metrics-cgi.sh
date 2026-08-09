@@ -45,6 +45,18 @@ WHERE m.ts = (SELECT max(ts) FROM minutes)
 "
 
 # ── obs-collect: newest per-minute sample ───────────────────────────────────
+#
+# NOTE: no `--` comments inside these SQL strings. The statement reaches sqlite3
+# as a single logical line, so a `--` comments out EVERYTHING after it — which
+# silently drops the whole remaining block (cpu, carrier, addr, conntrack,
+# softnet, optical) while still exiting 0 and serving a valid-looking page.
+# Keep commentary out here at shell level. Use /* */ if it must live inline.
+#
+# conntrack_entries/_limit are GLOBAL: both families, every scope, including
+# LAN<->LAN flows that never reach the ISP NAT, and _limit is our local 500k
+# table rather than the ISP session budget — so entries/limit reads ~2% while
+# CGNAT saturates. They stay for continuity; alert on wan4 instead, which counts
+# only ipv4 flows with a public destination. (Agreed with ops 2026-08-09.)
 q "file:/a/obs/rt.sql?mode=ro" "
 SELECT
   'route10_rt_sample_timestamp_seconds ' || ts || char(10) ||
@@ -56,6 +68,9 @@ SELECT
   'route10_wan3_up ' || COALESCE(json_extract(json,'\$.addr.wan3'),'NaN') || char(10) ||
   'route10_conntrack_entries ' || COALESCE(json_extract(json,'\$.ct.n'),'NaN')   || char(10) ||
   'route10_conntrack_limit '   || COALESCE(json_extract(json,'\$.ct.max'),'NaN') || char(10) ||
+  'route10_conntrack_v4 '   || COALESCE(json_extract(json,'\$.ct.v4'),'NaN')   || char(10) ||
+  'route10_conntrack_v6 '   || COALESCE(json_extract(json,'\$.ct.v6'),'NaN')   || char(10) ||
+  'route10_conntrack_wan4 ' || COALESCE(json_extract(json,'\$.ct.wan4'),'NaN') || char(10) ||
   'route10_softnet_dropped_total '     || COALESCE(json_extract(json,'\$.softnet.drop'),'NaN')    || char(10) ||
   'route10_softnet_timesqueeze_total ' || COALESCE(json_extract(json,'\$.softnet.squeeze'),'NaN') || char(10) ||
   'route10_optical_power_dbm{module=\"L4\",dir=\"tx\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_tx'),'NaN') || char(10) ||
