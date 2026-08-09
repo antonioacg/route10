@@ -810,6 +810,22 @@ if [ -x "$PONCOLLECT" ]; then
     fi
 fi
 
+# ── external dead-man beat B (ops NETWORK-CONTRACT "route10 heartbeat") ─────
+# route10 → WAN → ntfy, every 2 min, never touching opi5pro — so a stopped beat
+# tells ops whether the fault is theirs or ours (see scripts/heartbeat.sh for
+# the full matrix). 2 min, not 5: detection latency is set by ops's 15-min poll
+# window, so a faster beat costs nothing there and buys 7 chances instead of 3 —
+# margin our WAN demonstrably needs (CGNAT brownouts, PPP reconnects). Inert
+# until NTFY_HEARTBEAT_TOPIC exists in /cfg/seam.env (the topic IS the
+# credential, so it is never committed).
+HEARTBEAT=/cfg/scripts/heartbeat.sh
+if [ -x "$HEARTBEAT" ]; then
+    if ! grep -qF "$HEARTBEAT" /etc/crontabs/root 2>/dev/null; then
+        echo "*/2 * * * * $HEARTBEAT" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── Prometheus metrics endpoint (ops NETWORK-CONTRACT "route10 metrics scrape") ──
 # Second uhttpd instance, LAN-only bind on 192.168.10.1:9100, serving the
 # /metrics CGI at /cfg/scripts/metrics-www/metrics. Trending telemetry only —
