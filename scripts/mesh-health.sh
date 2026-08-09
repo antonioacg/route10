@@ -41,6 +41,24 @@
 #   - Heal = tailscale-reconcile.sh, at most once per run, then one re-check.
 #   - Clean no-op on a stick-only router (no tailscale installed).
 #
+# ⛔ DELIBERATELY ABSENT: a Headscale control-plane reachability assertion.
+# Considered and declined 2026-08-09, recorded here so it is not re-derived.
+# The gap is real — none of the assertions above ask "can I reach Headscale", and
+# Tailscale MASKS the fault: a node runs indefinitely off its cached netmap when
+# the control plane is gone, so every assertion here stays green until the next
+# re-auth, key rotation or node join, which may be days away. That is the shape of
+# ops's INC-09 (5h42m of silent split-DNS).
+# It is NOT built because ops already detects it: their `mesh-tag-check` (*/30)
+# fails CLOSED on an unreachable Headscale API and pages. A route10-side check
+# would still be complementary rather than redundant — theirs asks "can the
+# cluster reach Headscale over its pinned /32", ours would ask "can the node whose
+# tag is at stake reach it over its own path" — but complementary at */30 coverage
+# is a judgement call, not a gap, and it is the operator's to make.
+# If it is ever built: TCP reachability is close to worthless here (a listening
+# socket proves nothing about Headscale serving policy). Decide what a healthy
+# response actually looks like FIRST — an unconsidered check that stays green while
+# split-DNS is dead is worse than no check.
+#
 # See project_route10_tailscale_stale_binary_filter.md,
 # project_route10_native_tailscale.md and CLAUDE.md observability.
 
