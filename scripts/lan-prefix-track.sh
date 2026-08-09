@@ -30,14 +30,28 @@
 # the live prefix. Deterministic — does not rely on dnsmasq's own deprecation.
 #
 # We track ONLY the GUA (2xxx…). The LAN ULA (fd..) is a static br-lan address
-# that never rotates and must NEVER be deprecated; link-local is ignored. State in
-# /var/run (tmpfs): a reboot resets it, which is correct — a fresh boot has no
-# stale client prefix to chase. Idempotent and QUIET when healthy (touches the
-# state file / log only on an actual rotation).
+# that never rotates and must NEVER be deprecated; link-local is ignored.
+# Idempotent and QUIET when healthy (touches the state file / log only on an
+# actual rotation).
+#
+# STATE IS PERSISTENT (/cfg), NOT tmpfs. This file used to live in /var/run with
+# the rationale "a reboot resets it, which is correct — a fresh boot has no stale
+# client prefix to chase". That reasoning is exactly backwards and cost us a real
+# outage: OUR memory resets on reboot, the CLIENTS' does not. A LAN host holds its
+# SLAAC address as *preferred* for up to 24h regardless of what the router does in
+# between, so a rotation that spans a reboot is precisely when clients are most
+# stranded — and precisely when the tmpfs version was guaranteed to be blind to it.
+#
+# Observed 2026-08-09: rotation at ~19:21Z, reboot at 19:45:23Z, no prior state on
+# the first post-boot run, so no diff, so no deprecation RA ever sent. Every LAN
+# client kept 2804:2488:5083:d670::/64 preferred alongside the live prefix; source
+# selection could pick the dead one, producing intermittent v6 egress failures that
+# looked like a host bug. Ceasing to advertise a prefix does NOT deprecate it —
+# RFC 9096 requires an explicit RA with preferred_lft 0, which is what we send.
 #
 # See CLAUDE.md "stale IPv6 prefix", ra-deprecate.py, and project memory.
 
-STATE=/var/run/.lan-prefix.env
+STATE=/cfg/scripts/.lan-prefix.env
 DEP=/cfg/scripts/ra-deprecate.py
 IFACE=br-lan
 # Dual-sink logging (syslog route10.prefix-track + /cfg/scripts/prefix-track.log);
@@ -71,7 +85,7 @@ if [ -n "$prev" ] && [ "$prev" != "$net" ]; then
     fi
 fi
 
-# Persist current (only when it changed — keeps the tmpfs file untouched otherwise).
+# Persist current (only when it changed — avoids rewriting /cfg every minute).
 if [ "$prev" != "$net" ]; then
     printf "LAN_PREFIX='%s'\n" "$net" > "$STATE"
 fi
