@@ -111,6 +111,23 @@ telnet probes — they orphan the lock too.
   and mesh-health (heal). The old sideload (`/a/tailscale` + fork
   `alta-route10-tailscale`) is RETIRED. Log: `/cfg/scripts/ts-reconcile.log`.
   Source: `scripts/tailscale-reconcile.sh`. See `project_route10_native_tailscale.md`.
+- `/cfg/scripts/heartbeat.sh` — `*/2` cron, no daemon. **External dead-man "beat B"**
+  (route10 → WAN → ntfy), the counterpart to ops's cluster beat A: A alone stopping
+  means their cluster/alerting, both stopping means router/WAN/ntfy. **The emitter is
+  UNCONDITIONAL by design** — gating a send on health turns a bug in the health logic
+  into a page saying everything is dead, so the verdict rides in the body as
+  `lan_ok=1|0|unknown` (`unknown` when inputs are missing/stale, never silence).
+  `lan_ok` = br-lan holds a v4 address AND br-lan rx advancing, read from `/sys`
+  directly (never via obs-collect's DB — a dead collector must not be able to make the
+  heartbeat lie); rx baseline is in tmpfs, so **the first beat after every reboot is
+  honestly `unknown`** — ops maps that to low-priority, not red. Beats over IPv6 by
+  curl's happy-eyeballs default: v4 has a demonstrated CGNAT brownout mode that would
+  manufacture false "everything is dead" pages. Warns locally (once, on transition) if
+  its own send fails, so neither side infers health from silence. Topic is a
+  CREDENTIAL — `NTFY_HEARTBEAT_TOPIC` in `/cfg/seam.env` only, never in any git repo;
+  absent ⇒ inert + hourly warn. NOT a "br-lan dead but router alive" splitter: the
+  2026-08-08 wedge took br-lan, the eth4 MACVLAN and PPPoE together, so B would have
+  stopped too. Log: `/cfg/scripts/heartbeat.log`. Source: `scripts/heartbeat.sh`.
 - `/cfg/scripts/mesh-health.sh` — `*/5` cron, no daemon. Tailscale mesh DRIFT smoke
   tests + SELF-HEAL (quiet when healthy; WARN + heal via tailscale-reconcile.sh
   where route10-local): (1) tailscaled running, not a stale/DELETED binary,
