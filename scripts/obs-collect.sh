@@ -108,6 +108,43 @@ IRQ=$(awk '/edma|nss/{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) s+=$i} END{printf "
 CT=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
 CTMAX=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
 
+# ct.n above is the GLOBAL counter: both address families, and every scope
+# including LAN<->LAN flows that never touch the ISP NAT. It is therefore useless
+# for a CGNAT question, while looking exactly like the number you want — which is
+# how it produced a confident wrong answer on 2026-08-09 (2231 "conntrack" read as
+# CGNAT pressure against a ~1400 v4 ceiling; the true v4 internet-bound figure was
+# 991, and v6 has no CGNAT at all). Keep n/max for continuity, add the breakdown
+# that can actually answer the question:
+#   v4 / v6  — per-family totals
+#   wan4     — ipv4 entries whose ORIGINAL destination is a public address, i.e.
+#              flows genuinely egressing to the internet. This is the count
+#              comparable to an ISP NAT-session budget. Excludes RFC1918, loopback,
+#              link-local, multicast, and 100.64/10 (our own CGNAT + tailscale).
+# Single pass over /proc/net/nf_conntrack: ~2 ms against a ~57 ms script budget,
+# versus ~10 ms for each `conntrack -L` invocation.
+read -r CT4 CT6 CTW4 <<EOF
+$(awk '
+  function pub4(ip,   p) {
+    split(ip, p, ".")
+    if (p[1]==127 || p[1]==10 || p[1]==0)            return 0
+    if (p[1]==192 && p[2]==168)                      return 0
+    if (p[1]==172 && p[2]>=16 && p[2]<=31)           return 0
+    if (p[1]==169 && p[2]==254)                      return 0
+    if (p[1]==100 && p[2]>=64 && p[2]<=127)          return 0
+    if (p[1]>=224)                                   return 0
+    return 1
+  }
+  $1=="ipv4" {
+    v4++
+    for (i=1; i<=NF; i++)
+      if (substr($i,1,4)=="dst=") { if (pub4(substr($i,5))) w4++; break }
+  }
+  $1=="ipv6" { v6++ }
+  END { printf "%d %d %d", v4+0, v6+0, w4+0 }
+' /proc/net/nf_conntrack 2>/dev/null)
+EOF
+[ -n "$CT4" ] || { CT4=0; CT6=0; CTW4=0; }
+
 # Per-interface {rx_bytes,rx_pkts,tx_bytes,tx_pkts} as a JSON object keyed by name
 IFJSON=$(awk 'NR>2{
     n=$1; sub(/:$/,"",n)
@@ -142,10 +179,11 @@ if [ -f /var/run/w2-ddm.env ]; then
     fi
 fi
 
-JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s}}' \
+JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s}}' \
     "$(jnum "$CPU_TOT")" "$(jnum "$CPU_IDLE")" "$(jnum "$CPU_SIRQ")" "$(jnum "$CPU_IOW")" \
     "$(jnum "$SN_D")" "$(jnum "$SN_S")" "$(jnum "$IRQ")" \
-    "$(jnum "$CT")" "$(jnum "$CTMAX")" "$IFJSON" \
+    "$(jnum "$CT")" "$(jnum "$CTMAX")" \
+    "$(jnum "$CT4")" "$(jnum "$CT6")" "$(jnum "$CTW4")" "$IFJSON" \
     "$(jnum "$C4")" "$(jnum "$C5")" "$(jnum "$CBR")" \
     "$(jnum "$A4")" "$(jnum "$AG")" "$(jnum "$AU")" "$(jnum "$W3")" \
     "$(jnum "$L4T")" "$(jnum "$L4TX")" "$(jnum "$L4RX")" \
