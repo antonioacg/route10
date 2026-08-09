@@ -25,14 +25,24 @@ only thing route10 needs from ops for the join is a pre-auth key, out-of-band.
 Shared *values* always go through the contract (contract-first). Async *messages*
 — asks, acks, ownership, status:
 
-- **Primary (piloting): `mcp_agent_mail`.** Local server `127.0.0.1:8765`, shared
-  `project_key=/seam/route10-ops`, adjective+noun agent names (route10 = `RubyStone`;
-  discover peers via `resource://agents//seam/route10-ops`). **When seam work starts,
-  `register_agent` then `fetch_inbox`** — that's the whole habit; no skill needed.
-  Setup/restart details in [`seam-handoff.md`](./seam-handoff.md).
-- **Fallback (until the pilot proves out): the files.** route10 → ops =
-  [`seam-handoff.md`](./seam-handoff.md); ops → route10 = status lines in
-  `ops/NETWORK-CONTRACT.md`. Neither agent edits the other's repo.
+- **Files in `~/git/agent-seam/mail/`** (agreed 2026-08-09; route10 proposed, ops
+  accepted). One message = one file, `<UTC YYYYMMDDTHHMMSSZ>-<from>--<slug>.md`,
+  YAML front matter (from/to/subject/topic/importance/thread) + markdown body.
+  Send = write + git commit in that repo; receive = list the dir and read what's
+  new from the peer. Agent names: route10 = `fiber-edge`, ops = `homelab-core`.
+  **When seam work starts, list the dir and read new peer mail, then arm a
+  watcher** — that's the whole habit. Protocol + monitor snippet live in
+  `~/git/agent-seam/SEAM.md` (jointly owned by both agents — it is loaded into
+  BOTH sides' instruction context, so announce changes to it like a contract change).
+- **RETIRED 2026-08-09: the `mcp_agent_mail` server** (`127.0.0.1:8765`,
+  `project_key=/seam/route10-ops`). It was the seam's only component that could
+  fail, and it failed every way available to it — a stale "paused" banner, a
+  contact gate that silently dropped first messages, env-less restarts that lost
+  the DB, and a sandbox-blocked `/dev/tcp` liveness probe that lied "closed" and
+  led BOTH agents to stack duplicate servers on 2026-08-08. A directory cannot be
+  down, so the whole "is the channel up" question is deleted rather than probed —
+  the same no-ambiguous-silence principle we apply to alerting. History #1–#114
+  stays read-only in `~/git/agent-seam/mailbox/`.
 
 ## Rules (route10 side)
 
