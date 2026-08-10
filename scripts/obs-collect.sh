@@ -349,7 +349,46 @@ if [ -f /var/run/w2-ddm.env ]; then
     fi
 fi
 
-JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s}}' \
+# ── DNS resolver ladder ─────────────────────────────────────────────────────
+# WHY: the 2026-08-10 AdGuard maintenance degraded LAN DNS for every client for
+# ~6 min and NOT ONE of the 52 exported series moved. The only trace was a
+# routedns INFO line nothing consumed. This is the missing signal, and it is a
+# LADDER on purpose — each hop is probed independently so the metric NAMES the
+# broken hop instead of just asserting "DNS is sad":
+#   adguard  down, rest up  → ops-side outage; we are on DoH ⇒ AD-BLOCK IS OFF
+#   doh      down, rest up  → the safety net is gone; an AdGuard blip is now fatal
+#   routedns down           → dnsmasq's general upstream is dead
+#   dnsmasq  down           → the whole LAN has no resolver (the loud one)
+# ⚠ timeout 2 is NOT optional: bare drill retries 3x5s and takes 15 s on a dead
+# hop, which would push this collector past its own 60 s cron. 2 s also sits
+# safely above routedns's 1 s query-timeout, so a query that fails over to DoH
+# still counts as UP — which is correct, routedns did answer.
+# ⚠ Deliberately a STABLE name: this measures LIVENESS of each hop, not cold
+# lookup latency. dnsmasq/routedns can serve it from cache while the upstream is
+# dead, which is exactly why the adguard hop is probed DIRECTLY and is the one
+# that tells the truth about an ops-side outage.
+DNS_AGH_UP=0; DNS_AGH_MS=""; DNS_DOH_UP=0; DNS_DOH_MS=""
+DNS_RDNS_UP=0; DNS_RDNS_MS=""; DNS_DNSMASQ_UP=0; DNS_DNSMASQ_MS=""
+dns_probe() {   # $1=addr $2=port → sets DNS_UP / DNS_MS
+    _s=$(date +%s%N)
+    timeout 2 drill -Q -p "$2" example.com "@$1" >/dev/null 2>&1 && DNS_UP=1 || DNS_UP=0
+    _e=$(date +%s%N)
+    DNS_MS=$(( (_e - _s) / 1000000 ))
+}
+# AdGuard's address is a SEAM value (ops/NETWORK-CONTRACT.md §LAN DNS delegation)
+# — read it, never hardcode it. Absent ⇒ that rung is simply not probed (NaN),
+# same clean-no-op idiom as the DNS job in post-cfg.sh.
+[ -f /cfg/seam.env ] && . /cfg/seam.env
+if command -v drill >/dev/null 2>&1; then
+    if [ -n "$LAN_DNS4" ]; then
+        dns_probe "$LAN_DNS4" 53;  DNS_AGH_UP=$DNS_UP;     DNS_AGH_MS=$DNS_MS
+    fi
+    dns_probe 127.0.0.1 5054;      DNS_DOH_UP=$DNS_UP;     DNS_DOH_MS=$DNS_MS
+    dns_probe 127.0.0.1 5300;      DNS_RDNS_UP=$DNS_UP;    DNS_RDNS_MS=$DNS_MS
+    dns_probe 127.0.0.1 53;        DNS_DNSMASQ_UP=$DNS_UP; DNS_DNSMASQ_MS=$DNS_MS
+fi
+
+JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s},"dns":{"agh_up":%s,"agh_ms":%s,"doh_up":%s,"doh_ms":%s,"rdns_up":%s,"rdns_ms":%s,"dnsmasq_up":%s,"dnsmasq_ms":%s}}' \
     "$(jnum "$CPU_TOT")" "$(jnum "$CPU_IDLE")" "$(jnum "$CPU_SIRQ")" "$(jnum "$CPU_IOW")" \
     "$(jnum "$SN_D")" "$(jnum "$SN_S")" "$(jnum "$IRQ")" \
     "$(jnum "$CT")" "$(jnum "$CTMAX")" \
@@ -357,7 +396,11 @@ JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":
     "$(jnum "$C4")" "$(jnum "$C5")" "$(jnum "$CBR")" \
     "$(jnum "$A4")" "$(jnum "$AG")" "$(jnum "$AU")" "$(jnum "$W3")" \
     "$(jnum "$L4T")" "$(jnum "$L4TX")" "$(jnum "$L4RX")" \
-    "$(jnum "$W2T")" "$(jnum "$W2TX")" "$(jnum "$W2RX")")
+    "$(jnum "$W2T")" "$(jnum "$W2TX")" "$(jnum "$W2RX")" \
+    "$(jnum "$DNS_AGH_UP")" "$(jnum "$DNS_AGH_MS")" \
+    "$(jnum "$DNS_DOH_UP")" "$(jnum "$DNS_DOH_MS")" \
+    "$(jnum "$DNS_RDNS_UP")" "$(jnum "$DNS_RDNS_MS")" \
+    "$(jnum "$DNS_DNSMASQ_UP")" "$(jnum "$DNS_DNSMASQ_MS")")
 
 OUT=$(sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;

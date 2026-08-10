@@ -58,10 +58,22 @@ telnet probes — they orphan the lock too.
     ~2 y (fine-grained recent + downsampled long-term). Also the single **hard-cap
     janitor** for all of `/a/obs` (500 MB byte budget, trims oldest + VACUUMs on
     breach). Source: `scripts/stats-archive.sh`.
-  - `/cfg/scripts/obs-collect.sh` (`* * * * *` cron, ~50 ms) — per-minute samples
+  - `/cfg/scripts/obs-collect.sh` (`* * * * *` cron, ~250 ms; up to ~8 s if every
+    DNS hop is dead) — per-minute samples
     of the CPU-side counters rcstats can't see (CPU/softirq, softnet, br-lan/
     pppoe-wan3/tailscale0/eth4/eth5 counters + carriers, br-lan addr presence,
-    conntrack, L4+W2 DDM) → `/a/obs/rt.sql`, 30-day retention. Also drains the
+    conntrack, L4+W2 DDM) → `/a/obs/rt.sql`, 30-day retention. Also carries the
+    **DNS resolver ladder** (`route10_dns_up` / `route10_dns_query_ms`, labels
+    `resolver=adguard|doh|routedns|dnsmasq`, added 2026-08-10) — four independent
+    `timeout 2 drill` probes, one per hop, so the metric NAMES the broken hop.
+    Reads the 2026-08-10 outage as `adguard=0` while the rest stay 1, and
+    `routedns` latency jumping to ~1000 ms is a **direct readout that the DoH
+    fallback is active, i.e. ad-blocking is currently OFF** — no log parsing.
+    ⚠ `dnsmasq=1` does NOT mean LAN DNS is healthy (it serves the stable probe
+    name from cache with a dead upstream); the `adguard` rung is the honest one.
+    ⚠ `timeout 2` is load-bearing — bare `drill` retries 3×5 s and would run the
+    collector past its own cron. No new staleness guard: these ride
+    `route10_rt_sample_timestamp_seconds`. Also drains the
     kernel ring persistently to `/a/obs/kernel-ring.log` and harvests pstore
     crash records to `/a/obs/pstore/` with an `err` line (alertable ops-side).
     Also carries the **wedge tripwire**: 2 consecutive min of zero br-lan rx with
