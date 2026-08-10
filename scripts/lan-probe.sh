@@ -74,6 +74,43 @@ while read -r ip name medium; do
     case "$ip" in ''|'#'*) continue ;; esac
     [ -n "$name" ] && [ -n "$medium" ] || continue
 
+    # ── follow the DEVICE, not the address ──────────────────────────────────
+    # iOS private Wi-Fi addressing rotates the MAC; a rotated MAC takes a NEW
+    # lease at a NEW ip, and the configured address goes quiet forever. The probe
+    # would then read present=0 while she stands next to the AP using the
+    # internet — a control that looks healthy while aimed at nothing.
+    #
+    # The DHCP hostname survives the rotation even though the MAC and ip do not,
+    # so resolve name -> current lease each run and probe wherever the device
+    # actually is. This removes the dependency on a static reservation entirely:
+    # nothing has to be pinned, because nothing is assumed to stay still.
+    #
+    # Newest lease wins (max expiry) so a stale row for the same name cannot win
+    # over the live one. Targets with no DHCP name (`*` in the lease file) or no
+    # lease at all — statics like the AP — keep their configured ip untouched.
+    #
+    # ⛔ FAMILY-MATCHED. The lease file carries v4 AND v6 rows under the SAME
+    # hostname, so a bare max-expiry match returns whichever renewed last — the
+    # first test of this resolved `Notebook-Ana-Clara` to a GUA and would have
+    # silently repointed a v4 target at an IPv6 address. Match the family of the
+    # configured address and the ambiguity cannot arise.
+    if [ -f /cfg/dhcp.leases ]; then
+        case "$ip" in *:*) want=6 ;; *) want=4 ;; esac
+        cur=$(awk -v n="$name" -v want="$want" '
+              $4==n {
+                  fam = (index($3, ":") ? 6 : 4)
+                  if (fam == want && $1 > best) { best = $1; found = $3 }
+              }
+              END { if (found) print found }' /cfg/dhcp.leases 2>/dev/null)
+        if [ -n "$cur" ] && [ "$cur" != "$ip" ]; then
+            # Not a warning: this is the mechanism working. But it IS a state
+            # change worth a line, because the ip label on every series for this
+            # host changes with it and a reader will otherwise see a series end.
+            event "$name moved $ip -> $cur (lease follows the device; probing the new address)"
+            ip="$cur"
+        fi
+    fi
+
     # ── lease freshness: does this ADDRESS still belong to that device? ──────
     # `present=0` alone cannot tell "the phone is asleep" (recoverable, the
     # control working) from "this IP stopped being her phone days ago" (the probe
