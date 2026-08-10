@@ -128,6 +128,43 @@ SELECT group_concat(line, char(10)) FROM (
 );
 "
 
+# ── PASSIVE experience signal: TCP connections that never established ───────
+#
+# The one metric here that measures the USER's traffic rather than our own. An
+# ICMP probe cannot characterise a phone (measured: an iPhone answered every echo
+# in all 11 minutes it was passing traffic and lost all five in all 5 minutes it
+# was idle — the probe reports iOS power management, not the link). This has the
+# inverse property: a sleeping device opens no connections, so idleness yields NO
+# signal rather than a false one. And SYN_SENT is literally the reported symptom —
+# a connection attempted that never completed, which is what "the last few images
+# of the post do not load" IS.
+#
+# ⚠ BOTH numbers are exported on purpose. The ratio is the interesting value and
+# is meaningless alone: 1 unanswered of 1 flow is 100% and says nothing. Gate on
+# the denominator before displaying a ratio:
+#   route10_host_tcp_unanswered / route10_host_tcp_flows   and   flows >= 10
+#
+# ⚠ p2p makes SYN_SENT normal. A torrent host dials peers that are simply gone,
+# so it sits high on a perfectly healthy day. Read a host against ITS OWN trailing
+# baseline, never against an absolute threshold or against other hosts.
+#
+# ⚠ It is a ~2-minute smear, not an instant: nf_conntrack_tcp_timeout_syn_sent is
+# 120 s (verified on the box), so a failed SYN lingers twice the 60 s sampling
+# period. That means a fast burst CANNOT be missed — but it also means the metric
+# says a burst failed within a window, never which burst.
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT group_concat(line, char(10)) FROM (
+  SELECT 'route10_host_tcp_flows{family=\"v4\",host=\"' || json_extract(e.value,'\$.h') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') || '\"} ' ||
+         json_extract(e.value,'\$.tcp') || char(10) ||
+         'route10_host_tcp_unanswered{family=\"v4\",host=\"' || json_extract(e.value,'\$.h') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') || '\"} ' ||
+         json_extract(e.value,'\$.syn') AS line
+  FROM samples s, json_each(json_extract(s.json, '\$.ct.stall4')) e
+  WHERE s.ts = (SELECT max(ts) FROM samples)
+);
+"
+
 # ── LAN quality probe (lan-probe.sh, every 1 min) ───────────────────────────
 #
 # `present` is the CONTROL and must be read alongside loss, not after it: a phone

@@ -211,6 +211,25 @@ CTOUT=$(awk -v lan6="$LAN6" -v topn=10 '
     delete used
     return out "]"
   }
+  # Ranked by UNANSWERED count, and carrying the denominator with it. The ratio is
+  # the interesting number but it is meaningless alone: 1 of 1 is 100% and says
+  # nothing. Emitting both lets the consumer gate on a minimum flow count instead
+  # of trusting a ratio built from noise.
+  function emit_stall(N,   i, k, best, bk, out, first) {
+    out = "["; first = 1
+    for (i = 0; i < N; i++) {
+      best = -1; bk = ""
+      for (k in y4) if (!(k in used2) && y4[k] > best) { best = y4[k]; bk = k }
+      if (bk == "" || best <= 0) break
+      used2[bk] = 1
+      if (!first) out = out ","
+      out = out "{\"h\":\"" safe((bk in nm) ? nm[bk] : "unknown") "\",\"ip\":\"" bk \
+                "\",\"tcp\":" t4[bk]+0 ",\"syn\":" y4[bk]+0 "}"
+      first = 0
+    }
+    delete used2
+    return out "]"
+  }
   BEGIN { lan6x = (lan6 == "") ? "" : substr(expand(lan6), 1, 19) }
   # The FILENAME guard is load-bearing, not belt-and-braces: with an EMPTY idmap
   # (no leases yet at boot) NR==FNR is still true for the first conntrack line,
@@ -222,7 +241,23 @@ CTOUT=$(awk -v lan6="$LAN6" -v topn=10 '
       if (s=="" && substr($i,1,4)=="src=") s = substr($i,5)
       else if (d=="" && substr($i,1,4)=="dst=") { d = substr($i,5); break }
     }
-    if (d != "" && pub4(d)) { w4++; if (s ~ /^192\.168\./) c4[s]++ }
+    if (d != "" && pub4(d)) {
+      w4++
+      if (s ~ /^192\.168\./) {
+        c4[s]++
+        # PASSIVE experience signal. An ICMP probe cannot characterise a phone:
+        # measured 2026-08-10, an iPhone answered every echo on all 11 minutes it
+        # was passing traffic and lost all five on all 5 minutes it was idle, so
+        # the probe reports iOS power management rather than the link. Her real
+        # traffic has none of that problem — a sleeping device simply opens no
+        # connections, so idleness yields NO signal instead of a false one.
+        # SYN_SENT is a connection that was attempted and never established,
+        # which is literally the reported symptom (the tail of a burst of image
+        # or video requests failing to load).
+        # State is $6 for tcp lines only; on udp rows $6 is already src=.
+        if ($3=="tcp") { t4[s]++; if ($6=="SYN_SENT") y4[s]++ }
+      }
+    }
     next
   }
   $1=="ipv6" {
@@ -242,6 +277,7 @@ CTOUT=$(awk -v lan6="$LAN6" -v topn=10 '
     printf "TOTALS %d %d %d\n", v4+0, v6+0, w4+0
     printf "TOP4 %s\n", emit(c4, topn)
     printf "TOP6 %s\n", emit(c6, topn)
+    printf "STALL4 %s\n", emit_stall(topn)
   }
 ' "$IDMAP" /proc/net/nf_conntrack 2>/dev/null)
 
@@ -252,6 +288,8 @@ TOP6=$(printf '%s\n' "$CTOUT" | sed -n 's/^TOP6 //p')
 [ -n "$CT4" ] || { CT4=0; CT6=0; CTW4=0; }
 [ -n "$TOP4" ] || TOP4="[]"
 [ -n "$TOP6" ] || TOP6="[]"
+STALL4=$(printf '%s\n' "$CTOUT" | sed -n 's/^STALL4 //p')
+[ -n "$STALL4" ] || STALL4="[]"
 
 # Per-interface {rx_bytes,rx_pkts,tx_bytes,tx_pkts} as a JSON object keyed by name
 IFJSON=$(awk 'NR>2{
@@ -297,11 +335,11 @@ if [ -f /var/run/w2-ddm.env ]; then
     fi
 fi
 
-JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s}}' \
+JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s}}' \
     "$(jnum "$CPU_TOT")" "$(jnum "$CPU_IDLE")" "$(jnum "$CPU_SIRQ")" "$(jnum "$CPU_IOW")" \
     "$(jnum "$SN_D")" "$(jnum "$SN_S")" "$(jnum "$IRQ")" \
     "$(jnum "$CT")" "$(jnum "$CTMAX")" \
-    "$(jnum "$CT4")" "$(jnum "$CT6")" "$(jnum "$CTW4")" "$TOP4" "$TOP6" "$IFJSON" \
+    "$(jnum "$CT4")" "$(jnum "$CT6")" "$(jnum "$CTW4")" "$TOP4" "$TOP6" "$STALL4" "$IFJSON" \
     "$(jnum "$C4")" "$(jnum "$C5")" "$(jnum "$CBR")" \
     "$(jnum "$A4")" "$(jnum "$AG")" "$(jnum "$AU")" "$(jnum "$W3")" \
     "$(jnum "$L4T")" "$(jnum "$L4TX")" "$(jnum "$L4RX")" \

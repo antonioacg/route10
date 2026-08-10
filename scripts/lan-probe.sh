@@ -34,9 +34,20 @@
 # heartbeat, wan4 budget and PON metrics cover that, and conflating the two is how
 # "the internet is bad" stays unattributable for months.
 #
-# Targets live in /cfg/lan-probe.targets ("<ip> <name> <medium>", # comments), so
-# devices can be added without a redeploy. Absent file => seeded with a default set
-# and a warning, never a silent no-op.
+# Targets live in /cfg/lan-probe.targets ("<ip> <name> <medium> [dhcp_name]",
+# # comments), so devices can be added without a redeploy. Absent file => seeded
+# with a default set and a warning, never a silent no-op.
+#
+# ⛔ KNOWN DEAD END, measured 2026-08-10 — this probe CANNOT characterise an
+# iPhone's link, and a panel built on one is measuring iOS, not the network. A
+# phone answered every echo on all 11 minutes it was passing traffic and lost all
+# five on all 5 minutes it was idle: perfect separation, zero evidence of link
+# loss. `present` does not rescue it — the radio answers ARP while parked, so the
+# device reads present=1 throughout. There is no operating region where ICMP to an
+# aggressively power-saving device measures the air link. The controls (vacuum, AP,
+# wired) and the presence/lease coverage signal remain valid; per-client LATENCY
+# for phones does not. Measure their real traffic instead — see the unanswered-TCP
+# metric in obs-collect.sh.
 #
 # Install: scp to /cfg/scripts/lan-probe.sh, chmod +x
 # Cron:    * * * * *  (reinstalled each boot by post-cfg.sh — / is tmpfs)
@@ -70,9 +81,16 @@ fi
 TS=$(date +%s)
 ROWS=""
 
-while read -r ip name medium; do
+while read -r ip name medium dhcpname; do
     case "$ip" in ''|'#'*) continue ;; esac
     [ -n "$name" ] && [ -n "$medium" ] || continue
+
+    # `name` is the LABEL and must stay stable — every dashboard query keys on it.
+    # `dhcpname` (optional 4th field) is the DHCP hostname to chase. They are
+    # separate because the useful label and the lease hostname are rarely the same
+    # string: the lease says `iPhone` for one of two iPhones and `*` for the other,
+    # while the label has to distinguish them. Defaults to the label when omitted.
+    follow="${dhcpname:-$name}"
 
     # ── follow the DEVICE, not the address ──────────────────────────────────
     # iOS private Wi-Fi addressing rotates the MAC; a rotated MAC takes a NEW
@@ -96,7 +114,7 @@ while read -r ip name medium; do
     # configured address and the ambiguity cannot arise.
     if [ -f /cfg/dhcp.leases ]; then
         case "$ip" in *:*) want=6 ;; *) want=4 ;; esac
-        cur=$(awk -v n="$name" -v want="$want" '
+        cur=$(awk -v n="$follow" -v want="$want" '
               $4==n {
                   fam = (index($3, ":") ? 6 : 4)
                   if (fam == want && $1 > best) { best = $1; found = $3 }
