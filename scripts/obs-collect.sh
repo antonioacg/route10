@@ -215,12 +215,26 @@ CTOUT=$(awk -v lan6="$LAN6" -v topn=10 '
   # the interesting number but it is meaningless alone: 1 of 1 is 100% and says
   # nothing. Emitting both lets the consumer gate on a minimum flow count instead
   # of trusting a ratio built from noise.
-  function emit_stall(N,   i, k, best, bk, out, first) {
+  #
+  # ⛔ ITERATES t4 (every host with TCP flows), NOT y4 (hosts that failed). The
+  # first version ranked over y4 and stopped at the first zero, so a host emitted
+  # a series ONLY when something of its had failed. That silently deleted the most
+  # valuable reading this metric can produce: "she was actively using the network
+  # and NOTHING failed" — the one datum that can exonerate the LAN for a window.
+  # Worse, it rendered identically to "she was asleep", putting the ambiguity back
+  # that this metric exists to remove. Zero is a value; absence is a shrug.
+  # Ranked by unanswered, tie-broken by flow count so the busiest hosts win the
+  # remaining slots rather than an arbitrary hash order.
+  function emit_stall(N,   i, k, bs, bt, bk, s, t, out, first) {
     out = "["; first = 1
     for (i = 0; i < N; i++) {
-      best = -1; bk = ""
-      for (k in y4) if (!(k in used2) && y4[k] > best) { best = y4[k]; bk = k }
-      if (bk == "" || best <= 0) break
+      bs = -1; bt = -1; bk = ""
+      for (k in t4) {
+        if (k in used2) continue
+        s = y4[k] + 0; t = t4[k] + 0
+        if (s > bs || (s == bs && t > bt)) { bs = s; bt = t; bk = k }
+      }
+      if (bk == "") break
       used2[bk] = 1
       if (!first) out = out ","
       out = out "{\"h\":\"" safe((bk in nm) ? nm[bk] : "unknown") "\",\"ip\":\"" bk \
