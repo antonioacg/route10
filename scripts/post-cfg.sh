@@ -835,6 +835,18 @@ fi
 # demonstrably needs (CGNAT brownouts, PPP reconnects) and costs nothing against
 # the 5-ping/min provider limit. Inert until HC_URL_ALIVE and HC_URL_LAN exist in
 # /cfg/seam.env (the ping URL IS the credential, so it is never committed).
+# ── LAN quality probe (per-client RTT/loss, with presence + medium controls) ─
+# The only telemetry that can see a degraded WiFi link: route10 has no radios and
+# rcstats exposes no wireless clients, so an AP-side fault is otherwise invisible
+# and shows up only as a person saying the internet is bad.
+LANPROBE=/cfg/scripts/lan-probe.sh
+if [ -x "$LANPROBE" ]; then
+    if ! grep -qF "$LANPROBE" /etc/crontabs/root 2>/dev/null; then
+        echo "* * * * * $LANPROBE" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 HEARTBEAT=/cfg/scripts/heartbeat.sh
 if [ -x "$HEARTBEAT" ]; then
     if ! grep -qF "$HEARTBEAT" /etc/crontabs/root 2>/dev/null; then

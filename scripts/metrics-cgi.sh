@@ -126,6 +126,34 @@ SELECT group_concat(line, char(10)) FROM (
 );
 "
 
+# ── LAN quality probe (lan-probe.sh, every 1 min) ───────────────────────────
+#
+# `present` is the CONTROL and must be read alongside loss, not after it: a phone
+# that is asleep, off, or on cellular reports present=0 and its loss/rtt are null.
+# Alerting on loss without gating on present=1 manufactures a nightly outage every
+# time the device is put down — which is how a real signal gets ignored.
+#
+# `medium` is the second control. wifi degrading while wired/ap stay clean isolates
+# the air link; everything degrading together points at route10 or the LAN.
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT group_concat(line, char(10)) FROM (
+  SELECT 'route10_lan_probe_present{host=\"' || json_extract(e.value,'\$.n') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') ||
+         '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || json_extract(e.value,'\$.present') || char(10) ||
+         'route10_lan_probe_rtt_ms{host=\"' || json_extract(e.value,'\$.n') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') ||
+         '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.rtt'),'NaN') || char(10) ||
+         'route10_lan_probe_rtt_max_ms{host=\"' || json_extract(e.value,'\$.n') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') ||
+         '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.rttmax'),'NaN') || char(10) ||
+         'route10_lan_probe_loss_percent{host=\"' || json_extract(e.value,'\$.n') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') ||
+         '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.loss'),'NaN') AS line
+  FROM lanq l, json_each(l.json) e
+  WHERE l.ts = (SELECT max(ts) FROM lanq)
+);
+"
+
 # ── PON layer (pon-collect.sh, every 1 min) ─────────────────────────────────
 # Own staleness guard (60s cadence): route10_pon_sample_timestamp_seconds.
 # NaN for any field the parser couldn't read this cycle, so a partial diag read
