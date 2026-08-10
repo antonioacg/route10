@@ -74,6 +74,25 @@ while read -r ip name medium; do
     case "$ip" in ''|'#'*) continue ;; esac
     [ -n "$name" ] && [ -n "$medium" ] || continue
 
+    # ── lease freshness: does this ADDRESS still belong to that device? ──────
+    # `present=0` alone cannot tell "the phone is asleep" (recoverable, the
+    # control working) from "this IP stopped being her phone days ago" (the probe
+    # is pinging a dead lease and will read absent forever while she stands next
+    # to the AP using the internet). Both render identically, and the second is a
+    # control that looks healthy while aimed at nothing.
+    #
+    # The lease table is the only thing that separates them. dnsmasq field 1 is
+    # the EXPIRY epoch, so `expiry - now` is what is left of a 24 h lease: a
+    # device that renewed recently has most of it, a device that walked away
+    # decays to zero and then vanishes from the file entirely.
+    #
+    # ⚠ Empty is NOT a failure. Statically-configured hosts (the AP, .200) never
+    # take a lease, so they are permanently NaN here — a rule reading NaN as
+    # "stale target" would condemn exactly the hosts that are most stable. This
+    # discriminates for DHCP clients and says nothing about anyone else.
+    lease=$(awk -v ip="$ip" -v now="$TS" '$3==ip {print $1-now; exit}' /cfg/dhcp.leases 2>/dev/null)
+    case "$lease" in ''|*[!0-9-]*) lease="" ;; esac
+
     # ── presence control ────────────────────────────────────────────────────
     # A live neighbour entry means the device is on the segment and answering at
     # L2. FAILED/INCOMPLETE/absent means it is asleep, off, or gone — in which
@@ -126,7 +145,10 @@ while read -r ip name medium; do
     fi
 
     j() { case "$1" in ''|*[!0-9.]*) echo null ;; *) echo "$1" ;; esac; }
-    ROWS="$ROWS${ROWS:+,}{\"ip\":\"$ip\",\"n\":\"$name\",\"m\":\"$medium\",\"present\":$present,\"loss\":$(j "$loss"),\"rtt\":$(j "$rtt_avg"),\"rttmin\":$(j "$rtt_min"),\"rttmax\":$(j "$rtt_max"),\"dup\":$(j "$dup")}"
+    # lease may legitimately be negative (expired but not yet reaped), so it gets
+    # its own guard rather than j()'s digits-only one.
+    jl() { case "$1" in ''|*[!0-9-]*) echo null ;; *) echo "$1" ;; esac; }
+    ROWS="$ROWS${ROWS:+,}{\"ip\":\"$ip\",\"n\":\"$name\",\"m\":\"$medium\",\"present\":$present,\"loss\":$(j "$loss"),\"rtt\":$(j "$rtt_avg"),\"rttmin\":$(j "$rtt_min"),\"rttmax\":$(j "$rtt_max"),\"dup\":$(j "$dup"),\"lease\":$(jl "$lease")}"
 done < "$TARGETS"
 
 [ -n "$ROWS" ] || exit 0

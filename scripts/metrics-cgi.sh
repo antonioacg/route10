@@ -66,6 +66,8 @@ SELECT
   'route10_brlan_addr_present{family=\"ipv6_gua\"} ' || COALESCE(json_extract(json,'\$.addr.gua'),'NaN') || char(10) ||
   'route10_brlan_addr_present{family=\"ipv6_ula\"} ' || COALESCE(json_extract(json,'\$.addr.ula'),'NaN') || char(10) ||
   'route10_wan3_up ' || COALESCE(json_extract(json,'\$.addr.wan3'),'NaN') || char(10) ||
+  '# HELP route10_conntrack_entries NOT a NAT metric. Kernel table, BOTH families, EVERY scope, including LAN-to-LAN flows that never reach the ISP. For CGNAT pressure use route10_conntrack_wan4.' || char(10) ||
+  '# HELP route10_conntrack_limit NOT the ISP session budget. Our local nf_conntrack_max (500k). The entries/limit ratio renders ~0.4 percent green while CGNAT saturates; it has misled both sides. Use route10_conntrack_wan4 against ~1400.' || char(10) ||
   'route10_conntrack_entries ' || COALESCE(json_extract(json,'\$.ct.n'),'NaN')   || char(10) ||
   'route10_conntrack_limit '   || COALESCE(json_extract(json,'\$.ct.max'),'NaN') || char(10) ||
   'route10_conntrack_v4 '   || COALESCE(json_extract(json,'\$.ct.v4'),'NaN')   || char(10) ||
@@ -149,6 +151,14 @@ SELECT group_concat(line, char(10)) FROM (
 # Absent devices emit NaN, NOT a missing series: the series is always present so
 # `absent()` never fires on a sleeping phone, but any aggregation that touches a
 # NaN returns NaN. Gate on present=1 rather than relying on the value.
+#
+# Staleness: lanq is its OWN table on its OWN cron, so route10_rt_sample_timestamp
+# does not cover it — obs-collect can be perfectly healthy while lan-probe is dead,
+# and the query below serves the last row forever with nothing to say it is old.
+# Every other feed here declares its own age; this one must too.
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT 'route10_lan_probe_sample_timestamp_seconds ' || COALESCE(max(ts),'NaN') FROM lanq;
+"
 q "file:/a/obs/rt.sql?mode=ro" "
 SELECT group_concat(line, char(10)) FROM (
   SELECT 'route10_lan_probe_present{host=\"' || json_extract(e.value,'\$.n') ||
@@ -166,6 +176,9 @@ SELECT group_concat(line, char(10)) FROM (
          'route10_lan_probe_duplicates{host=\"' || json_extract(e.value,'\$.n') ||
          '\",ip=\"' || json_extract(e.value,'\$.ip') ||
          '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.dup'),'NaN') || char(10) ||
+         'route10_lan_probe_lease_seconds_remaining{host=\"' || json_extract(e.value,'\$.n') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') ||
+         '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.lease'),'NaN') || char(10) ||
          'route10_lan_probe_loss_percent{host=\"' || json_extract(e.value,'\$.n') ||
          '\",ip=\"' || json_extract(e.value,'\$.ip') ||
          '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.loss'),'NaN') AS line
