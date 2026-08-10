@@ -13,6 +13,17 @@
 # Agreed with ops 2026-08-09 (seam thread dead-man-coverage); cadence + grace +
 # body assertion are recorded in ops/NETWORK-CONTRACT.md.
 #
+# ⚠ "never touching opi5pro" WAS FALSE AT THE DNS LAYER, and the residue is worth
+# knowing. This beat resolves hc-ping.com through the LAN resolver, whose primary
+# upstream is AdGuard — ON opi5pro. So on 2026-08-10 ops's planned maintenance
+# silenced BOTH beats, and the table above read "both stop → router, WAN, or the
+# receiver": it accused this router while the router and the WAN were healthy.
+# The retry in hc_ping() below absorbs it (the failover answer is cached by the
+# time attempt 2 runs), but the DEPENDENCY IS STILL THERE — it cannot be cut with
+# curl on this build (see the c-ares note at hc_ping). If a future firmware ships
+# curl with AsynchDNS, pin this beat's lookups at the local DoH proxy
+# (127.0.0.1:5054) and the coupling is gone for real rather than absorbed.
+#
 # NAMING: the old "beat A / beat B" shorthand is retired. A/B carries no
 # information and destroys the only thing the pair is for — at 1am "beat A is
 # down" needs a lookup nobody performs correctly under pressure. Say which box
@@ -135,8 +146,48 @@ BODY="route10 beat lan_ok=$lan_ok up=${UP:-?} ppp=$PPP"
 # busybox that the shell never reaches). A builtin does not fork, so the URL exists
 # only in this shell's memory. Calling /usr/bin/printf explicitly, or switching to
 # any external helper, silently puts the credential back into `ps` output.
+#
+# ⚠ ONE RETRY, because the FIRST attempt of a cycle is the one that pays the DNS
+# bill, and paying it is not an outage. 2026-08-10, ops's planned maintenance:
+# AdGuard (on opi5pro) went silent, routedns's fail-back group waits its full 5 s
+# query-timeout on AdGuard before failing over to DoH, and reset-after=10 sends it
+# back to the dead primary every 10 s — so nearly every lookup cost 5 s. musl's
+# stub resolver gives up at ~5 s too, and lost the race by SIX MILLISECONDS
+# (failover logged 21:16:05.941 UTC, our warn 21:16:05.947): curl exited "couldn't
+# resolve host" while the answer landed in dnsmasq's cache a moment later. The
+# alive ping is sent first, so it ate the timeout on every cycle while the LAN
+# ping — issued milliseconds behind it — sailed through on the now-warm cache.
+# Three alive beats missed ⇒ healthchecks.io flipped "Router + internet" red at
+# period+grace, and because opi5pro's own beat was down for the same maintenance,
+# the PAIR read "both stopped" = router, WAN, or receiver. It accused this router
+# and its WAN while both were perfectly healthy. That is precisely the false
+# attribution the two-beat design exists to prevent.
+# The retry is the same second attempt the LAN ping was already making by
+# accident — 3/3 successful that day. It cannot mask a real outage: a down WAN
+# fails both attempts. Worst case 2×(10 s + 2 s) per check, well inside the 120 s
+# cycle.
+# ⚠ NOT fixed by `curl --dns-servers 127.0.0.1:5054` to skip AdGuard entirely:
+# this build has no c-ares (`Features:` lists no AsynchDNS) and SILENTLY IGNORES
+# the flag — verified by aiming it at a dead port and still getting HTTP 200. It
+# would have been a no-op that reads like a fix.
 hc_ping() {
+    printf 'url = "%s"\n' "$1" | curl -K - -fsS -m 10 --data-binary "$2" >/dev/null 2>&1 && return 0
+    sleep 2
     printf 'url = "%s"\n' "$1" | curl -K - -fsS -m 10 --data-binary "$2" >/dev/null 2>&1
+}
+
+# curl's exit code NAMES the fault. The old warn could only guess, and on
+# 2026-08-10 both of its guesses ("WAN down? URL rotated?") were wrong — it was
+# the LAN resolver, the one component the beat is supposed not to depend on.
+hc_why() {
+    case "$1" in
+        6)     echo "DNS: name unresolved — LAN resolver, not the WAN" ;;
+        7)     echo "connect refused/unreachable" ;;
+        22)    echo "HTTP >=400 — URL rotated or revoked" ;;
+        28)    echo "timed out" ;;
+        35|60) echo "TLS" ;;
+        *)     echo "see curl(1) exit codes" ;;
+    esac
 }
 
 # ── send: the alive ping is UNCONDITIONAL. Never gate it on the verdict. ─────
@@ -148,7 +199,8 @@ if hc_ping "$HC_URL_ALIVE" "$BODY"; then
     [ -f "$FAILSTATE" ] && { rm -f "$FAILSTATE"; event "heartbeat send recovered ($BODY)"; }
     alive=ok
 else
-    [ -f "$FAILSTATE" ] || { touch "$FAILSTATE"; warn "heartbeat send FAILED (WAN down? URL rotated?) — ops dead-man will read this as home dark"; }
+    rc=$?
+    [ -f "$FAILSTATE" ] || { touch "$FAILSTATE"; warn "heartbeat send FAILED twice (curl rc=$rc — $(hc_why $rc)) — ops dead-man will read this as home dark"; }
     alive=fail
 fi
 
@@ -163,8 +215,8 @@ esac
 # fail together and the warn above already says so — logging twice would imply
 # two faults. A LAN ping failing alone is genuinely odd (same host, same instant)
 # and usually means the LAN check's own URL is wrong.
-if ! hc_ping "$lan_target" "$BODY" && [ "$alive" = ok ]; then
-    err "LAN check ping failed while the alive ping succeeded — HC_URL_LAN may be wrong (lan_ok=$lan_ok)"
-fi
+hc_ping "$lan_target" "$BODY" || { rc=$?
+    [ "$alive" = ok ] && err "LAN check ping failed twice while the alive ping succeeded (curl rc=$rc — $(hc_why $rc)) — HC_URL_LAN may be wrong (lan_ok=$lan_ok)"
+}
 
 exit 0
