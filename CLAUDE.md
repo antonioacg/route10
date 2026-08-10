@@ -82,6 +82,26 @@ telnet probes — they orphan the lock too.
     `scripts/pon-collect.sh`. Manual recovery: `scripts/stick-unwedge.sh` (no
     reboot; kills the orphaned login/sh session, not just cli.pid). See
     `reference_odi_stick_arch_no_ssh.md`.
+  - `/cfg/scripts/lan-probe.sh` (`* * * * *` cron) — per-client LAN RTT/loss for the
+    **user-experience** half (the infra metrics never caught the chronic "last images
+    don't load / I switch to 5G" complaint). Targets in **`/cfg/lan-probe.targets`**
+    (`<ip> <name> <medium> [dhcp_name]`, **not in git** — it holds the device→label
+    map; `dhcp_name` is chased across MAC/IP rotations, family-matched). Controls:
+    `present` (gate loss on it or a sleeping phone fakes a nightly outage), `medium`
+    (wifi vs wired/ap), `rtt_min` floor, `dup`, `lease_seconds_remaining` (NaN = static
+    host, NOT stale). ⛔ **Cannot characterise a phone** — measured 2026-08-10: an
+    iPhone answered every echo in all 11 minutes it passed traffic and lost all 5 in
+    all 5 idle minutes, so ICMP reports iOS power-save, not the link. Valid only for
+    the vacuum/AP/wired controls. Source: `scripts/lan-probe.sh`.
+  - **Passive experience signal** (in `obs-collect.sh`'s existing conntrack pass) —
+    `route10_host_tcp_flows` / `_unanswered` per host: SYN_SENT that never
+    established, i.e. the reported symptom itself. Inverts the probe's flaw — a
+    sleeping device opens no connections, so idleness gives NO signal, not a false
+    one. ⚠ Both numbers exported so the consumer can gate (`flows >= 10`); a ratio
+    alone is vacuous. ⚠ p2p makes SYN_SENT normal (`.200` sits ~27-37% while
+    healthy) — read a host against ITS OWN baseline, never an absolute threshold.
+    ⚠ ~2-min smear (`nf_conntrack_tcp_timeout_syn_sent`=120s > 60s sampling): a fast
+    burst cannot be missed, but it names a window, never which burst.
   - **`/metrics` exporter** — second uhttpd on **`192.168.10.1:9100`** (LAN-only
     bind, relaunched by post-cfg), CGI at `/cfg/scripts/metrics-www/metrics`
     serving newest stats.sql + rt.sql rows (no live probing in the request
