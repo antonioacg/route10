@@ -258,7 +258,17 @@ IFJSON=$(awk 'NR>2{
     n=$1; sub(/:$/,"",n)
     if (n=="br-lan"||n=="eth4"||n=="eth5"||n=="pppoe-wan3"||n=="tailscale0") {
         if (s) s=s","
-        s=s "\"" n "\":{\"rxb\":" $2 ",\"rxp\":" $3 ",\"txb\":" $10 ",\"txp\":" $11 "}"
+        # rxe/rxd/rxf = rx errs / drop / fifo (cols 4,5,6 of /proc/net/dev).
+        # These are the counters a NAPI stall would move, and softnet_dropped is
+        # NOT: softnet counts the per-CPU BACKLOG queue (netif_rx path — PPP, TUN,
+        # re-injection), while the ethernet here is nss-dp, a NAPI driver whose
+        # (NB: no apostrophes in this comment — it lives inside a single-quoted
+        # awk program, and one would terminate the string mid-script.)
+        # RX never touches that queue. If the CPU-side stack stops draining, packets
+        # pile up in the hardware ring and are dropped by the DEVICE, landing here.
+        # Collected because INC-11 (br-lan rx frozen, ASIC still forwarding) is the
+        # shape softnet may be structurally blind to, and nothing was recording these.
+        s=s "\"" n "\":{\"rxb\":" $2 ",\"rxp\":" $3 ",\"rxe\":" $4 ",\"rxd\":" $5 ",\"rxf\":" $6 ",\"txb\":" $10 ",\"txp\":" $11 "}"
     }} END{print "{" s "}"}' /proc/net/dev)
 
 C4=$(cat /sys/class/net/eth4/carrier 2>/dev/null)
