@@ -88,7 +88,26 @@ dnsmasq was bound and answering broadcast, and the forwarding path to the collec
 > operator describes as unstable-not-dead. Nothing we hold contradicts that account.
 >
 > Revised shape: **healthy → abrupt loss of the CPU-mediated path → a degraded phase of unknown
-> length → a hard stop by 19:37 → recovery at 19:45.**
+> length → a hard stop by 19:36 → recovery at 19:45.**
+>
+> **Combined bracket, after reconciling with ops (2026-08-10).** Their record made the mirror
+> error from the other side: a "~98 s" LAN-death bracket derived from *our last received syslog
+> line plus a missed heartbeat* — and syslog rides the LAN it was being used to time, so it
+> timed **delivery**, not the LAN. They retracted it. Their `tcpdump` ARP capture survives and is
+> direct evidence, but it establishes a hard stop **by 19:36**, not **from 19:20**:
+>
+> ```
+> 19:18:45          last line we receive        <- delivery stops; LAN state UNKNOWN
+> 19:20:23 → 19:36  NO DIRECT EVIDENCE (~16 min) <- operator: wedged but unstable, not dead
+> 19:36 → 19:42     ARP capture: gateway dead, switch forwarding  <- measured hard stop
+> 19:37 → 19:44     switch counters: port 5 zero rx               <- measured hard stop
+> 19:45:22          power cycle
+> ```
+>
+> **Both sides summarised their observed tail as though it described the whole event** — this
+> document with "every minute of the wedge", ops with a 98-second bracket. Two independent
+> sources, the same blind spot, the same direction of overclaim. Their hole ends at 19:36; ours
+> begins at 19:37. Neither instrumented the middle.
 >
 > This also weakens the *deadlock* inference below. "Idle CPU + complete stop" reads cleanly as a
 > wait that never returns; "idle CPU + intermittent service" does not, and an intermittent fault

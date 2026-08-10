@@ -92,7 +92,10 @@ SELECT
   'route10_interface_receive_bytes_total{iface=\"'  || je.key || '\"} ' || json_extract(je.value,'\$.rxb') || char(10) ||
   'route10_interface_transmit_bytes_total{iface=\"' || je.key || '\"} ' || json_extract(je.value,'\$.txb') || char(10) ||
   'route10_interface_receive_packets_total{iface=\"'  || je.key || '\"} ' || json_extract(je.value,'\$.rxp') || char(10) ||
-  'route10_interface_transmit_packets_total{iface=\"' || je.key || '\"} ' || json_extract(je.value,'\$.txp')
+  'route10_interface_transmit_packets_total{iface=\"' || je.key || '\"} ' || json_extract(je.value,'\$.txp') || char(10) ||
+  'route10_interface_receive_errors_total{iface=\"'  || je.key || '\"} ' || COALESCE(json_extract(je.value,'\$.rxe'),'NaN') || char(10) ||
+  'route10_interface_receive_dropped_total{iface=\"' || je.key || '\"} ' || COALESCE(json_extract(je.value,'\$.rxd'),'NaN') || char(10) ||
+  'route10_interface_receive_fifo_total{iface=\"'    || je.key || '\"} ' || COALESCE(json_extract(je.value,'\$.rxf'),'NaN')
 FROM samples s, json_each(s.json,'\$.if') je
 WHERE s.ts = (SELECT max(ts) FROM samples);
 "
