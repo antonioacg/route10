@@ -10,6 +10,12 @@ IP** — LAN ARP, the eth4 management MACVLAN and the PPPoE session all died tog
 hardware switch provably continued flooding broadcast and forwarding unicast between wired ports.
 Userspace (cron, odi-health) ran throughout. Only a power cycle recovered it.
 
+⚠ **Amended 2026-08-10:** the operator reports internet access was **wedged and highly unstable
+during the outage, not 100 % down.** The counters showing a hard stop only begin **18 minutes
+after onset**; that first third is unobserved by every source we hold. Read "died" below as
+"stopped being usable / stopped delivering telemetry", not as a proven instantaneous stop — see
+the correction in §"What the last minute looked like".
+
 Sibling incidents: [`2026-07-08-wan3-route-loss.md`](2026-07-08-wan3-route-loss.md),
 [`2026-06-24-power-surge-dhcp.md`](2026-06-24-power-surge-dhcp.md).
 
@@ -62,9 +68,32 @@ LAN path was already dead by 19:21:58, from a source that knows nothing about DH
 | WiFi→wired broadcast/flood path | **Switch ASIC: broadcast flooding + unicast forwarding** |
 | Syslog egress to `.242:514` | dnsmasq had been serving leases 1 s earlier |
 
-**br-lan was not degrading — it was perfect, then gone.** A complete dual-stack lease negotiation
-finished 1.0 s before the last line. At 19:18:45.094 `br-lan` held its address, dnsmasq was bound
-and answering broadcast, and the forwarding path to the collector was intact.
+**br-lan was healthy right up to 19:18:45.094 — no ramp preceded the last line.** A complete
+dual-stack lease negotiation finished 1.0 s before it. At 19:18:45.094 `br-lan` held its address,
+dnsmasq was bound and answering broadcast, and the forwarding path to the collector was intact.
+
+> ⚠ **CORRECTION 2026-08-10.** An earlier version of this paragraph read *"br-lan was not
+> degrading — it was perfect, then gone."* The second half of that is **not supported**, and the
+> operator's first-hand account contradicts it: during the outage internet access was **wedged and
+> highly unstable, but not 100 % down.**
+>
+> The evidence only ever established that **logging stopped** abruptly. Silence in the log is
+> equally consistent with "network dead" and "network too degraded to deliver a syslog line", and
+> this document treated the first reading as the only one. Absence of telemetry was read as
+> absence of traffic.
+>
+> The switch counters that show a hard stop (§ below: port 5 zero rx for 8 consecutive minutes)
+> begin at **19:37:00** — **18 minutes after onset**, two thirds of the way through the wedge.
+> Those 18 minutes have **no counter data from any source**, and they are exactly the window the
+> operator describes as unstable-not-dead. Nothing we hold contradicts that account.
+>
+> Revised shape: **healthy → abrupt loss of the CPU-mediated path → a degraded phase of unknown
+> length → a hard stop by 19:37 → recovery at 19:45.**
+>
+> This also weakens the *deadlock* inference below. "Idle CPU + complete stop" reads cleanly as a
+> wait that never returns; "idle CPU + intermittent service" does not, and an intermittent fault
+> fits neither deadlock nor livelock cleanly. The mechanism should be treated as **less settled
+> than the retraction of the livelock reading made it sound.**
 
 **Zero interface events preceded it.** A query of 19:00–19:19Z for
 `netifd|pppd|padt|auth|eth4|eth5|carrier|link up/down|br-lan: port|interface down` returned **five
@@ -127,8 +156,22 @@ is a **deadlock / stuck state, a wait that never returns — not a livelock** �
 pstore's silence and the absence of any RCU-stall report.
 
 The same source adds one hard datum route10's own logs never carried: **switch port 5 (eth4)
-counted zero received bytes for every minute of the wedge while the box kept transmitting
-51–56 KB/min out of it.** At the ASIC counter this cannot discriminate "host ingress path dead"
+counted zero received bytes while the box kept transmitting 51–56 KB/min out of it.**
+
+⚠ **Scope of that datum, corrected 2026-08-10.** It was written as "for every minute of the
+wedge". It is not: the archive's earliest row is **19:37:00**, so it covers **19:37–19:44 — eight
+minutes, the tail** — against a wedge that began at 19:18:45. Verified directly:
+
+```
+19:37  port5 {tx:53848}                 <- no rx key at all
+19:44  port5 {tx:53669}                 <- 8 consecutive minutes, zero rx
+19:45  port5 {tx:881427, rx:167636}     <- recovery
+       ports 1 and 4: rx AND tx every minute throughout
+```
+
+"Every minute of the wedge" silently upgraded *every minute we have data for* into *every minute*.
+The missing 18 minutes are where the operator reports unstable-but-working internet, so the
+overclaim erased precisely the interval that disagrees with it. At the ASIC counter this cannot discriminate "host ingress path dead"
 from "stick stopped transmitting" — but a stick-only fault is already excluded by the LAN evidence,
 so it reads as the WAN-side face of the same one-sided stop. Ports 1 and 4 (LAN) passed traffic in
 **both** directions every minute throughout — the ASIC-keeps-forwarding conclusion confirmed a
