@@ -635,7 +635,15 @@ install_connlimit_guard() {
     # swallowed by `|| true`, leaving the guard half applied (confirmed
     # 2026-07-18: missing v6 jump + duplicated rules).
     ipt="$1 -w 10"; mask=$2; icmpreject=$3; warn=$4; block=$5; rlist=$6
-    # -l2 suffix: layout v2 — per-SOURCE log gating via xt_recent. Bumping the
+    # Family token for the log prefix. Both families used to log the IDENTICAL
+    # prefix, so a consumer could only tell them apart by string-matching a ':'
+    # inside SRC — which is why ops's alert carried "TRIAGE BY FAMILY" as an
+    # instruction to the human instead of splitting into two rules. The families
+    # mean different things (v4 = CGNAT-protective, act; v6 = anomaly smell,
+    # routinely expected) and belong in separate alerts with separate severities.
+    case "$1" in ip6tables) fam=v6 ;; *) fam=v4 ;; esac
+    # -l3 suffix: layout v3 — per-SOURCE log gating via xt_recent (v2) plus the
+    # family token in the log prefix (v3). Bumping the
     # suffix forces a one-time rebuild on chains built from the older layout.
     #
     # Why per-source: layout v1 rate-limited each LOG rule with a single shared
@@ -648,7 +656,7 @@ install_connlimit_guard() {
     # one host's flood can never consume another host's visibility.
     # hashlimit would be the textbook tool but Alta ships the kernel module
     # without libxt_hashlimit.so; xt_recent (both halves present) does the job.
-    mark="route10-connlimit-w${warn}b${block}-l2"
+    mark="route10-connlimit-w${warn}b${block}-l3"
     $ipt -N RT10_CONNLIMIT 2>/dev/null || true
     $ipt -N RT10_CL_LOGW 2>/dev/null || true
     $ipt -N RT10_CL_LOGB 2>/dev/null || true
@@ -668,7 +676,16 @@ install_connlimit_guard() {
         # normal operation the per-source gate bounds volume by itself. Caveat:
         # a source suppressed by the backstop is still marked, so its line waits
         # for the next 10-min window — visibility deferred, never stolen.
-        for _tier in "W route10.connlimit warn: " "B route10.connlimit block: "; do
+        # ⚠ The prefix keeps "route10.connlimit warn:" / "...block:" as an INTACT
+        # substring and appends the family AFTER the colon. That is deliberate and
+        # load-bearing: ops's existing alert matches those substrings, so this
+        # change cannot silently disable it the moment it deploys — they gain a
+        # family token to split on, on their own schedule, instead of inheriting a
+        # broken rule. Renaming in place would have been the frozen-name hazard
+        # (a rule keyed on a string that no longer exists never fires, never errors).
+        # 28 chars max here — iptables caps --log-prefix at 29; verified accepted
+        # and untruncated on this build before shipping.
+        for _tier in "W route10.connlimit warn: $fam " "B route10.connlimit block: $fam "; do
             _c="RT10_CL_LOG${_tier%% *}"; _pfx="${_tier#* }"; _rl="${rlist}$(echo "${_tier%% *}" | tr 'WB' 'wb')"
             $ipt -A "$_c" -m recent --name "$_rl" --rcheck --seconds 600 -j RETURN 2>/dev/null || true
             $ipt -A "$_c" -m recent --name "$_rl" --set 2>/dev/null || true
