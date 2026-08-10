@@ -144,6 +144,17 @@ SELECT group_concat(line, char(10)) FROM (
 # for a device that is merely saving battery. Read min and max together:
 #   min flat + max high => the device slept; the air is fine
 #   min risen           => the floor moved; congestion or a genuinely bad link
+#
+# ⛔ But do NOT plot raw rtt_min. Each run sends only 5 echoes, so if a sleepy
+# device is parked for all five, that run's "floor" is a wakeup latency and not a
+# path latency. Per-burst min is therefore noisy for exactly the devices this
+# control exists for; the estimate improves with the number of BURSTS, not with
+# anything inside one. Measured: one target's per-burst floor ranged 2.8-50.5 ms
+# over 16 samples while its true floor sat at the bottom of that range.
+# Use a rolling low quantile as link health:
+#   quantile_over_time(0.05, route10_lan_probe_rtt_min_ms[15m])   (or min_over_time)
+# and keep raw rtt_max as the felt tail. The GAP between them is the variance,
+# which is often the only thing the data actually establishes.
 # `dup` corroborates independently — duplicate echo replies mean 802.11 had to
 # retransmit, which power-save cannot produce. It is the only field here a
 # sleeping device cannot fake.
