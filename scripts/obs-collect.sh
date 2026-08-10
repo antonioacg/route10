@@ -317,16 +317,35 @@ DELETE FROM samples WHERE ts < $TS - 30*86400;
 # per 30-min cooldown so a sustained wedge doesn't spam the ring. cron kept
 # running through the real wedge, so this path is expected to execute.
 BRLAN_RXP=$(echo "$IFJSON" | sed -n 's/.*"br-lan":{"rxb":[0-9]*,"rxp":\([0-9]*\).*/\1/p')
-PREV_RXP=$(sqlite3 -readonly "$DB" "SELECT json_extract(json,'\$.if.\"br-lan\".rxp') FROM samples WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
+# busy_timeout matters on THIS read, not just on the insert: stats-archive VACUUMs
+# /a/obs every 30 min, and a lock here makes sqlite3 exit non-zero — which 2>/dev/null
+# turns into an empty PREV_RXP that is indistinguishable from "no prior sample".
+PREV_RXP=$(sqlite3 -readonly "$DB" "PRAGMA busy_timeout=5000; SELECT json_extract(json,'\$.if.\"br-lan\".rxp') FROM samples WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
 STALLS=$(cat /var/run/.obs-wedge.stalls 2>/dev/null)
 case "$STALLS" in ''|*[!0-9]*) STALLS=0 ;; esac
-case "$BRLAN_RXP$PREV_RXP" in *[!0-9]*|'') STALLS=0 ;; *)
+# ⛔ Validate the two operands SEPARATELY. This used to test the CONCATENATION
+# ("$BRLAN_RXP$PREV_RXP"), which cannot see an empty second operand: with
+# BRLAN_RXP=8529086 and PREV_RXP="" the joined string is all-digits and non-empty,
+# so the guard passed and `[ 8529086 -eq "" ]` reached the shell as "out of range".
+# Harmless-looking (rc stayed 0, stderr only) but it meant the wedge counter was
+# reset by any condition that emptied PREV_RXP — including archiver lock contention,
+# i.e. the tripwire could lose its 2-consecutive-minute streak for reasons that have
+# nothing to do with the LAN. Never fired in production (verified 0 occurrences in
+# syslog); every sighting was a fresh scratch DB during testing.
+_cmp_ok=1
+case "$BRLAN_RXP" in ''|*[!0-9]*) _cmp_ok=0 ;; esac
+case "$PREV_RXP"  in ''|*[!0-9]*) _cmp_ok=0 ;; esac
+if [ "$_cmp_ok" = 1 ]; then
     if [ "$BRLAN_RXP" -eq "$PREV_RXP" ] && [ "${CBR:-0}" = "1" ]; then
         STALLS=$((STALLS+1))
     else
         STALLS=0
-    fi ;;
-esac
+    fi
+else
+    # No comparable baseline (first sample, or the read failed). Conservative: do
+    # not count a stall we cannot evidence.
+    STALLS=0
+fi
 printf '%s' "$STALLS" > /var/run/.obs-wedge.stalls
 if [ "$STALLS" -ge 2 ]; then
     COOL=/var/run/.obs-wedge.fired
