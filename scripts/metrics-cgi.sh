@@ -135,6 +135,20 @@ SELECT group_concat(line, char(10)) FROM (
 #
 # `medium` is the second control. wifi degrading while wired/ap stay clean isolates
 # the air link; everything degrading together points at route10 or the LAN.
+#
+# rtt_min is the third control, and the one a dashboard is most likely to skip.
+# 802.11 power-save parks a phone between beacons, so avg/max climb into the
+# hundreds of ms on a HEALTHY link. Plot rtt_ms alone and the panel is red forever
+# for a device that is merely saving battery. Read min and max together:
+#   min flat + max high => the device slept; the air is fine
+#   min risen           => the floor moved; congestion or a genuinely bad link
+# `dup` corroborates independently — duplicate echo replies mean 802.11 had to
+# retransmit, which power-save cannot produce. It is the only field here a
+# sleeping device cannot fake.
+#
+# Absent devices emit NaN, NOT a missing series: the series is always present so
+# `absent()` never fires on a sleeping phone, but any aggregation that touches a
+# NaN returns NaN. Gate on present=1 rather than relying on the value.
 q "file:/a/obs/rt.sql?mode=ro" "
 SELECT group_concat(line, char(10)) FROM (
   SELECT 'route10_lan_probe_present{host=\"' || json_extract(e.value,'\$.n') ||
@@ -143,9 +157,15 @@ SELECT group_concat(line, char(10)) FROM (
          'route10_lan_probe_rtt_ms{host=\"' || json_extract(e.value,'\$.n') ||
          '\",ip=\"' || json_extract(e.value,'\$.ip') ||
          '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.rtt'),'NaN') || char(10) ||
+         'route10_lan_probe_rtt_min_ms{host=\"' || json_extract(e.value,'\$.n') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') ||
+         '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.rttmin'),'NaN') || char(10) ||
          'route10_lan_probe_rtt_max_ms{host=\"' || json_extract(e.value,'\$.n') ||
          '\",ip=\"' || json_extract(e.value,'\$.ip') ||
          '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.rttmax'),'NaN') || char(10) ||
+         'route10_lan_probe_duplicates{host=\"' || json_extract(e.value,'\$.n') ||
+         '\",ip=\"' || json_extract(e.value,'\$.ip') ||
+         '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.dup'),'NaN') || char(10) ||
          'route10_lan_probe_loss_percent{host=\"' || json_extract(e.value,'\$.n') ||
          '\",ip=\"' || json_extract(e.value,'\$.ip') ||
          '\",medium=\"' || json_extract(e.value,'\$.m') || '\"} ' || COALESCE(json_extract(e.value,'\$.loss'),'NaN') AS line

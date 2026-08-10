@@ -10,9 +10,10 @@
 # fault is in the air, nothing here could ever see it, and "no alert fired" is
 # guaranteed rather than surprising.
 #
-# ⛔ TWO CONTROLS, and they are the whole design. A bare ping to a phone answers
+# ⛔ THREE CONTROLS, and they are the whole design. A bare ping to a phone answers
 # nothing, because both a WiFi problem and route10 being busy raise RTT, and a
-# sleeping phone looks exactly like a dropped packet:
+# sleeping phone looks exactly like a dropped packet — and also exactly like a bad
+# radio, since 802.11 power-save inflates RTT on a perfectly healthy link:
 #
 #   1. PRESENCE control (per target). Loss is only counted when the device is
 #      demonstrably on the LAN — an `ip neigh` entry in a live state. A phone that
@@ -23,6 +24,11 @@
 #      alongside the wireless client is what separates "the air is bad" from
 #      "route10 is slow". Wireless degrades + wired clean => the WiFi link.
 #      Both degrade => route10 or the LAN, and the AP is exonerated.
+#   3. FLOOR control (within a burst). rtt_min alongside rtt_max separates a bad
+#      radio from a SLEEPING one — see the long note at the parse below. A
+#      battery device idling behind power-save shows a low floor and a huge tail;
+#      a degraded link lifts the floor itself. `dup` corroborates: duplicate
+#      replies mean 802.11 retransmitted, which power-save cannot produce.
 #
 # Deliberately measures the LAN leg only. It says nothing about the WAN — the
 # heartbeat, wan4 budget and PON metrics cover that, and conflating the two is how
@@ -78,17 +84,41 @@ while read -r ip name medium; do
         *) present=0 ;;
     esac
 
-    rtt_avg=""; rtt_max=""; loss=""
+    rtt_min=""; rtt_avg=""; rtt_max=""; loss=""; dup=""
     if [ "$present" = 1 ]; then
         out=$(ping -c "$COUNT" -W "$WAIT" -q "$ip" 2>/dev/null)
-        # busybox: "N packets transmitted, M packets received, X% packet loss"
+        # busybox: "N packets transmitted, M packets received[, D duplicates], X% packet loss"
+        # `received` excludes duplicates (they are counted separately), so the
+        # loss arithmetic below stays correct even when DUPs are present.
         rx=$(printf '%s' "$out" | sed -n 's/.*, *\([0-9]*\) packets received.*/\1/p')
         case "$rx" in ''|*[!0-9]*) rx="" ;; esac
         if [ -n "$rx" ]; then
             loss=$(( (COUNT - rx) * 100 / COUNT ))
             # round-trip min/avg/max = 1.234/5.678/9.012 ms
+            #
+            # ⛔ MIN IS THE THIRD CONTROL, and without it this probe cannot tell
+            # a bad radio from a sleeping one. 802.11 power-save parks a phone or
+            # a battery IoT device between DTIM beacons; the echo that arrives
+            # while it is asleep waits for the wakeup, so avg and max climb into
+            # the hundreds of ms on a PERFECTLY HEALTHY link. Plotting avg as
+            # "WiFi quality" therefore paints a permanently-red panel that is
+            # really just a device saving battery — a confidently-wrong signal,
+            # which is worse than none.
+            #   min rises too      => the floor moved: congestion or a bad link
+            #   min flat, max high => the device slept; the air is fine
+            # The floor is the honest measure; the tail is what a person feels.
+            # Report both and let the reader see the gap, rather than averaging
+            # two different phenomena into one number that means neither.
+            rtt_min=$(printf '%s' "$out" | sed -n 's|.*= *\([0-9.]*\)/.*|\1|p')
             rtt_avg=$(printf '%s' "$out" | sed -n 's|.*= *[0-9.]*/\([0-9.]*\)/.*|\1|p')
             rtt_max=$(printf '%s' "$out" | sed -n 's|.*= *[0-9.]*/[0-9.]*/\([0-9.]*\).*|\1|p')
+            # DUPLICATE replies are an 802.11 RETRANSMISSION tell: the receiver
+            # got the frame but its ACK was lost, so the sender sent it again and
+            # both copies were delivered. Power-save does NOT produce duplicates.
+            # This is the one field here that a sleeping device cannot fake, so it
+            # discriminates where latency alone is ambiguous. Absent field => 0.
+            dup=$(printf '%s' "$out" | sed -n 's/.*, *\([0-9]*\) duplicates.*/\1/p')
+            case "$dup" in ''|*[!0-9]*) dup=0 ;; esac
         fi
         # ARP said present but every echo was lost: that is a REAL finding (the
         # device is on the segment and not answering), not an absent device.
@@ -96,7 +126,7 @@ while read -r ip name medium; do
     fi
 
     j() { case "$1" in ''|*[!0-9.]*) echo null ;; *) echo "$1" ;; esac; }
-    ROWS="$ROWS${ROWS:+,}{\"ip\":\"$ip\",\"n\":\"$name\",\"m\":\"$medium\",\"present\":$present,\"loss\":$(j "$loss"),\"rtt\":$(j "$rtt_avg"),\"rttmax\":$(j "$rtt_max")}"
+    ROWS="$ROWS${ROWS:+,}{\"ip\":\"$ip\",\"n\":\"$name\",\"m\":\"$medium\",\"present\":$present,\"loss\":$(j "$loss"),\"rtt\":$(j "$rtt_avg"),\"rttmin\":$(j "$rtt_min"),\"rttmax\":$(j "$rtt_max"),\"dup\":$(j "$dup")}"
 done < "$TARGETS"
 
 [ -n "$ROWS" ] || exit 0
