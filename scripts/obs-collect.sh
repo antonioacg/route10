@@ -122,8 +122,67 @@ CTMAX=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
 #              link-local, multicast, and 100.64/10 (our own CGNAT + tailscale).
 # Single pass over /proc/net/nf_conntrack: ~2 ms against a ~57 ms script budget,
 # versus ~10 ms for each `conntrack -L` invocation.
-read -r CT4 CT6 CTW4 <<EOF
-$(awk '
+# Per-host "worst offender" identity, for the connlimit alerts: a cap breach names
+# a source, and the source alone does not say which device to go and look at.
+# v4 comes straight from the DHCP lease; v6 needs the neighbour table (addr->MAC)
+# joined to the lease (MAC->name), because a host's v6 addresses are not in the
+# lease file. Hosts with no lease (statically configured, e.g. .200) legitimately
+# resolve to "unknown" — the IP is still carried, so nothing is hidden.
+# ⚠ /proc/net/nf_conntrack writes v6 EXPANDED (8 groups of 4 hex); `ip -6 neigh`
+# prints RFC5952-COMPRESSED. Without expanding one side the map NEVER matches and
+# every v6 host reports "unknown" — a failure that reads as "no v6 traffic" rather
+# than as a bug. Verified 17/19 live addresses match; the 2 that do not are the
+# router's own WAN address and a host with an expired neighbour entry, both correct.
+IDMAP=/var/run/.obs-idmap
+{
+  awk '$3 ~ /^[0-9]+\./ && $4 != "*" && $4 != "" {print $3, $4}' /cfg/dhcp.leases 2>/dev/null
+  ip -6 neigh show dev br-lan 2>/dev/null | awk '
+    function pad(g) { while (length(g) < 4) g = "0" g; return g }
+    function expand(a,   lead,tail,nl,nt,i,out,L,T) {
+      if (index(a, "::")) {
+        lead = substr(a, 1, index(a,"::")-1); tail = substr(a, index(a,"::")+2)
+        nl = (lead == "") ? 0 : split(lead, L, ":")
+        nt = (tail == "") ? 0 : split(tail, T, ":")
+        out = ""
+        for (i=1; i<=nl; i++) out = out pad(L[i]) ":"
+        for (i=0; i < 8-nl-nt; i++) out = out "0000:"
+        for (i=1; i<=nt; i++) out = out pad(T[i]) ":"
+        return substr(out, 1, length(out)-1)
+      }
+      nl = split(a, L, ":"); out = ""
+      for (i=1; i<=nl; i++) out = out pad(L[i]) ":"
+      return substr(out, 1, length(out)-1)
+    }
+    NR==FNR { if ($4 != "*" && $4 != "") nm[$2] = $4; next }
+    /lladdr/ { m=""
+               for (i=1; i<=NF; i++) if ($i == "lladdr") m = $(i+1)
+               if (m != "" && (m in nm)) print expand($1), nm[m] }
+  ' /cfg/dhcp.leases -
+} > "$IDMAP" 2>/dev/null || : > "$IDMAP"
+
+LAN6=$(ip -6 addr show br-lan scope global 2>/dev/null | awk '/inet6 2/{print $2; exit}' | cut -d/ -f1)
+
+# ONE pass produces both the totals and the per-host top-N, deliberately: two
+# passes would sample /proc at different instants and the offender counts would
+# not sum to the totals in the same record, which is the kind of small
+# disagreement that gets read as a bug in whichever number you trust less.
+CTOUT=$(awk -v lan6="$LAN6" -v topn=10 '
+  function pad(g) { while (length(g) < 4) g = "0" g; return g }
+  function expand(a,   lead,tail,nl,nt,i,out,L,T) {
+    if (index(a, "::")) {
+      lead = substr(a, 1, index(a,"::")-1); tail = substr(a, index(a,"::")+2)
+      nl = (lead == "") ? 0 : split(lead, L, ":")
+      nt = (tail == "") ? 0 : split(tail, T, ":")
+      out = ""
+      for (i=1; i<=nl; i++) out = out pad(L[i]) ":"
+      for (i=0; i < 8-nl-nt; i++) out = out "0000:"
+      for (i=1; i<=nt; i++) out = out pad(T[i]) ":"
+      return substr(out, 1, length(out)-1)
+    }
+    nl = split(a, L, ":"); out = ""
+    for (i=1; i<=nl; i++) out = out pad(L[i]) ":"
+    return substr(out, 1, length(out)-1)
+  }
   function pub4(ip,   p) {
     split(ip, p, ".")
     if (p[1]==127 || p[1]==10 || p[1]==0)            return 0
@@ -134,16 +193,65 @@ $(awk '
     if (p[1]>=224)                                   return 0
     return 1
   }
-  $1=="ipv4" {
-    v4++
-    for (i=1; i<=NF; i++)
-      if (substr($i,1,4)=="dst=") { if (pub4(substr($i,5))) w4++; break }
+  # Names are kept verbatim, not curated. Only characters that cannot survive a
+  # JSON string or a Prometheus label are mapped — a stray quote in a DHCP name
+  # would otherwise break the JSON blob and take the WHOLE sample down with it.
+  function safe(s) { gsub(/[^A-Za-z0-9._:-]/, "_", s); return s }
+  function emit(cnt, N,   i, k, best, bk, out, first) {
+    out = "["; first = 1
+    for (i = 0; i < N; i++) {
+      best = -1; bk = ""
+      for (k in cnt) if (!(k in used) && cnt[k] > best) { best = cnt[k]; bk = k }
+      if (bk == "") break
+      used[bk] = 1
+      if (!first) out = out ","
+      out = out "{\"h\":\"" safe((bk in nm) ? nm[bk] : "unknown") "\",\"ip\":\"" bk "\",\"n\":" cnt[bk] "}"
+      first = 0
+    }
+    delete used
+    return out "]"
   }
-  $1=="ipv6" { v6++ }
-  END { printf "%d %d %d", v4+0, v6+0, w4+0 }
-' /proc/net/nf_conntrack 2>/dev/null)
-EOF
+  BEGIN { lan6x = (lan6 == "") ? "" : substr(expand(lan6), 1, 19) }
+  # The FILENAME guard is load-bearing, not belt-and-braces: with an EMPTY idmap
+  # (no leases yet at boot) NR==FNR is still true for the first conntrack line,
+  # and that line would be swallowed as a map entry.
+  NR==FNR && FILENAME != "/proc/net/nf_conntrack" { nm[$1] = $2; next }
+  $1=="ipv4" {
+    v4++; s=""; d=""
+    for (i=1; i<=NF; i++) {
+      if (s=="" && substr($i,1,4)=="src=") s = substr($i,5)
+      else if (d=="" && substr($i,1,4)=="dst=") { d = substr($i,5); break }
+    }
+    if (d != "" && pub4(d)) { w4++; if (s ~ /^192\.168\./) c4[s]++ }
+    next
+  }
+  $1=="ipv6" {
+    v6++; s=""; d=""
+    for (i=1; i<=NF; i++) {
+      if (s=="" && substr($i,1,4)=="src=") s = substr($i,5)
+      else if (d=="" && substr($i,1,4)=="dst=") { d = substr($i,5); break }
+    }
+    if (s == "" || d == "") next
+    lansrc = (lan6x != "" && substr(s,1,19) == lan6x) || substr(s,1,2) == "fd"
+    pubdst = (substr(d,1,1) == "2" || substr(d,1,1) == "3") && \
+             !(lan6x != "" && substr(d,1,19) == lan6x)
+    if (lansrc && pubdst) c6[s]++
+    next
+  }
+  END {
+    printf "TOTALS %d %d %d\n", v4+0, v6+0, w4+0
+    printf "TOP4 %s\n", emit(c4, topn)
+    printf "TOP6 %s\n", emit(c6, topn)
+  }
+' "$IDMAP" /proc/net/nf_conntrack 2>/dev/null)
+
+set -- $(printf '%s\n' "$CTOUT" | grep '^TOTALS ')
+CT4=$2; CT6=$3; CTW4=$4
+TOP4=$(printf '%s\n' "$CTOUT" | sed -n 's/^TOP4 //p')
+TOP6=$(printf '%s\n' "$CTOUT" | sed -n 's/^TOP6 //p')
 [ -n "$CT4" ] || { CT4=0; CT6=0; CTW4=0; }
+[ -n "$TOP4" ] || TOP4="[]"
+[ -n "$TOP6" ] || TOP6="[]"
 
 # Per-interface {rx_bytes,rx_pkts,tx_bytes,tx_pkts} as a JSON object keyed by name
 IFJSON=$(awk 'NR>2{
@@ -179,11 +287,11 @@ if [ -f /var/run/w2-ddm.env ]; then
     fi
 fi
 
-JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s}}' \
+JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s}}' \
     "$(jnum "$CPU_TOT")" "$(jnum "$CPU_IDLE")" "$(jnum "$CPU_SIRQ")" "$(jnum "$CPU_IOW")" \
     "$(jnum "$SN_D")" "$(jnum "$SN_S")" "$(jnum "$IRQ")" \
     "$(jnum "$CT")" "$(jnum "$CTMAX")" \
-    "$(jnum "$CT4")" "$(jnum "$CT6")" "$(jnum "$CTW4")" "$IFJSON" \
+    "$(jnum "$CT4")" "$(jnum "$CT6")" "$(jnum "$CTW4")" "$TOP4" "$TOP6" "$IFJSON" \
     "$(jnum "$C4")" "$(jnum "$C5")" "$(jnum "$CBR")" \
     "$(jnum "$A4")" "$(jnum "$AG")" "$(jnum "$AU")" "$(jnum "$W3")" \
     "$(jnum "$L4T")" "$(jnum "$L4TX")" "$(jnum "$L4RX")" \

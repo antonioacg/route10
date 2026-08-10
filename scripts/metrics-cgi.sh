@@ -72,6 +72,7 @@ SELECT
   'route10_conntrack_v6 '   || COALESCE(json_extract(json,'\$.ct.v6'),'NaN')   || char(10) ||
   'route10_conntrack_wan4 ' || COALESCE(json_extract(json,'\$.ct.wan4'),'NaN') || char(10) ||
   'route10_softnet_dropped_total '     || COALESCE(json_extract(json,'\$.softnet.drop'),'NaN')    || char(10) ||
+  'route10_host_flows_topn 10' || char(10) ||
   'route10_softnet_timesqueeze_total ' || COALESCE(json_extract(json,'\$.softnet.squeeze'),'NaN') || char(10) ||
   'route10_optical_power_dbm{module=\"L4\",dir=\"tx\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_tx'),'NaN') || char(10) ||
   'route10_optical_power_dbm{module=\"L4\",dir=\"rx\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_rx'),'NaN') || char(10) ||
@@ -94,6 +95,32 @@ SELECT
   'route10_interface_transmit_packets_total{iface=\"' || je.key || '\"} ' || json_extract(je.value,'\$.txp')
 FROM samples s, json_each(s.json,'\$.if') je
 WHERE s.ts = (SELECT max(ts) FROM samples);
+"
+
+# ── per-host offenders (top 10 per family, from the same sample) ─────────────
+#
+# What a connlimit alert cannot say on its own: WHICH device. The log line names
+# a source address; this names the host and shows the field, so "over the cap" can
+# be read next to who else was competing for the same budget.
+#
+# Cardinality is bounded by top-N (<=20 series), but v6 label VALUES churn as
+# SLAAC privacy addresses rotate, so the series count grows slowly over time.
+# That is the accepted cost of naming the actual offending address; the host
+# label stays stable across a rotation, so query on `host`, not on `ip`.
+#
+# Names are verbatim from DHCP, uncurated by explicit operator decision — it is a
+# private LAN and a masked offender list is worth less than an honest one.
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT group_concat(line, char(10)) FROM (
+  SELECT 'route10_host_flows{family=\"' || fam ||
+         '\",host=\"' || json_extract(e.value,'\$.h') ||
+         '\",ip=\"'   || json_extract(e.value,'\$.ip') || '\"} ' ||
+         json_extract(e.value,'\$.n') AS line
+  FROM (SELECT json, 'v4' AS fam, '\$.ct.top4' AS path FROM samples WHERE ts=(SELECT max(ts) FROM samples)
+        UNION ALL
+        SELECT json, 'v6' AS fam, '\$.ct.top6' AS path FROM samples WHERE ts=(SELECT max(ts) FROM samples)) s,
+       json_each(json_extract(s.json, s.path)) e
+);
 "
 
 # ── PON layer (pon-collect.sh, every 1 min) ─────────────────────────────────
