@@ -82,6 +82,11 @@ SELECT
   'route10_optical_power_dbm{module=\"W2\",dir=\"rx\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_rx'),'NaN') || char(10) ||
   'route10_optical_temp_celsius{module=\"L4\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_t'),'NaN') || char(10) ||
   'route10_optical_temp_celsius{module=\"W2\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_t'),'NaN') || char(10) ||
+  '# HELP route10_optical_bias_ma Laser bias current. The LEADING ageing indicator: bias climbing while route10_optical_power_dbm{dir=tx} stays flat means the laser is being driven harder to hold its output, which is how a DFB dies - visible weeks before Tx power sags. Trend it per module, do not threshold it absolutely.' || char(10) ||
+  'route10_optical_voltage_volts{module=\"L4\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_v'),'NaN') || char(10) ||
+  'route10_optical_voltage_volts{module=\"W2\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_v'),'NaN') || char(10) ||
+  'route10_optical_bias_ma{module=\"L4\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_a'),'NaN') || char(10) ||
+  'route10_optical_bias_ma{module=\"W2\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_a'),'NaN') || char(10) ||
   '# HELP route10_dns_up A LADDER, not one verdict: each resolver hop probed independently so the broken hop names itself. resolver=\"adguard\" 0 with the rest 1 means an ops-side outage AND that ad-blocking is silently OFF (we are serving from the DoH fallback). resolver=\"dnsmasq\" 1 does NOT prove LAN DNS is healthy - it answers the stable probe name from cache while the whole upstream chain is dead.' || char(10) ||
   'route10_dns_up{resolver=\"adguard\"} '  || COALESCE(json_extract(json,'\$.dns.agh_up'),'NaN')     || char(10) ||
   'route10_dns_up{resolver=\"doh\"} '      || COALESCE(json_extract(json,'\$.dns.doh_up'),'NaN')     || char(10) ||

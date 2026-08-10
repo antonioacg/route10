@@ -339,13 +339,26 @@ DHI=$(i2cget -y 0 0x51 0x66 2>/dev/null); DLO=$(i2cget -y 0 0x51 0x67 2>/dev/nul
 [ -n "$DHI" ] && [ -n "$DLO" ] && L4TX=$(awk "BEGIN{v=($DHI*256)+$DLO; if(v>0) printf \"%.2f\", 10*log(v*0.0001)/log(10); else print \"?\"}") || L4TX=""
 DHI=$(i2cget -y 0 0x51 0x68 2>/dev/null); DLO=$(i2cget -y 0 0x51 0x69 2>/dev/null)
 [ -n "$DHI" ] && [ -n "$DLO" ] && L4RX=$(awk "BEGIN{v=($DHI*256)+$DLO; if(v>0) printf \"%.2f\", 10*log(v*0.0001)/log(10); else print \"?\"}") || L4RX=""
+# Vcc (A2h 98-99, LSB 100 uV) and TX bias current (A2h 100-101, LSB 2 uA) — the two
+# SFF-8472 fields we were dropping on the floor. They are the LEADING indicators of
+# transceiver ageing: bias current climbing while Tx power holds flat means the laser
+# is being driven harder to keep its output, which is how a DFB dies — visible weeks
+# before Tx power finally sags. Vcc catches supply/cage problems that look like
+# random link flaps. Register map confirmed against a known-good value: rx at 0x68/0x69
+# decodes to -11.98 dBm, exactly what odi-health independently logged.
+DHI=$(i2cget -y 0 0x51 0x62 2>/dev/null); DLO=$(i2cget -y 0 0x51 0x63 2>/dev/null)
+[ -n "$DHI" ] && [ -n "$DLO" ] && L4V=$(awk "BEGIN{printf \"%.3f\", (($DHI*256)+$DLO)*0.0001}") || L4V=""
+DHI=$(i2cget -y 0 0x51 0x64 2>/dev/null); DLO=$(i2cget -y 0 0x51 0x65 2>/dev/null)
+[ -n "$DHI" ] && [ -n "$DLO" ] && L4A=$(awk "BEGIN{printf \"%.2f\", (($DHI*256)+$DLO)*0.002}") || L4A=""
 
 # W2 DDM — daemon cache only (single Boa poller lives in daemon-odi-w2-ddm.sh)
-W2T=""; W2TX=""; W2RX=""
+# W2_V / W2_A were already being computed by the daemon and THROWN AWAY here — the
+# stick's voltage and bias were sitting in this file unread the whole time.
+W2T=""; W2TX=""; W2RX=""; W2V=""; W2A=""
 if [ -f /var/run/w2-ddm.env ]; then
     . /var/run/w2-ddm.env
     if [ $(( TS - ${W2_TS:-0} )) -le 60 ]; then
-        W2T=$W2_T; W2TX=$W2_P; W2RX=$W2_R
+        W2T=$W2_T; W2TX=$W2_P; W2RX=$W2_R; W2V=$W2_V; W2A=$W2_A
     fi
 fi
 
@@ -388,15 +401,15 @@ if command -v drill >/dev/null 2>&1; then
     dns_probe 127.0.0.1 53;        DNS_DNSMASQ_UP=$DNS_UP; DNS_DNSMASQ_MS=$DNS_MS
 fi
 
-JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s},"dns":{"agh_up":%s,"agh_ms":%s,"doh_up":%s,"doh_ms":%s,"rdns_up":%s,"rdns_ms":%s,"dnsmasq_up":%s,"dnsmasq_ms":%s}}' \
+JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"l4_v":%s,"l4_a":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s,"w2_v":%s,"w2_a":%s},"dns":{"agh_up":%s,"agh_ms":%s,"doh_up":%s,"doh_ms":%s,"rdns_up":%s,"rdns_ms":%s,"dnsmasq_up":%s,"dnsmasq_ms":%s}}' \
     "$(jnum "$CPU_TOT")" "$(jnum "$CPU_IDLE")" "$(jnum "$CPU_SIRQ")" "$(jnum "$CPU_IOW")" \
     "$(jnum "$SN_D")" "$(jnum "$SN_S")" "$(jnum "$IRQ")" \
     "$(jnum "$CT")" "$(jnum "$CTMAX")" \
     "$(jnum "$CT4")" "$(jnum "$CT6")" "$(jnum "$CTW4")" "$TOP4" "$TOP6" "$STALL4" "$IFJSON" \
     "$(jnum "$C4")" "$(jnum "$C5")" "$(jnum "$CBR")" \
     "$(jnum "$A4")" "$(jnum "$AG")" "$(jnum "$AU")" "$(jnum "$W3")" \
-    "$(jnum "$L4T")" "$(jnum "$L4TX")" "$(jnum "$L4RX")" \
-    "$(jnum "$W2T")" "$(jnum "$W2TX")" "$(jnum "$W2RX")" \
+    "$(jnum "$L4T")" "$(jnum "$L4TX")" "$(jnum "$L4RX")" "$(jnum "$L4V")" "$(jnum "$L4A")" \
+    "$(jnum "$W2T")" "$(jnum "$W2TX")" "$(jnum "$W2RX")" "$(jnum "$W2V")" "$(jnum "$W2A")" \
     "$(jnum "$DNS_AGH_UP")" "$(jnum "$DNS_AGH_MS")" \
     "$(jnum "$DNS_DOH_UP")" "$(jnum "$DNS_DOH_MS")" \
     "$(jnum "$DNS_RDNS_UP")" "$(jnum "$DNS_RDNS_MS")" \
