@@ -92,6 +92,17 @@ telnet probes — they orphan the lock too.
   - Syslog app names **`route10.odi-health` and `route10.dhcp-watchdog` are
     FROZEN** — ops's `Route10SyslogSilent` dead-man alert keys on their absence
     (contract-recorded). Never rename/retire them without telling ops first.
+  - The connlimit log prefixes **`route10.connlimit warn: v4|v6` and
+    `block: v4|v6` are FROZEN** (2026-08-10) — four ops rules key on the family
+    tag; drop or rename it and all four match nothing, never fire, never error.
+    Same class as the app names above. **Extend, never rename in place**: the
+    family was appended AFTER the colon precisely so `route10.connlimit warn: `
+    stayed an intact substring and ops could migrate with no coverage gap.
+  - `route10_host_flows{family,host,ip}` on `/metrics` carries **verbatim,
+    uncurated DHCP hostnames** (operator decision 2026-08-10 — private LAN, and a
+    masked offender list is worth less than an honest one). They reach ops's
+    Prometheus labels and phone notifications. Query on `host`, not `ip`: v6
+    label values churn as SLAAC privacy addresses rotate.
 - `/cfg/scripts/tailscale-reconcile.sh` — single owner of the **firmware-native
   Tailscale** integration (Alta's 2026-07-22 firmware auto-update ships
   `/usr/sbin/tailscaled` 1.98.4-1 + uci `/etc/config/tailscale`; NOT cloud-modeled,
