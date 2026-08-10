@@ -62,6 +62,12 @@ SELECT
   'route10_rt_sample_timestamp_seconds ' || ts || char(10) ||
   'route10_eth_carrier{iface=\"eth4\"} ' || COALESCE(json_extract(json,'\$.carrier.eth4'),'NaN') || char(10) ||
   'route10_eth_carrier{iface=\"eth5\"} ' || COALESCE(json_extract(json,'\$.carrier.eth5'),'NaN') || char(10) ||
+  '# HELP route10_eth_carrier_changes_total Link flap counter. route10_eth_carrier is a 0/1 gauge sampled once a minute and CANNOT see a flap - the 2026-06 eth5 incident was 261 flaps in 3.4 days and a per-minute carrier=1 would have read healthy throughout. Alert on rate() of this, not on the carrier gauge. Resets to 0 on reboot.' || char(10) ||
+  'route10_eth_carrier_changes_total{iface=\"eth4\"} '   || COALESCE(json_extract(json,'\$.flap.eth4'),'NaN')  || char(10) ||
+  'route10_eth_carrier_changes_total{iface=\"eth5\"} '   || COALESCE(json_extract(json,'\$.flap.eth5'),'NaN')  || char(10) ||
+  'route10_eth_carrier_changes_total{iface=\"br-lan\"} ' || COALESCE(json_extract(json,'\$.flap.brlan'),'NaN') || char(10) ||
+  '# HELP route10_eth_rx_crc_errors_total Office-fibre receive CRC errors (ethtool driver counter, NOT the /proc/net/dev errs column, which reads 0 while this climbs). This is the counter that hit 51k+ in the 2026-06 dirty-ferrule incident and took the whole LAN down while the WAN was fine. ONE DIRECTION ONLY: route10->office corruption lands on the office switch counters, which we cannot see, so a flat value here does NOT clear the fibre.' || char(10) ||
+  'route10_eth_rx_crc_errors_total{iface=\"eth5\"} ' || COALESCE(json_extract(json,'\$.crc.eth5'),'NaN') || char(10) ||
   'route10_brlan_addr_present{family=\"ipv4\"} '     || COALESCE(json_extract(json,'\$.addr.v4'),'NaN')  || char(10) ||
   'route10_brlan_addr_present{family=\"ipv6_gua\"} ' || COALESCE(json_extract(json,'\$.addr.gua'),'NaN') || char(10) ||
   'route10_brlan_addr_present{family=\"ipv6_ula\"} ' || COALESCE(json_extract(json,'\$.addr.ula'),'NaN') || char(10) ||
