@@ -333,15 +333,34 @@ RDNS_BIN=/a/routedns/routedns
 RDNS_CFG=/a/routedns/routedns.toml
 RDNS_GENERAL=
 if [ -x "$RDNS_BIN" ] && [ -n "$LAN_DNS4" ]; then
+    # ⚠ This heredoc delimiter is UNQUOTED on purpose ($LAN_DNS4 must interpolate),
+    # so the body is still shell: a backtick or a $ inside even a TOML *comment* is
+    # executed at render time. Cost me a live `-j: not found` and a comment with a
+    # hole in it, 2026-08-10. Plain prose only below.
     rdns_want=$(cat <<RDNSCFG
 [resolvers.adguard]
 address = "$LAN_DNS4:53"
 protocol = "udp"
-# Wait up to 5s for AdGuard. A cache-miss makes AdGuard fetch from ITS upstream
-# (1–3s is normal); a short timeout would mis-read that as a failure → needless
-# DoH failover + a late "unexpected answer" once AdGuard finally replies. 5s lets
-# normal upstream latency through, so only a genuine AdGuard stall fails over.
-query-timeout = 5
+# ⚠ THE BINDING CONSTRAINT IS THE CLIENT'S PATIENCE, NOT ADGUARD'S SLOWNESS.
+# This was 5s, chosen to tolerate a slow AdGuard cache-miss ("1–3s is normal").
+# Both halves of that were wrong, measured 2026-08-10:
+#   - AdGuard cache-miss latency is 20–32 ms (max of 20 forced misses). The 1–3 s
+#     premise was off by ~100×; nothing needed a 5 s allowance.
+#   - musl's stub resolver gives the WHOLE lookup ~5 s. Setting our failover
+#     detection to 5 s means the fallback query STARTS at the instant the client
+#     stops waiting, so the failover cannot save the query it was invoked for —
+#     it is a LOST query, not a slow one. Observed during ops's planned AdGuard
+#     outage: the DoH answer landed 6 ms AFTER our own heartbeat had already
+#     given up (routedns 21:16:05.941, heartbeat 21:16:05.947). Reproduced 3/3 by
+#     dropping AdGuard's REPLIES: first query 5006/5005/5007 ms, all FAILED.
+# 1s is 31× the observed worst case and leaves ~4 s of the client's budget for
+# the DoH fallback (~150 ms), so a dead AdGuard now costs a slow answer instead
+# of no answer. Keep this STRICTLY below the stub's total budget, always.
+# ⚠ Injecting this fault with -j DROP in the OUTPUT chain does NOT reproduce it:
+# netfilter returns EPERM to the local socket, so routedns sees an instant error
+# and fails over in ~20 ms, making a broken config look healthy. A down AdGuard is
+# SILENCE — drop its REPLIES in INPUT instead, then time the FIRST query.
+query-timeout = 1
 
 [resolvers.doh-fallback]
 address = "127.0.0.1:5054"

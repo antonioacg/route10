@@ -219,7 +219,17 @@ telnet probes — they orphan the lock too.
      `project_route10_cgnat_torrent_exhaustion.md`.
   8. **LAN DNS — route10 as the sole resolver** (`dhcp.@dnsmasq[0]`): forwards
      `strict-order` (allservers off) **AdGuard `.241`/`::241` first → encrypted DoH
-     (`127.0.0.1#505x`, Cloudflare/Google/OpenDNS) fallback**; pins `/net.aac.gd/` to
+     (`127.0.0.1#505x`, Cloudflare/Google/OpenDNS) fallback**. ⚠ **That ordering lives
+     in routedns, not in dnsmasq** — dnsmasq's only general upstream is
+     `127.0.0.1#5300` (routedns), whose `fail-back` group holds AdGuard as PRIMARY.
+     Reading `uci show dhcp` alone therefore makes AdGuard look domain-pinned and
+     out of the general path; it is not, and ops misdiagnosed a router incident that
+     way on 2026-08-10. **AdGuard is in the path for every LAN query, so an
+     opi5pro outage DOES degrade general LAN DNS.** Its blast radius is set by
+     `query-timeout`, which must stay STRICTLY below the client stub's total budget
+     (musl gives ~5 s): at the old 5 s the fallback answer arrived after the client
+     had already given up, i.e. the first query of each retry window was LOST, not
+     slow. Now 1 s (AdGuard's measured cache-miss max is 32 ms). Pins `/net.aac.gd/` to
      AdGuard only (inside names SERVFAIL, never leak the `192.0.2.1` stub, if AdGuard is
      down); `add-subnet` (ECS, via a `/tmp/dnsmasq.d` drop-in — no uci mapping on this
      build) so single-box AdGuard keeps per-client identity through the forwarder.
