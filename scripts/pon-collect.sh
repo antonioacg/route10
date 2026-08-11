@@ -328,6 +328,29 @@ case "$RANGING_REQ" in
     *) [ "$RANGING_REQ" -ge 3 ] && warn "PON re-activation loop: ranging_req=$RANGING_REQ in this cycle (onu_state=${ONU:-?}) — OLT is ranging then dropping us; healthy is 0" ;;
 esac
 
+# ── saturation tripwire ─────────────────────────────────────────────────────
+# These counters SATURATE rather than wrap: they stop at 0xFFFF / 0xFFFFFFFF.
+# A saturated sample is a FLOOR, not a count, so the interval it covers is
+# under-reported -- and aggregation hides that perfectly, which is the failure
+# mode this whole day has been about. Detect it instead of eating it.
+#
+# Measured headroom at the 60 s sole-reader cadence (2026-08-11): TX BOH 12-19
+# vs 65535 (~3400x), BWmap ~960k vs 4.29e9 (~4400x) -- both fine. But GEM Idle
+# runs 3.44e9/min against a 4.29e9 cap: only 1.25x, so it saturates on any
+# cycle longer than ~75 s. Cycles DO stretch (wedge self-heal adds ~15 s, a
+# missed cron tick, a slow telnet session), so this will fire occasionally and
+# legitimately. It names the field rather than silently under-counting it.
+_sat=""
+for _f in "bip_bits=$BIP_BITS" "bip_blocks=$BIP_BLK" "ploam_rx=$PLOAM_RX" \
+          "tx_boh=$TX_BOH" "usp_total=$USP_TOTAL" "usp_nomsg=$USP_NOMSG" \
+          "bw_total=$BW_TOTAL" "gem_idle=$GEM_IDLE" "gem_nonidle=$GEM_NONIDLE" \
+          "usg_bytes=$USG_BYTES" "eth_unicast=$ETH_UNI"; do
+    case "${_f#*=}" in
+        65535|4294967295) _sat="$_sat ${_f%%=*}" ;;
+    esac
+done
+[ -n "$_sat" ] && warn "counter SATURATED (floor, not a count -- this interval under-reports):$_sat"
+
 # ── accumulate the ds counters into running totals ──────────────────────────
 # The stick's ds-phy/ds-plm counters RESET ON EVERY READ (proven 2026-08-08:
 # two reads 1 s apart returned 60 then 0) — each poll's value is "count since
