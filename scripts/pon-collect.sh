@@ -114,8 +114,19 @@ OMCI_LOGMASK=0x3FFFFFFF
 #      is what turned a volume problem into six hours of "the logger is dead".
 # Paths are /var/tmp (the real location -- /tmp is a symlink to it, and omci_app
 # holds its fd on /var/tmp/omcilog).
-OMCI_DRAIN_KB=96
-OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; dd if=/var/tmp/omcilog.par bs=1024 count=$OMCI_DRAIN_KB 2>/dev/null; dd if=/var/tmp/omcilog bs=1024 count=$OMCI_DRAIN_KB 2>/dev/null; echo __OMCI''LOG_E__; : > /var/tmp/omcilog.par; : > /var/tmp/omcilog"
+# ⛔ NO `dd` ON THIS STICK. Nor head, tail, wc, tr, du, od. busybox v1.12.4 here
+# is minimal; `cat`, `ls`, `echo`, `grep`, `nc` exist. A previous version of this
+# used `dd ... 2>/dev/null` and I "verified" dd with
+# `dd ... 2>/dev/null; echo DD_OK` -- the redirect ate the "not found" and the
+# echo ran anyway. A test that cannot fail proves nothing; that one shipped a
+# drain which read ZERO bytes and truncated regardless, i.e. guaranteed 100%
+# loss. Verify a tool by its OUTPUT, never by a following command's success.
+#
+# So: read with `cat` (bounded reads are not available), and TRUNCATE SEPARATELY,
+# only after we have the bytes in hand. Read and destroy must never share a
+# command line -- that coupling is the original bug: on a timeout the socket
+# dies before we get the output while the stick's shell still runs the truncate.
+OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; cat /var/tmp/omcilog.par 2>/dev/null; cat /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
 # ── MIB state poll — the durable half of the management-plane record ────────
 # The OMCI log is EPHEMERAL by construction: /tmp on the stick is tmpfs, the
 # logger is runtime-only, and an `ActivateSw` REBOOTS the stick -- so the one
@@ -204,10 +215,28 @@ OMCILOG=$(printf '%s' "$_omci_body" | head -c 64000 | sed "s/'/''/g")
 # they have different fixes: the transfer bound (raise OMCI_DRAIN_KB, or reduce
 # the logger's action mask so it stops emitting 1.7 MB per burst) and the row
 # storage bound (a /a/obs budget decision).
-if [ "$_omci_ondisk" -gt "$(( OMCI_DRAIN_KB * 1024 * 2 ))" ] 2>/dev/null; then
-    warn "OMCI drain BOUNDED: stick held ${_omci_ondisk} B, transferred ${_omci_got} B (cap ${OMCI_DRAIN_KB} KB/file) — the remainder was truncated UNREAD. Reduce the logger action mask or raise the cap; 0x3FFFFFFF logs far more than the OLT conversation."
+# ── truncate ONLY on proof we have the bytes ────────────────────────────────
+# Separate round trip, deliberately. If the read failed or came back short we
+# leave the file alone and try again next cycle; nothing is destroyed unread.
+#
+# The one exception is a RAM guard, and it is a real risk not a theoretical one:
+# /var on the stick is ramfs (23 MB TOTAL, ~2.8 MB free) so an undrained log
+# competes with omci_app itself -- and omci_app IS the GPON MAC. Losing text is
+# survivable; OOM-ing the process that terminates our only fibre is not. Above
+# the guard we truncate anyway and say so at err.
+OMCI_RAMGUARD=$(( 4 * 1024 * 1024 ))
+if [ "${_omci_got:-0}" -gt 0 ] 2>/dev/null; then
+    python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
+    if [ "$_omci_ondisk" -gt "$(( _omci_got + 4096 ))" ] 2>/dev/null; then
+        warn "OMCI drain SHORT: stick held ${_omci_ondisk} B, captured ${_omci_got} B — remainder lost to truncation. cat over telnet cannot carry this volume."
+    fi
+elif [ "${_omci_ondisk:-0}" -gt "$OMCI_RAMGUARD" ] 2>/dev/null; then
+    python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
+    err "OMCI log ${_omci_ondisk} B UNREADABLE over telnet and past the ${OMCI_RAMGUARD} B ram guard — truncated UNREAD to protect omci_app (ramfs is 23 MB total and omci_app is the GPON MAC). This is data loss, chosen deliberately over risking the fibre."
+elif [ "${_omci_ondisk:-0}" -gt 0 ] 2>/dev/null; then
+    warn "OMCI log holds ${_omci_ondisk} B but the read returned nothing — NOT truncating; will retry next cycle."
 fi
-[ "$_omci_got" -gt 64000 ] && warn "OMCI row truncated: ${_omci_got} B drained, 64000 B stored"
+[ "${_omci_got:-0}" -gt 64000 ] && warn "OMCI row truncated: ${_omci_got} B drained, 64000 B stored"
 
 # ── upstream loss, measured from OMCI retransmissions ───────────────────────
 # THE signal this whole drain exists for. The OLT re-sends a request with the
