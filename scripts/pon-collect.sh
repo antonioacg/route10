@@ -384,11 +384,22 @@ esac
 # must stay routable/droppable independently of route10.pon-collect, which
 # carries the alerts. Never mix a firehose into an alert stream.
 #
-# Measured 2026-08-11: busybox syslogd truncates the payload at ~216 B, and
-# OMCI lines run avg 81 B / max 329 B, so ~1% clip -- only the long hex
-# attribute dumps, the least information-dense lines. The other 99% arrive
-# intact, which is what makes shipping them worthwhile at all. Full
-# untruncated text always remains in the sqlite `omci` table regardless.
+# NOTHING IS TRUNCATED. busybox syslogd cuts the payload at a hard 221 B for
+# this tag (measured directly, not assumed -- our notes said "~256 B" and were
+# wrong). OMCI lines run avg 81 B / max 329 B, so ~1% would otherwise clip:
+# exactly the long hex attribute dumps. Rather than accept a lossy sink, over-
+# long lines are SPLIT into numbered chunks that rejoin losslessly:
+#
+#     c<seq>.<i>/<n>|<chunk>
+#
+# Rejoin (chunks of one cycle arrive adjacent and in order):
+#     grep 'route10.omci:' messages | sed -E 's/.*route10\.omci: //' \
+#       | awk '/^c[0-9]+\.[0-9]+\/[0-9]+\|/{ split($0,a,"|"); split(a[1],b,/[c.\/]/);
+#              buf[b[2]]=buf[b[2]] substr($0, index($0,"|")+1);
+#              if (b[3]==b[4]) { print buf[b[2]]; delete buf[b[2]] }; next } {print}'
+#
+# No ambiguity with real content: every genuine OMCI line begins with `[`
+# (the timestamp), so a leading `c<digits>.` can only be our marker.
 #
 # busybox `logger` reading stdin emits ONE syslog entry PER LINE (verified),
 # so the whole batch costs a single process rather than one spawn per line.
@@ -408,6 +419,15 @@ esac
 if [ "$_ship" = 1 ] && [ -n "$_omci_body" ]; then
     _n=$(printf '%s\n' "$_omci_body" | grep -c '')
     printf '%s\n' "$_omci_body" | head -n "$OMCI_SYSLOG_MAXLINES" \
+        | awk -v LIM=221 -v MK=16 '
+            BEGIN { CH = LIM - MK }
+            length($0) <= LIM { print; next }
+            {
+                seq++
+                total = int((length($0) + CH - 1) / CH)
+                for (i = 1; i <= total; i++)
+                    printf "c%d.%d/%d|%s\n", seq, i, total, substr($0, (i-1)*CH + 1, CH)
+            }' \
         | logger -t route10.omci -p daemon.info 2>/dev/null
     [ "$_n" -gt "$OMCI_SYSLOG_MAXLINES" ] \
         && warn "OMCI syslog ship capped: $_n lines drained, $OMCI_SYSLOG_MAXLINES shipped (full text is in the omci table)"
