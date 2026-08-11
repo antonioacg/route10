@@ -289,7 +289,9 @@ SELECT
   'route10_pon_omci_dropped_total '   || COALESCE(json_extract(json,'\$.omci.dropped'),'NaN')      || char(10) ||
   'route10_pon_ds_bwmap_crc_error_total ' || COALESCE(json_extract(json,'\$.bw.crc_err'),'NaN')    || char(10) ||
   'route10_pon_ds_bwmap_invalid_total{slot=\"0\"} ' || COALESCE(json_extract(json,'\$.bw.invalid0'),'NaN') || char(10) ||
-  'route10_pon_ds_bwmap_invalid_total{slot=\"1\"} ' || COALESCE(json_extract(json,'\$.bw.invalid1'),'NaN')
+  'route10_pon_ds_bwmap_invalid_total{slot=\"1\"} ' || COALESCE(json_extract(json,'\$.bw.invalid1'),'NaN') || char(10) ||
+  'route10_pon_omci_requests_total '    || COALESCE(json_extract(json,'\$.omci_tx.req'),'NaN')  || char(10) ||
+  'route10_pon_omci_retransmits_total ' || COALESCE(json_extract(json,'\$.omci_tx.retx'),'NaN')
 FROM pon ORDER BY ts DESC LIMIT 1;
 "
 

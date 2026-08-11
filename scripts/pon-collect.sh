@@ -142,6 +142,36 @@ OMCILOG=$(printf '%s' "$_omci_body" | head -c 32000 | sed "s/'/''/g")
 # Never truncate silently -- a capped capture that looks complete is how a
 # missing signal gets read as an absent one.
 [ ${#_omci_body} -gt 32000 ] && warn "OMCI drain truncated: ${#_omci_body} B drained, 32000 B stored (steady state is ~6 KB/min)"
+
+# ── upstream loss, measured from OMCI retransmissions ───────────────────────
+# THE signal this whole drain exists for. The OLT re-sends a request with the
+# SAME transaction ID on a ~1 s timeout when it does not receive our reply. So
+# duplicate request TCIs are a DIRECT read of upstream loss -- the one
+# direction nothing else on this box can measure. DDM reports the light we
+# EMIT, never what the OLT receives; these retransmissions are the OLT telling
+# us, in its own words, what it did not get.
+#
+# Measured 2026-08-11: 332/1810 = 18.3% while the ONU answered every request
+# correctly. That killed the PLOAM-password theory (auth passes -- the OLT
+# gets all the way to MIB upload) and proved physical upstream impairment.
+#
+# Requests are lines whose op does not end in `Rsp`. TCI reuse inside one
+# 60-s drain is not a concern: they increment sequentially through a 16-bit
+# space and we see a few hundred per cycle, so a wrap cannot alias here.
+_omci_reqs=$(printf '%s\n' "$_omci_body" \
+    | sed -n 's/^\[[^]]*\][[:space:]]*\(0x[0-9a-f]*\)[[:space:]][^ ]*[[:space:]]*\([A-Za-z]*\)(.*/\1 \2/p' \
+    | grep -v 'Rsp$' | cut -d' ' -f1 | grep '^0x')
+OMCI_REQ=$(printf '%s\n' "$_omci_reqs" | grep -c '^0x')
+OMCI_RETX=$(( OMCI_REQ - $(printf '%s\n' "$_omci_reqs" | sort -u | grep -c '^0x') ))
+
+# Healthy is ~0 by construction (a delivered reply is never re-requested), so
+# a sustained ratio is structural evidence, not a tuned threshold. Gated on a
+# sample size so a 1-of-2 blip cannot read as 50% loss. The healthy baseline
+# is genuinely unmeasured -- this counter was born during the fault.
+if [ "$OMCI_REQ" -ge 20 ] && [ "$OMCI_RETX" -gt 0 ]; then
+    _pct=$(( OMCI_RETX * 100 / OMCI_REQ ))
+    [ "$_pct" -ge 5 ] && warn "UPSTREAM LOSS ${_pct}% — OLT retransmitted ${OMCI_RETX}/${OMCI_REQ} OMCI requests (our replies are not reaching it; DDM cannot see this direction)"
+fi
 RAW=$(printf '%s\n' "$RAW" | sed '/__OMCILOG_S__/,/__OMCILOG_E__/d')
 
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
@@ -276,8 +306,10 @@ acc omci_drop    "$OMCI_DROP";   OMCI_DROP=$ACC
 acc bw_crc_err   "$BW_CRC";      BW_CRC=$ACC
 acc bw_invalid0  "$BW_INV0";     BW_INV0=$ACC
 acc bw_invalid1  "$BW_INV1";     BW_INV1=$ACC
+acc omci_req     "$OMCI_REQ";    OMCI_REQ=$ACC
+acc omci_retx    "$OMCI_RETX";   OMCI_RETX=$ACC
 
-JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s}}' \
+JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
     "$(alarm 'TX Too Long')" "$(alarm 'TX Mismatch')" \
@@ -287,7 +319,8 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
     "$(nz "$SN_REQ")" "$(nz "$RANGING_REQ")" \
     "$(nz "$TX_SN_PLOAM")" "$(nz "$TX_BOH")" \
     "$(nz "$OMCI_PROC")" "$(nz "$OMCI_DROP")" \
-    "$(nz "$BW_CRC")" "$(nz "$BW_INV0")" "$(nz "$BW_INV1")")
+    "$(nz "$BW_CRC")" "$(nz "$BW_INV0")" "$(nz "$BW_INV1")" \
+    "$(nz "$OMCI_REQ")" "$(nz "$OMCI_RETX")")
 
 # Store the raw diag blob ONLY when a field failed to parse (JSON contains a
 # null). Parsers are verified against real output, so a healthy row is all
