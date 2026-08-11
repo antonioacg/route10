@@ -220,6 +220,74 @@ it off. A knob, not a moat.
 
 ---
 
+## Hardware shortlist (Brazil, Aug 2026)
+
+⛔ **There is no WiFi 7 access point running OpenWrt today.** None. "WiFi 7 on
+OpenWrt" means a router in dumb-AP mode, on a barrel jack, on a shelf.
+
+⚠ AliExpress and Mercado Livre were captcha-blocked all session, so "no price"
+below means *unreachable*, not *unavailable*. Landed estimates use 1.6× and
+5.4 BRL/USD.
+
+### The three that survive
+
+| Role | Device | Price | Why |
+|---|---|---|---|
+| **House AP** | TP-Link **EAP660 HD v1** | R$1,799 domestic (Kabum/Amazon.br) | 4x4:4 radio, 2.5 GbE, PoE+, no EOL flag, real BR retail |
+| **Cheap lab** | **Cudy AP3000 v1** | **R$676.61** Kabum | MT7981B, 2.5 GbE, 802.3af/at. Cheapest route to an open mac80211 radio |
+| **Bleeding edge** | **Zbtlink ZBT-Z8803BE** | no price reached | The only MT7996 + 2.5 GbE + **10G SFP+** box |
+
+### Zbtlink ZBT-Z8803BE — the experimenter's pick
+
+Silicon verified via the **firmware package the build pulls**
+(`kmod-mt7996-firmware`), not the DTS node name — its node is `mt7996@0,0` and so
+is the BE450's, which is MT7992. **Node names lie; package selection doesn't.**
+
+- **MT7988A** (Filogic 880, quad A73), **1 GB RAM**
+- **MT7996** tri-band, dedicated EEPROM nvmem cell
+- **1x 2.5 GbE**, **1x 10G SFP+ cage** (`phy-mode = "10gbase-r"`), 3x 1 GbE,
+  2x USB3, PWM fan with a 100 °C thermal trip
+
+A BPI-R4-class machine in a retail chassis *with* a PSU and case — arguably a
+better experiment target than the bare board, and the SFP+ cage is directly
+relevant given route10 already runs an SFP+ stick.
+
+⚠ **Not in `openwrt-25.12` at all** — main/SNAPSHOT only. No stable images, no
+upgrade-path guarantee, **no wiki page and therefore no documented
+broken-functions list**. Unknown unknowns, not known-and-accepted.
+⚠ 6 GHz is capability-inferred, not unit-confirmed — it has its own EEPROM nvmem
+cell and so carries the same risk class as BPI-R4's zeroed-TX-power bug.
+
+### Cudy AP3000 v1 — the PHY swap is a CLOSED issue
+
+In Jan 2026 Cudy **silently swapped the 2.5 GbE PHY** from Realtek RTL8221B to
+Motorcomm YT8821 with **no model-number or revision change**. Not detectable before
+purchase — no SKU, packaging or date-code tell.
+
+**But `DEVICE_PACKAGES` for `cudy_ap3000-v1` includes `kmod-phy-motorcomm`
+unconditionally in both `main` and `openwrt-25.12`.** The stock official image
+drives both variants. Not a lottery.
+
+Residual risk, entirely avoidable:
+- Cudy **transition image must be ≥ 20260224** (older ones can't flash YT8821)
+- OpenWrt image must be **≥ 24.10.6 / 25.12.0-rc5**
+
+⚠ If either bites, the AP3000 has **only one Ethernet port** — no PHY driver means
+no network, and recovery is **UART-only** (case open, USB-TTL, 115200, 3.3 V).
+
+### Ruled out, and why
+
+| Device | Reason |
+|---|---|
+| TP-Link **EAP670** | **Zero OpenWrt support** in any revision — absent from snapshot, 25.12.5 and 24.10.8; wiki 404s |
+| **GL-MT3600BE**, TP-Link **BE450**, **Routerich BE7200**, **Tenda BE12 Pro**, **Hiveton H5000M**, **Keenetic KN-1812** | `kmod-mt7992-firmware` ⇒ **dual-band forever**, permanent silicon grounds |
+| **ipTIME AX7800M-6E** | 6 GHz **TX power broken** on OpenWrt |
+| **Zyxel NWA50AX Pro** | 2.5 GbE link-flapping; the only workaround **disables 2.5 GbE** |
+| **ASUS ZenWiFi BT8** | No price obtainable anywhere; absent from BR retail |
+| **BPI-R4 + BE14** | Grey market only, no price; DIY parts list (PSU, storage, BE14, SFPs, antennas, case). Best-*evidenced* 6 GHz, worst buying path |
+| Netgear **WAX220 / WAX630 / WAX218** | Discontinued or non-orderable at source |
+| TP-Link **EAP683-LR** | Manufacturer-confirmed **EOL** |
+
 ## Telemetry — the actual reason to buy an AP
 
 The unresolved complaint ("last images don't load, I switch to 5G") has no
