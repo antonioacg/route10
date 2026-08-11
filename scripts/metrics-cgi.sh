@@ -280,7 +280,16 @@ SELECT
   'route10_pon_ds_ploam_received_total ' || COALESCE(json_extract(json,'\$.ds.ploam_rx'),'NaN')  || char(10) ||
   'route10_pon_ds_ploam_crc_error_total ' || COALESCE(json_extract(json,'\$.ds.ploam_crc'),'NaN') || char(10) ||
   'route10_pon_rogue_sd_too_long_total ' || COALESCE(json_extract(json,'\$.rogue.sd_too_long'),'NaN') || char(10) ||
-  'route10_pon_rogue_sd_mismatch_total ' || COALESCE(json_extract(json,'\$.rogue.sd_mismatch'),'NaN')
+  'route10_pon_rogue_sd_mismatch_total ' || COALESCE(json_extract(json,'\$.rogue.sd_mismatch'),'NaN') || char(10) ||
+  'route10_pon_ranging_requests_total ' || COALESCE(json_extract(json,'\$.act.ranging_req'),'NaN') || char(10) ||
+  'route10_pon_sn_requests_total '      || COALESCE(json_extract(json,'\$.act.sn_req'),'NaN')      || char(10) ||
+  'route10_pon_us_sn_ploam_sent_total ' || COALESCE(json_extract(json,'\$.us.tx_sn_ploam'),'NaN')  || char(10) ||
+  'route10_pon_us_burst_overhead_total ' || COALESCE(json_extract(json,'\$.us.tx_boh'),'NaN')      || char(10) ||
+  'route10_pon_omci_processed_total ' || COALESCE(json_extract(json,'\$.omci.processed'),'NaN')    || char(10) ||
+  'route10_pon_omci_dropped_total '   || COALESCE(json_extract(json,'\$.omci.dropped'),'NaN')      || char(10) ||
+  'route10_pon_ds_bwmap_crc_error_total ' || COALESCE(json_extract(json,'\$.bw.crc_err'),'NaN')    || char(10) ||
+  'route10_pon_ds_bwmap_invalid_total{slot=\"0\"} ' || COALESCE(json_extract(json,'\$.bw.invalid0'),'NaN') || char(10) ||
+  'route10_pon_ds_bwmap_invalid_total{slot=\"1\"} ' || COALESCE(json_extract(json,'\$.bw.invalid1'),'NaN')
 FROM pon ORDER BY ts DESC LIMIT 1;
 "
 
