@@ -444,23 +444,26 @@ RDNSCFG
     # Quiet in steady state (junk reverse now answered by dnsmasq before it ever
     # reaches here), so the per-line logger is cheap; a silent DNS component is
     # undebuggable from Grafana.
-    # ── optional storm rollup ────────────────────────────────────────────────
-    # DEFAULT OFF, on purpose. The filter is built, tested and deployed, but the
-    # routedns line volume is a SHARED VALUE: ops keys a sustained-failover rule
-    # on that stream, so reducing it needs their agreement first (contract
-    # §route10.routedns verbosity). Flipping this to `on` is the whole change
-    # once they confirm the rollup's counted form suits their rule.
+    # ── storm rollup (always on) ─────────────────────────────────────────────
+    # A sustained upstream failure makes routedns emit ~1629 lines/min (measured
+    # 2026-08-11) — 92% of route10's entire syslog, enough to collapse the local
+    # /var/log/messages ring to 14 SECONDS and evict every other component's
+    # alerts. The information content of those 1629 lines is about three facts,
+    # so this is not a tradeoff worth a switch: the raw stream actively destroys
+    # observability during the only window where it matters.
     #
-    # Ready now rather than later because the 2026-08-11 storm supplied the data
-    # to build it against, and reconstructing that mid-incident is exactly when
-    # you cannot afford to. Measured on real captured output: 96% fewer lines,
-    # state transitions preserved verbatim.
-    RDNS_LOG_ROLLUP=off          # off | on
+    # The filter emits the first occurrence of each distinct condition verbatim
+    # and immediately — the state TRANSITION, which is the alertable event — and
+    # collapses sustained repeats into one line carrying an integer count. 96%
+    # fewer lines on real captured output, with nothing an alert needs removed.
+    #
+    # Falls back to `cat` if the filter is missing: a deploy gap must degrade to
+    # today's verbose behaviour, never to a broken pipe that loses DNS logging
+    # entirely.
     RDNS_ROLLUP_WINDOW=60        # seconds per counted rollup, per condition
     RDNS_FILTER="cat"
-    if [ "$RDNS_LOG_ROLLUP" = on ] && [ -f /cfg/scripts/rdns-logfilter.awk ]; then
-        RDNS_FILTER="awk -v WINDOW=$RDNS_ROLLUP_WINDOW -f /cfg/scripts/rdns-logfilter.awk"
-    fi
+    [ -f /cfg/scripts/rdns-logfilter.awk ] \
+        && RDNS_FILTER="awk -v WINDOW=$RDNS_ROLLUP_WINDOW -f /cfg/scripts/rdns-logfilter.awk"
 
     if ! pidof routedns >/dev/null 2>&1; then
         setsid sh -c "\"$RDNS_BIN\" \"$RDNS_CFG\" 2>&1 | $RDNS_FILTER | while IFS= read -r ln; do
