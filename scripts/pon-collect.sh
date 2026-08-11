@@ -379,6 +379,40 @@ case "$UPTIME" in ''|*[!0-9]*) : ;; *)
     esac ;;
 esac
 
+# ── raw OMCI lines → syslog, unfiltered ─────────────────────────────────────
+# Separate tag `route10.omci` on purpose: this is BULK DATA, not events, and it
+# must stay routable/droppable independently of route10.pon-collect, which
+# carries the alerts. Never mix a firehose into an alert stream.
+#
+# Measured 2026-08-11: busybox syslogd truncates the payload at ~216 B, and
+# OMCI lines run avg 81 B / max 329 B, so ~1% clip -- only the long hex
+# attribute dumps, the least information-dense lines. The other 99% arrive
+# intact, which is what makes shipping them worthwhile at all. Full
+# untruncated text always remains in the sqlite `omci` table regardless.
+#
+# busybox `logger` reading stdin emits ONE syslog entry PER LINE (verified),
+# so the whole batch costs a single process rather than one spawn per line.
+#
+# Volume: ~164 lines/min while faulting. `fault` therefore ships unfiltered
+# CONTENT but only while the PON is not in O5 -- the window where it is worth
+# anything -- instead of a permanent firehose into the collector. `all` is
+# there if the full stream is genuinely wanted; `off` disables shipping.
+OMCI_SYSLOG=fault            # off | fault | all
+OMCI_SYSLOG_MAXLINES=500
+
+_ship=0
+case "$OMCI_SYSLOG" in
+    all)   _ship=1 ;;
+    fault) [ "${ONU:-x}" != "5" ] && _ship=1 ;;
+esac
+if [ "$_ship" = 1 ] && [ -n "$_omci_body" ]; then
+    _n=$(printf '%s\n' "$_omci_body" | grep -c '')
+    printf '%s\n' "$_omci_body" | head -n "$OMCI_SYSLOG_MAXLINES" \
+        | logger -t route10.omci -p daemon.info 2>/dev/null
+    [ "$_n" -gt "$OMCI_SYSLOG_MAXLINES" ] \
+        && warn "OMCI syslog ship capped: $_n lines drained, $OMCI_SYSLOG_MAXLINES shipped (full text is in the omci table)"
+fi
+
 # Alarm surfacing: any non-clear PON alarm is worth an event even between scrapes.
 for a in LOS LOF LOM SF SD; do
     [ "$(alarm $a)" = 1 ] && warn "PON alarm $a is RAISED (onu_state=O${ONU:-?})"
