@@ -303,6 +303,12 @@ SELECT
   'route10_pon_ds_bwmap_invalid_total{slot=\"1\"} ' || COALESCE(json_extract(json,'\$.bw.invalid1'),'NaN') || char(10) ||
   'route10_pon_omci_requests_total '    || COALESCE(json_extract(json,'\$.omci_tx.req'),'NaN')  || char(10) ||
   'route10_pon_omci_retransmits_total ' || COALESCE(json_extract(json,'\$.omci_tx.retx'),'NaN') || char(10) ||
+  '# HELP route10_pon_omci_logger_dead The OLT spoke and we did not write it down: 1 when the DS OMCI hardware counter advanced while the omci_app log drain came back EMPTY. These are independent witnesses (hardware vs software) to the same event, so the pair separates honest silence from a dead recorder - which no single signal can do. Measured 2026-08-11: the logger sat dead for 4.6h while omcicli get logfile still self-reported armed. Alert on this being 1 for several minutes; pon-collect also self-heals it, rate-limited to one re-arm per 10 min.' || char(10) ||
+  'route10_pon_omci_logger_dead '       || COALESCE(json_extract(json,'\$.omcilog.dead'),'NaN')   || char(10) ||
+  '# HELP route10_pon_omci_log_lines Parsed OMCI log lines captured this cycle. 0 is normal when the OLT is quiet - read it together with route10_pon_omci_logger_dead, never alone.' || char(10) ||
+  'route10_pon_omci_log_lines '         || COALESCE(json_extract(json,'\$.omcilog.lines'),'NaN')  || char(10) ||
+  '# HELP route10_pon_omci_writes The OLT RECONFIGURING us, not just polling: count of Set/Create/Delete this cycle (…Rsp excluded - those are our own replies). Measured baseline is ZERO: over 52 min of capture on 2026-08-11 this OLT issued 8127 messages and not one write. Any sustained non-zero is the ISP changing our config, which is the difference between matching a config change and an SLA visit that swaps a working modem.' || char(10) ||
+  'route10_pon_omci_writes '            || COALESCE(json_extract(json,'\$.omcilog.writes'),'NaN') || char(10) ||
   'route10_pon_ds_plen_fail_total '      || COALESCE(json_extract(json,'\$.ds2.plen_fail'),'NaN')  || char(10) ||
   'route10_pon_ds_ploam_processed_total '|| COALESCE(json_extract(json,'\$.ds2.ploam_proc'),'NaN') || char(10) ||
   'route10_pon_ds_ploam_overflow_total ' || COALESCE(json_extract(json,'\$.ds2.ploam_ovf'),'NaN')  || char(10) ||

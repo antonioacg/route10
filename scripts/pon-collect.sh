@@ -172,6 +172,58 @@ if [ "$OMCI_REQ" -ge 20 ] && [ "$OMCI_RETX" -gt 0 ]; then
     _pct=$(( OMCI_RETX * 100 / OMCI_REQ ))
     [ "$_pct" -ge 5 ] && warn "UPSTREAM LOSS ${_pct}% — OLT retransmitted ${OMCI_RETX}/${OMCI_REQ} OMCI requests (our replies are not reaching it; DDM cannot see this direction)"
 fi
+# ── the OLT's INSTRUCTIONS, not just its transport health ──────────────────
+# Everything above measures the CHANNEL (did our replies arrive). This measures
+# the CONTENT. OMCI is GPON's management plane -- the equivalent of TR-069 on a
+# DSL CPE -- so a WRITE from the OLT is the ISP reconfiguring us. Missing one is
+# the difference between "edit a config" and a 48 h SLA visit that swaps a
+# working modem and hopes.
+#
+# Verbs partition cleanly. The list is exhaustive, taken from the sprintf sites
+# in Realtek's omci_message.c -- the code that emits these very lines:
+#   read   Get GetNext GetCurrentData MibUpload MibUploadNext GetAllAlarm(Next)
+#   write  Set Create Delete
+#   act    StartSwDownload DownloadSection EndSwDownload ActivateSw CommitSw
+#          Reboot MibReset SyncTime Test
+#
+# ` Verb(` is anchored on BOTH sides so ` SetRsp(` cannot match ` Set(`. The
+# `…Rsp` lines are OUR replies -- never mistake our own words for an
+# instruction. Read the matching Rsp for `Result=0x0` to learn if it took.
+#
+# ⛔ Deliberately NOT alerted: `MibReset` is the normal first step of EVERY
+# re-provision (MibReset -> MibUpload -> MibUploadNext xN -- we logged 159 of
+# them in 52 min while the PON was churning), `SyncTime` is a routine PM
+# boundary sync, `Test` is a routine optical measurement. Paging on those would
+# page on healthy provisioning. `DownloadSection` is excluded as a firehose --
+# `StartSwDownload` already fires at the start of the same transfer.
+#
+# Baseline measured 2026-08-11 over 52 min of capture: 8127 lines, and ZERO
+# Set/Create/Delete. This OLT never writes in normal operation, so any hit here
+# is exceptional by construction rather than by a tuned threshold.
+_omci_lines=$(printf '%s\n' "$_omci_body" | grep -c '^\[')
+_omci_writes=$(printf '%s\n' "$_omci_body" | grep -cE ' (Set|Create|Delete)\(')
+
+# CRITICAL -- firmware or reboot. ActivateSw reboots onto the inactive image;
+# CommitSw is what makes it survive a power cycle. Everything before Activate is
+# still reversible, so StartSwDownload is the early warning worth having.
+_omci_crit=$(printf '%s\n' "$_omci_body" \
+    | grep -E ' (StartSwDownload|EndSwDownload|ActivateSw|CommitSw|Reboot)\(' | head -5)
+# HIGH -- the management plane opening up. The ACS chain is ME 340 -> 137 ->
+# 148/157 (server -> address -> credentials/URL); `Ontg Set(...AdminState` is an
+# admin LOCK, which stops all traffic while PLOAM stays O5 -- i.e. it reads
+# exactly like a fibre fault and would send a technician to the wrong problem.
+# `UnknowME` means the OLT reached for an ME this firmware does not implement.
+_omci_mgmt=$(printf '%s\n' "$_omci_body" \
+    | grep -E ' (TR069ManageServer|NetworkAddress|AuthSecMethod|LargeString|IpHostCfgData|TcpUdpCfgData|OnuRemoteDebug|VEIP) (Set|Create|Delete)\(| Ontg Set\([^)]*AdminState| UnknowME ' | head -5)
+# MEDIUM -- data path. A VLAN/bridge change stops our PPPoE frames being
+# delivered; the symptom is an outage, the cause is a config we could match.
+_omci_path=$(printf '%s\n' "$_omci_body" \
+    | grep -E ' (ExtVlanTagOperCfgData|MacBriPortCfgData|VlanTagFilterData|GemPortCtp|Tcont|McastOperProf|Map8021pServProf) (Set|Create|Delete)\(' | head -5)
+
+[ -n "$_omci_crit" ] && err "OLT SENT A FIRMWARE/REBOOT COMMAND: $(printf '%s' "$_omci_crit" | tr '\n' '|')"
+[ -n "$_omci_mgmt" ] && warn "OLT WROTE THE MANAGEMENT PLANE: $(printf '%s' "$_omci_mgmt" | tr '\n' '|')"
+[ -n "$_omci_path" ] && warn "OLT CHANGED THE DATA PATH: $(printf '%s' "$_omci_path" | tr '\n' '|')"
+
 RAW=$(printf '%s\n' "$RAW" | sed '/__OMCILOG_S__/,/__OMCILOG_E__/d')
 
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
@@ -432,7 +484,53 @@ acc eth_leak_mc  "$ETH_LEAK_MC";   ETH_LEAK_MC=$ACC
 # OMCI_RX_B / OMCI_TX_B / USG_BLOCKS are cumulative -- NOT accumulated
 # OMCI_RX_TOT / OMCI_TX_TOT are cumulative -- deliberately NOT passed to acc()
 
-JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s}}' \
+# ── is the LOGGER alive? hardware counter as a positive control ─────────────
+# `Total RX OMCI` is a PON-layer HARDWARE counter; the drain above is produced
+# by omci_app in SOFTWARE. Two independent witnesses to the same event, which
+# together answer a question neither can answer alone:
+#
+#   counter still + drain empty  =>  the OLT said nothing. Honest silence.
+#   counter MOVED + drain empty  =>  the OLT spoke and we did not write it down.
+#
+# ⛔ The instrument will NOT tell you, and this is measured, not hypothetical.
+# On 2026-08-11 `omcicli get logfile` reported "Parsed Mode with Time Stamp,
+# ActionMask 0x3FFFFFFF" -- armed, healthy -- while /tmp/omcilog.par sat at 0
+# bytes for 4.6 h during which the counter advanced by exactly 43 messages every
+# 15 min. ~780 OLT messages lost with the config self-report saying fine
+# throughout. Never accept an instrument's self-report; ask an independent one.
+#
+# The previous re-arm was gated on stick-reboot detection and had fired ZERO
+# times ever -- the logger dies WITHOUT the stick rebooting (uptime climbed
+# straight through the minute capture stopped: 6345 -> 6418). Reboot re-arm
+# stays below (it is faster when it applies); this is the general net.
+#
+# Counter going BACKWARDS is a reboot (it is cumulative since stick boot), not a
+# dead logger -- `-gt` alone excludes that, and the reboot handler owns it.
+OMCI_LOG_DEAD=0
+PREV_RX=$(sqlite3 -readonly "$DB" "SELECT json_extract(json,'\$.omci2.rx_total') FROM pon WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
+case "$OMCI_RX_TOT" in ''|*[!0-9]*) : ;; *)
+    case "$PREV_RX" in ''|*[!0-9]*) : ;; *)
+        if [ "$OMCI_RX_TOT" -gt "$PREV_RX" ] && [ -z "$_omci_body" ]; then
+            OMCI_LOG_DEAD=1
+            # Rate-limited so a stick that refuses to arm cannot turn this into
+            # a per-minute extra CLI session -- that would manufacture the wedge
+            # class this script exists to avoid. Detection still runs every
+            # cycle and is exported, so ops alerts on the FLAG, not the re-arm.
+            _last=$(cat /var/run/.omci-rearm 2>/dev/null || echo 0)
+            case "$_last" in ''|*[!0-9]*) _last=0 ;; esac
+            if [ $(( TS - _last )) -ge 600 ]; then
+                echo "$TS" > /var/run/.omci-rearm
+                if python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK" >/dev/null 2>&1; then
+                    warn "OMCI logger was DEAD (rx_total +$(( OMCI_RX_TOT - PREV_RX )) this cycle with an EMPTY drain) — re-armed mode $OMCI_LOGMODE mask $OMCI_LOGMASK"
+                else
+                    err "OMCI logger DEAD (rx_total +$(( OMCI_RX_TOT - PREV_RX )), empty drain) and re-arm FAILED — the OLT's instructions are not being recorded"
+                fi
+            fi
+        fi ;;
+    esac ;;
+esac
+
+JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s},"omcilog":{"dead":%s,"lines":%s,"writes":%s}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
     "$(alarm 'TX Too Long')" "$(alarm 'TX Mismatch')" \
@@ -455,7 +553,8 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
     "$(nz "$USP_NORM")" "$(nz "$USP_PNRM")" "$(nz "$USP_NOMSG")" \
     "$(nz "$GEM_IDLE")" "$(nz "$GEM_NONIDLE")" "$(nz "$GEM_MFM")" \
     "$(nz "$USG_BLOCKS")" "$(nz "$USG_BYTES")" \
-    "$(nz "$ETH_UNI")" "$(nz "$ETH_MCAST")" "$(nz "$ETH_FWD_MC")" "$(nz "$ETH_LEAK_MC")")
+    "$(nz "$ETH_UNI")" "$(nz "$ETH_MCAST")" "$(nz "$ETH_FWD_MC")" "$(nz "$ETH_LEAK_MC")" \
+    "$OMCI_LOG_DEAD" "${_omci_lines:-0}" "${_omci_writes:-0}")
 
 # Store the raw diag blob ONLY when a field failed to parse (JSON contains a
 # null). Parsers are verified against real output, so a healthy row is all
