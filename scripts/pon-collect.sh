@@ -126,7 +126,21 @@ OMCI_LOGMASK=0x3FFFFFFF
 # only after we have the bytes in hand. Read and destroy must never share a
 # command line -- that coupling is the original bug: on a timeout the socket
 # dies before we get the output while the stick's shell still runs the truncate.
-OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; cat /var/tmp/omcilog.par 2>/dev/null; cat /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
+# ⭐ FILTER ON THE STICK. Measured 2026-08-11 by pulling a whole file byte-exact
+# over nc: apparent size 1,781,963 B, of which **1,769,817 were NUL** and only
+# 4,126 were text. The file is ~99% hole, and the hole is OUR doing: `: > file`
+# resets the size but NOT omci_app's retained file offset, so its next write
+# lands at the old offset and re-creates a hole of exactly the previous length.
+# `cat` then drags ~1.7 MB of zeros through telnet and times out -- which is the
+# "wedge", the empty drains, and the six hours of "the logger is dead".
+#
+# Every real line begins with the `[monotonic.ms]` stamp, so one sed collapses
+# it: 1,781,963 B -> 12,191 B, a 146x reduction, and 12 KB crosses telnet
+# comfortably. This is why nc turned out to be unnecessary for the routine path:
+# there was never 1.7 MB of data to move, only 1.7 MB of our own padding.
+# (nc IS the right tool for a one-off byte-exact pull -- it is what diagnosed
+# this, since telnet strips NULs and the stick has no od/wc/du to see them.)
+OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; sed -n '/^\[/p' /var/tmp/omcilog.par 2>/dev/null; sed -n '/^\[/p' /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
 # ── MIB state poll — the durable half of the management-plane record ────────
 # The OMCI log is EPHEMERAL by construction: /tmp on the stick is tmpfs, the
 # logger is runtime-only, and an `ActivateSw` REBOOTS the stick -- so the one
@@ -227,9 +241,13 @@ OMCILOG=$(printf '%s' "$_omci_body" | head -c 64000 | sed "s/'/''/g")
 OMCI_RAMGUARD=$(( 4 * 1024 * 1024 ))
 if [ "${_omci_got:-0}" -gt 0 ] 2>/dev/null; then
     python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
-    if [ "$_omci_ondisk" -gt "$(( _omci_got + 4096 ))" ] 2>/dev/null; then
-        warn "OMCI drain SHORT: stick held ${_omci_ondisk} B, captured ${_omci_got} B — remainder lost to truncation. cat over telnet cannot carry this volume."
-    fi
+    # ⚠ Do NOT compare captured bytes against the file's apparent size -- they
+    # are not the same quantity. Apparent size is ~99% NUL hole (see above); the
+    # capture is the filtered text. A naive `ondisk > got` test would warn on
+    # every healthy cycle. Only a *shrinking* line count is meaningful, and the
+    # honest signal for a partial read is the drop of the closing sentinel,
+    # which shows up as a short/empty body and is handled below.
+    :
 elif [ "${_omci_ondisk:-0}" -gt "$OMCI_RAMGUARD" ] 2>/dev/null; then
     python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
     err "OMCI log ${_omci_ondisk} B UNREADABLE over telnet and past the ${OMCI_RAMGUARD} B ram guard — truncated UNREAD to protect omci_app (ramfs is 23 MB total and omci_app is the GPON MAC). This is data loss, chosen deliberately over risking the fibre."
