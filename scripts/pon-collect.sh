@@ -118,7 +118,17 @@ OMCIDRAIN="echo __OMCI''LOG_S__; cat /tmp/omcilog.par /tmp/omcilog 2>/dev/null; 
 # Sentinel-wrapped (written __MIB''_* so the echoed command cannot self-match)
 # and stripped from RAW before the counter parsers run, for the same reason the
 # OMCI drain is: `Key: value` text must never collide with a counter label.
-MIBPOLL="echo __MIB''_S__; omcicli mib get 7; omcicli mib get 340; echo __MIB''_E__"
+# ME 329 = VEIP, and ME 137/148/157 = the ACS chain hanging off ME 340:
+#   340 --AcsAddress--> 137 --SecurityPointer--> 148 (username/password/realm)
+#                           \--AddressPointer--> 157 (the ACS URL, <=375 B)
+# All three read EMPTY today (no instances). We poll them so that if the ISP
+# ever populates them we capture the ACTUAL PAYLOAD -- the URL and credentials
+# they intend for this line -- durably, instead of only noticing that a write
+# happened. That distinction matters because the log that would have shown the
+# write is precisely the thing that can be dark (it is dark right now).
+#
+# ⛔ Reading the ACS pointer is NOT following it. Nothing here dials out.
+MIBPOLL="echo __MIB''_S__; omcicli mib get 7; omcicli mib get 340; omcicli mib get 329; omcicli mib get 137; omcicli mib get 148; omcicli mib get 157; echo __MIB''_E__"
 poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" "$MIBPOLL" 2>&1; }
 is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
@@ -265,6 +275,13 @@ mibf() {   # mibf <EntityID-suffix> <Field>
 SW0_VER=$(mibf 00 Version);  SW0_ACT=$(mibf 00 Active);  SW0_COM=$(mibf 00 Committed)
 SW1_VER=$(mibf 01 Version);  SW1_ACT=$(mibf 01 Active);  SW1_COM=$(mibf 01 Committed)
 TR69_ADM=$(mibf 0601 AdminState); TR69_ACS=$(mibf 0601 AcsAddress); TR69_TAG=$(mibf 0601 AssociateTag)
+# VEIP shares entity id 0x0601 with ME 340 (that is WHY 340 exists -- G.988 ties
+# its identity to a VEIP instance), so pull its fields by their distinct names.
+VEIP_ADM=$(mibf 0601 OperState)
+# The ACS chain. Instance-count only: if any of these stops being 0 the ISP has
+# begun configuring remote management, and the full text is in the raw blob.
+_chain=$(printf '%s\n' "$_mib_body" | grep -c '^EntityID')
+ACS_CHAIN=$(printf '%s\n' "$_mib_body" | sed -n '/NetworkAddress/,$p' | grep -c '^EntityID')
 
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
 # `<label> : <value>` — grep the label, take the last colon-separated integer.
@@ -556,7 +573,7 @@ acc eth_leak_mc  "$ETH_LEAK_MC";   ETH_LEAK_MC=$ACC
 # mere absence of new evidence.
 OMCI_DEAD_STATE=/var/run/.omci-dead
 if [ "${_omci_lines:-0}" -gt 0 ] 2>/dev/null && [ -f "$OMCI_DEAD_STATE" ]; then
-    rm -f "$OMCI_DEAD_STATE"
+    rm -f "$OMCI_DEAD_STATE"; rm -f /var/run/.omci-rearm-n
     event "OMCI logger RECOVERED — ${_omci_lines} lines captured this cycle"
 fi
 PREV_RX=$(sqlite3 -readonly "$DB" "SELECT json_extract(json,'\$.omci2.rx_total') FROM pon WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
@@ -572,10 +589,28 @@ case "$OMCI_RX_TOT" in ''|*[!0-9]*) : ;; *)
             case "$_last" in ''|*[!0-9]*) _last=0 ;; esac
             if [ $(( TS - _last )) -ge 600 ]; then
                 echo "$TS" > /var/run/.omci-rearm
-                if python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK" >/dev/null 2>&1; then
-                    warn "OMCI logger was DEAD (rx_total +$(( OMCI_RX_TOT - PREV_RX )) this cycle with an EMPTY drain) — re-armed mode $OMCI_LOGMODE mask $OMCI_LOGMASK"
+                # ⛔ NEVER say "re-armed" here. Measured 2026-08-11: on this
+                # firmware state `omcicli set logfile` is a NO-OP in BOTH
+                # directions -- setting mode 0 (off) left `get logfile` still
+                # reporting "Parsed Mode with Time Stamp, 0x3FFFFFFF", and two
+                # re-arms 15 min apart restored exactly zero capture. `get` is
+                # not reading live state and `set` is not writing it, so the
+                # command's success tells us nothing at all.
+                #
+                # We still ATTEMPT it -- it demonstrably worked earlier the same
+                # day, so something got stuck rather than being absent -- but the
+                # claim of success belongs to the LATCH, which clears only when a
+                # drain actually returns lines. Reporting a heal we have not
+                # observed would make our own telemetry lie exactly the way the
+                # stick's does, and that is the failure mode of the whole day.
+                python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK" >/dev/null 2>&1
+                _tries=$(cat /var/run/.omci-rearm-n 2>/dev/null || echo 0)
+                case "$_tries" in ''|*[!0-9]*) _tries=0 ;; esac
+                _tries=$(( _tries + 1 )); echo "$_tries" > /var/run/.omci-rearm-n
+                if [ "$_tries" -ge 3 ]; then
+                    err "OMCI logger DEAD and re-arm INEFFECTIVE after ${_tries} attempts (rx_total +$(( OMCI_RX_TOT - PREV_RX )) this cycle, empty drain). \`omcicli set logfile\` is a no-op in this state — the only known restore is a STICK REBOOT, which is an ~80 s WAN outage on a single fibre and needs an operator decision. The OLT's instructions are NOT being recorded meanwhile."
                 else
-                    err "OMCI logger DEAD (rx_total +$(( OMCI_RX_TOT - PREV_RX )), empty drain) and re-arm FAILED — the OLT's instructions are not being recorded"
+                    warn "OMCI logger DEAD (rx_total +$(( OMCI_RX_TOT - PREV_RX )) this cycle with an EMPTY drain) — re-arm ATTEMPTED (attempt ${_tries}); success is unproven until a drain returns lines and clears the latch"
                 fi
             fi
         fi ;;
