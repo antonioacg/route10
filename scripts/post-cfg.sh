@@ -544,6 +544,24 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
     # that would let a DoH fallback beat AdGuard and return the stub. Both required.
     [ "$(uci -q get dhcp.@dnsmasq[0].strictorder 2>/dev/null || true)" = "1" ] || { uci set dhcp.@dnsmasq[0].strictorder=1; DNS_DIRTY=1; }
     [ "$(uci -q get dhcp.@dnsmasq[0].allservers  2>/dev/null || true)" = "0" ] || { uci set dhcp.@dnsmasq[0].allservers=0;  DNS_DIRTY=1; }
+    # noresolv ON: ignore /tmp/resolv.conf.d/resolv.conf.auto entirely. Every PPP
+    # reconnect injects the ISP's resolvers there, and they were live — measured
+    # 2026-08-11 after the outage: 2001:4860:4860::8844 and 190.109.67.237/.240
+    # present as dnsmasq upstreams. `strict-order` kept 127.0.0.1#5300 first so
+    # they took 0 queries, which is exactly what made it invisible.
+    #
+    # They are a LATENT BYPASS, not spare capacity: if routedns is unavailable,
+    # dnsmasq would fall through to ISP DNS directly — ad-blocking silently OFF,
+    # and $SPLIT_DOMAIN names answered by a resolver that has never heard of
+    # them instead of SERVFAILing. A wrong answer is worse than no answer here,
+    # and "route10 is the SOLE resolver" is the documented intent.
+    #
+    # Cost, stated plainly: a dead routedns now takes LAN DNS down instead of
+    # degrading it. That is deliberate — routedns already carries its own
+    # AdGuard→DoH fail-back, so the ISP rung was never the redundancy it looked
+    # like, and a dead resolver is a fault worth surfacing rather than papering
+    # over with answers we do not want.
+    [ "$(uci -q get dhcp.@dnsmasq[0].noresolv 2>/dev/null || true)" = "1" ] || { uci set dhcp.@dnsmasq[0].noresolv=1; DNS_DIRTY=1; }
     # rebind allow-list: AdGuard returns a PRIVATE v4 (.240) for the PUBLIC
     # $SPLIT_DOMAIN — textbook DNS-rebind shape. Allow it so the answer survives if
     # rebind_protection is ever enabled (keeps the cloud's /manage.alta.inc/ entry).
