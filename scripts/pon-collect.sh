@@ -341,8 +341,21 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
 # bounded window, so the ~6 KB/min only applies while something is wrong.
 # Only rows with actual OMCI text are stored -- an empty drain writes nothing,
 # so the table stays empty rather than filling with blank per-minute rows.
+# 7-day retention, NOT the 30 d the other tables use. Measured 2026-08-11:
+# a faulting PON produces ~9.6 KB/min of OMCI text = ~13.8 MB/day, so 30 d
+# would be ~415 MB against a 500 MB /a/obs budget. That does not merely
+# overflow -- it makes the stats-archive janitor trim OLDEST across all of
+# /a/obs, so bulk forensic text would evict the downsampled 2-year rollups.
+# Backwards: the raw log is the thing with the shortest useful life here.
+#
+# Nothing durable is lost by the shorter window, because the SIGNAL is already
+# rolled up elsewhere at full retention: omci_tx.req / omci_tx.retx are
+# per-minute counts in the `pon` row (30 d) and exported as
+# route10_pon_omci_{requests,retransmits}_total. This table holds the TEXT,
+# which is forensic and wanted for days. 7 d worst case is ~97 MB (19% of
+# budget) and only while continuously faulting; a healthy PON is far quieter.
 OMCI_SQL=""
-[ -n "$OMCILOG" ] && OMCI_SQL="INSERT OR IGNORE INTO omci VALUES($TS,'$OMCILOG');DELETE FROM omci WHERE ts < $TS - 30*86400;"
+[ -n "$OMCILOG" ] && OMCI_SQL="INSERT OR IGNORE INTO omci VALUES($TS,'$OMCILOG');DELETE FROM omci WHERE ts < $TS - 7*86400;"
 
 _raw_keep() { printf '%s' "$RAW" | head -c 6000 | sed "s/'/''/g"; }
 case "$JSON" in
