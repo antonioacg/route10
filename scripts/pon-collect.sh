@@ -327,7 +327,28 @@ _omci_crit=$(printf '%s\n' "$_omci_body" \
 # exactly like a fibre fault and would send a technician to the wrong problem.
 # `UnknowME` means the OLT reached for an ME this firmware does not implement.
 _omci_mgmt=$(printf '%s\n' "$_omci_body" \
-    | grep -E ' (TR069ManageServer|NetworkAddress|AuthSecMethod|LargeString|IpHostCfgData|TcpUdpCfgData|OnuRemoteDebug|VEIP) (Set|Create|Delete)\(| Ontg Set\([^)]*AdminState| UnknowME ' | head -5)
+    | grep -E ' (TR069ManageServer|NetworkAddress|AuthSecMethod|LargeString|IpHostCfgData|TcpUdpCfgData|OnuRemoteDebug|VEIP) (Set|Create|Delete)\(| Ontg Set\([^)]*AdminState' | head -5)
+
+# ── UnknowME: worth knowing ONCE per ME number, never every cycle ────────────
+# Measured on the first real capture: the OLT probes `UnknowME 351` every 15 min
+# and retransmits it (same TCI twice) because we cannot answer. 351 is in
+# G.988's vendor range 350-399, adjacent to the Huawei MEs this firmware
+# emulates (350/370/373) -- the OLT is talking Huawei-vendor to what it believes
+# is the EG8145X6 we present as.
+#
+# It was originally in the management-write tier above. That was wrong twice: it
+# is a READ, not a write, and at a 15-minute cadence it would warn ~96x/day
+# forever. An alert that always fires is an alert nobody reads, and it would
+# bury the one that matters. So: remember which ME numbers we have seen and
+# report only NEW ones. A genuinely new vendor ME is a real event -- it is the
+# most likely shape for an ISP pushing config to a device it thinks is an HGU.
+_seen=/cfg/scripts/.omci-unknown-me
+for _me in $(printf '%s\n' "$_omci_body" | sed -n 's/.* UnknowME \([0-9]*\).*/\1/p' | sort -u); do
+    if ! grep -qx "$_me" "$_seen" 2>/dev/null; then
+        echo "$_me" >> "$_seen"
+        warn "OLT probed a vendor ME this firmware does NOT implement: UnknowME $_me (first time seen; G.988 350-399 is vendor-specific, and we present as a Huawei EG8145X6). We cannot answer it, so the OLT retransmits. Watch for config following it."
+    fi
+done
 # MEDIUM -- data path. A VLAN/bridge change stops our PPPoE frames being
 # delivered; the symptom is an outage, the cause is a config we could match.
 _omci_path=$(printf '%s\n' "$_omci_body" \
