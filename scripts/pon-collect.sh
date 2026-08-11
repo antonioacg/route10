@@ -73,7 +73,7 @@ trap 'rm -rf "$LOCK"' EXIT
 TS=$(date +%s)
 
 # One clean session: uptime (reboot detection) + the diag batch via stdin pipe.
-DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\ngpon show counter global active\ngpon show counter global us-plm\ngpon show counter global us-phy\ngpon show counter global ds-omci\ngpon show counter global ds-bw\ngpon show counter global us-omci\ngpon show counter global ds-gem\ngpon show counter global ds-eth\ngpon show counter global us-dbr\nexit\n" | diag'
+DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\ngpon show counter global active\ngpon show counter global us-plm\ngpon show counter global us-phy\ngpon show counter global ds-omci\ngpon show counter global ds-bw\ngpon show counter global us-omci\ngpon show counter global ds-gem\ngpon show counter global ds-eth\ngpon show counter global us-dbr\ngpon show counter global us-gem\nexit\n" | diag'
 
 # ── OMCI message log drain ──────────────────────────────────────────────────
 # The stick can log OMCI messages (the OLT's actual instruction channel) via
@@ -278,6 +278,42 @@ US_DBRU=$(val "TX DBRu")
 OMCI_RX_TOT=$(val "Total RX OMCI")
 OMCI_TX_TOT=$(val "total TX OMCI")
 
+# ── third wave: the remainder, so the set is COMPLETE ───────────────────────
+# Everything the stick's `show counter global` groups expose is now collected.
+# The previous cut kept only what looked diagnostic and dropped 22 fields as
+# "redundant" -- a judgement that does not survive 2026-08-11, where two hours
+# were spent blind because the counter that mattered had been judged not worth
+# collecting. Each field is ~10 B/row; optionality is worth more than the bytes.
+#
+# ⚠ SOME OF THESE SATURATE RATHER THAN WRAP. Observed 65535 on TX BOH, Total TX
+# PLOAM, TX NoMsg PLOAM and TX GEM Blocks, and 4294967295 on D/S GEM Idle, when
+# a long interval elapsed between reads. A saturated sample is a FLOOR, not a
+# true count -- so a delta spanning a gap under-reports and can never be trusted
+# as an absolute. Treat these as "did activity occur" signals, not volumes.
+FEC_COR_BITS=$(val "FEC Correct bits")
+FEC_COR_BYTES=$(val "FEC Correct bytes")
+PLEN_OK=$(val "PLEN correct")
+USP_TOTAL=$(val "Total TX PLOAM")
+USP_PROC=$(val "Process TX PLOAM")
+USP_URG=$(val "TX Urgent PLOAM")
+USP_PURG=$(val "Proc Urg PLOAM")
+USP_NORM=$(val "TX Normal PLOAM")
+USP_PNRM=$(val "Proc Nrm PLOAM")
+USP_NOMSG=$(val "TX NoMsg PLOAM")
+USO_PROC=$(val "Process OMCI")
+GEM_IDLE=$(val "D/S GEM Idle")
+GEM_NONIDLE=$(val "D/S GEM Non Idle")
+GEM_MFM=$(val "Multi Flow Match")
+USG_BYTES=$(val "TX GEM Bytes")
+ETH_UNI=$(val "Total Unicast")
+ETH_MCAST=$(val "Total Multicast")
+ETH_FWD_MC=$(val "Fwd Multicast")
+ETH_LEAK_MC=$(val "Leak Multicast")
+# cumulative-since-boot (measured): byte counts and TX GEM Blocks
+OMCI_RX_B=$(val "RX OMCI byte")
+OMCI_TX_B=$(val "TX OMCI byte")
+USG_BLOCKS=$(val "TX GEM Blocks")
+
 # Re-activation loop alert. These counters reset on read, so RANGING_REQ is
 # already "rangings in the last minute" -- no rate maths needed. Threshold 3
 # tolerates a legitimate one-off re-activation (recovery, stick reboot) while
@@ -351,9 +387,29 @@ acc gem_mislen   "$GEM_MISLEN";  GEM_MISLEN=$ACC
 acc gem_ovil     "$GEM_OVIL";    GEM_OVIL=$ACC
 acc eth_fcs      "$ETH_FCS";     ETH_FCS=$ACC
 acc us_dbru      "$US_DBRU";     US_DBRU=$ACC
+acc fec_cor_bits "$FEC_COR_BITS";  FEC_COR_BITS=$ACC
+acc fec_cor_byte "$FEC_COR_BYTES"; FEC_COR_BYTES=$ACC
+acc plen_ok      "$PLEN_OK";       PLEN_OK=$ACC
+acc usp_total    "$USP_TOTAL";     USP_TOTAL=$ACC
+acc usp_proc     "$USP_PROC";      USP_PROC=$ACC
+acc usp_urg      "$USP_URG";       USP_URG=$ACC
+acc usp_purg     "$USP_PURG";      USP_PURG=$ACC
+acc usp_norm     "$USP_NORM";      USP_NORM=$ACC
+acc usp_pnrm     "$USP_PNRM";      USP_PNRM=$ACC
+acc usp_nomsg    "$USP_NOMSG";     USP_NOMSG=$ACC
+acc uso_proc     "$USO_PROC";      USO_PROC=$ACC
+acc gem_idle     "$GEM_IDLE";      GEM_IDLE=$ACC
+acc gem_nonidle  "$GEM_NONIDLE";   GEM_NONIDLE=$ACC
+acc gem_mfm      "$GEM_MFM";       GEM_MFM=$ACC
+acc usg_bytes    "$USG_BYTES";     USG_BYTES=$ACC
+acc eth_uni      "$ETH_UNI";       ETH_UNI=$ACC
+acc eth_mcast    "$ETH_MCAST";     ETH_MCAST=$ACC
+acc eth_fwd_mc   "$ETH_FWD_MC";    ETH_FWD_MC=$ACC
+acc eth_leak_mc  "$ETH_LEAK_MC";   ETH_LEAK_MC=$ACC
+# OMCI_RX_B / OMCI_TX_B / USG_BLOCKS are cumulative -- NOT accumulated
 # OMCI_RX_TOT / OMCI_TX_TOT are cumulative -- deliberately NOT passed to acc()
 
-JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s}}' \
+JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
     "$(alarm 'TX Too Long')" "$(alarm 'TX Mismatch')" \
@@ -369,7 +425,14 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
     "$(nz "$BW_TOTAL")" "$(nz "$BW_OVF")" \
     "$(nz "$GEM_LOS")" "$(nz "$GEM_HEC")" "$(nz "$GEM_MISLEN")" "$(nz "$GEM_OVIL")" \
     "$(nz "$ETH_FCS")" "$(nz "$US_DBRU")" \
-    "$(nz "$OMCI_CRC")" "$(nz "$OMCI_RX_TOT")" "$(nz "$OMCI_TX_TOT")")
+    "$(nz "$OMCI_CRC")" "$(nz "$OMCI_RX_TOT")" "$(nz "$OMCI_TX_TOT")" \
+    "$(nz "$OMCI_RX_B")" "$(nz "$OMCI_TX_B")" "$(nz "$USO_PROC")" \
+    "$(nz "$FEC_COR_BITS")" "$(nz "$FEC_COR_BYTES")" "$(nz "$PLEN_OK")" \
+    "$(nz "$USP_TOTAL")" "$(nz "$USP_PROC")" "$(nz "$USP_URG")" "$(nz "$USP_PURG")" \
+    "$(nz "$USP_NORM")" "$(nz "$USP_PNRM")" "$(nz "$USP_NOMSG")" \
+    "$(nz "$GEM_IDLE")" "$(nz "$GEM_NONIDLE")" "$(nz "$GEM_MFM")" \
+    "$(nz "$USG_BLOCKS")" "$(nz "$USG_BYTES")" \
+    "$(nz "$ETH_UNI")" "$(nz "$ETH_MCAST")" "$(nz "$ETH_FWD_MC")" "$(nz "$ETH_LEAK_MC")")
 
 # Store the raw diag blob ONLY when a field failed to parse (JSON contains a
 # null). Parsers are verified against real output, so a healthy row is all

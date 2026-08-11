@@ -317,7 +317,29 @@ SELECT
   'route10_pon_us_dbru_sent_total '      || COALESCE(json_extract(json,'\$.us2.dbru'),'NaN')       || char(10) ||
   'route10_pon_omci_crc_error_total '    || COALESCE(json_extract(json,'\$.omci2.crc_err'),'NaN')  || char(10) ||
   'route10_pon_ds_omci_received_total '  || COALESCE(json_extract(json,'\$.omci2.rx_total'),'NaN') || char(10) ||
-  'route10_pon_us_omci_sent_total '      || COALESCE(json_extract(json,'\$.omci2.tx_total'),'NaN')
+  'route10_pon_us_omci_sent_total '      || COALESCE(json_extract(json,'\$.omci2.tx_total'),'NaN') || char(10) ||
+  'route10_pon_ds_omci_received_bytes_total ' || COALESCE(json_extract(json,'\$.omci2.rx_bytes'),'NaN') || char(10) ||
+  'route10_pon_us_omci_sent_bytes_total '     || COALESCE(json_extract(json,'\$.omci2.tx_bytes'),'NaN') || char(10) ||
+  'route10_pon_us_omci_processed_total '      || COALESCE(json_extract(json,'\$.omci2.us_proc'),'NaN')  || char(10) ||
+  'route10_pon_ds_fec_corrected_bits_total '  || COALESCE(json_extract(json,'\$.ds3.fec_cor_bits'),'NaN')  || char(10) ||
+  'route10_pon_ds_fec_corrected_bytes_total ' || COALESCE(json_extract(json,'\$.ds3.fec_cor_bytes'),'NaN') || char(10) ||
+  'route10_pon_ds_plen_correct_total '        || COALESCE(json_extract(json,'\$.ds3.plen_ok'),'NaN')       || char(10) ||
+  'route10_pon_us_ploam_sent_total{kind=\"all\"} '      || COALESCE(json_extract(json,'\$.usp.total'),'NaN')    || char(10) ||
+  'route10_pon_us_ploam_sent_total{kind=\"processed\"} '|| COALESCE(json_extract(json,'\$.usp.proc'),'NaN')     || char(10) ||
+  'route10_pon_us_ploam_sent_total{kind=\"urgent\"} '   || COALESCE(json_extract(json,'\$.usp.urg'),'NaN')      || char(10) ||
+  'route10_pon_us_ploam_sent_total{kind=\"proc_urgent\"} ' || COALESCE(json_extract(json,'\$.usp.proc_urg'),'NaN') || char(10) ||
+  'route10_pon_us_ploam_sent_total{kind=\"normal\"} '   || COALESCE(json_extract(json,'\$.usp.normal'),'NaN')   || char(10) ||
+  'route10_pon_us_ploam_sent_total{kind=\"proc_normal\"} ' || COALESCE(json_extract(json,'\$.usp.proc_nrm'),'NaN') || char(10) ||
+  'route10_pon_us_ploam_sent_total{kind=\"nomsg\"} '    || COALESCE(json_extract(json,'\$.usp.nomsg'),'NaN')    || char(10) ||
+  'route10_pon_ds_gem_frames_total{kind=\"idle\"} '     || COALESCE(json_extract(json,'\$.gem2.idle'),'NaN')    || char(10) ||
+  'route10_pon_ds_gem_frames_total{kind=\"non_idle\"} ' || COALESCE(json_extract(json,'\$.gem2.nonidle'),'NaN') || char(10) ||
+  'route10_pon_ds_gem_multi_flow_match_total ' || COALESCE(json_extract(json,'\$.gem2.multiflow'),'NaN') || char(10) ||
+  'route10_pon_us_gem_blocks_total ' || COALESCE(json_extract(json,'\$.gem2.us_blocks'),'NaN') || char(10) ||
+  'route10_pon_us_gem_bytes_total '  || COALESCE(json_extract(json,'\$.gem2.us_bytes'),'NaN')  || char(10) ||
+  'route10_pon_ds_eth_frames_total{kind=\"unicast\"} '      || COALESCE(json_extract(json,'\$.eth2.unicast'),'NaN')    || char(10) ||
+  'route10_pon_ds_eth_frames_total{kind=\"multicast\"} '    || COALESCE(json_extract(json,'\$.eth2.multicast'),'NaN')  || char(10) ||
+  'route10_pon_ds_eth_frames_total{kind=\"fwd_multicast\"} '|| COALESCE(json_extract(json,'\$.eth2.fwd_mcast'),'NaN')  || char(10) ||
+  'route10_pon_ds_eth_frames_total{kind=\"leak_multicast\"} '|| COALESCE(json_extract(json,'\$.eth2.leak_mcast'),'NaN')
 FROM pon ORDER BY ts DESC LIMIT 1;
 "
 
