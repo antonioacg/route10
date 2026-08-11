@@ -475,7 +475,43 @@ which inverts the conclusion: buy retail, run stable.
 **XGS1250-12 fits us**: one SFP+ is all the BiDi uplink needs, its 10GBASE-T ports
 cover the two 2.5G clients, and the 1G ports cover the rest. ⚠ Verify NBASE-T
 negotiates 2.5G and that the 1G ports still do 100M (port 2 runs a device at
-`100Full`). ⚠ A1/B1 revisions exist here too — check which you receive.
+`100Full`).
+
+⚠ **It is NOT the only stable option** — that impression came from it being the one
+with a confirmed Amazon Brazil listing, not from the support matrix. Variants actually
+built per branch, read from `target/linux/realtek/image/rtl930x.mk`:
+
+| Model | 25.12 stable | `main` |
+|---|---|---|
+| XGS1210-12 | **a1 + b1** | a1 + b1 |
+| XGS1250-12 | **a1 + b1** | a1 + b1 |
+| XGS1010-12 | ⚠ **a1 ONLY** | a1 + b1 |
+
+**XGS1010-12 is the value play** at ~US$184–227 on Amazon.com.br — roughly half the
+1250, and its 2x2.5G + 2xSFP+ is a *better* fit for our clients than the 1250's
+10GBASE-T. ⛔ But stable has **no B1 image**: receive a B1 and you are on snapshot.
+
+### A1 vs B1 — it is the PHY silicon and its MDIO addressing
+
+Read from the device trees, not relayed. Entire functional diff for **XGS1210-12**:
+
+```
+A1:  PHY_C45_PAIR_ORDER(24, 8, 1)   |   B1:  PHY_C45(24, 1)
+A1:  PHY_C45_PAIR_ORDER(25, 9, 1)   |   B1:  PHY_C45(25, 2)
+```
+
+Different 2.5G PHY part, addressed differently on MDIO (A1 at 8/9 with paired page
+ordering; B1 at 1/2, plain C45).
+
+**XGS1250-12** is explicit — A1's DTS comments *"External Aquantia 113C PHYs"*, all
+three at `reg = <8>`, plus `&port24 { managed = "in-band-status" }`; B1 puts them at
+`reg = <0/1/2>` and drops in-band-status.
+
+**Consequence:** the wrong image means the switch cannot talk to its own PHYs — ports
+do not come up or do not negotiate. On the 1210/1250 that is a pick-the-right-file
+problem (both revisions ship in stable); on the 1010-12 it is a support risk. The
+revision is on the box label and in the stock web UI before flashing — but **not in
+any marketplace listing**, so ask the seller in writing.
 
 At **~US$347 domestic** against the Hasivo F1100W's **~US$367 landed**, the retail
 route is cheaper *and* avoids snapshot firmware, blind revision roulette and import
