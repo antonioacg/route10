@@ -102,6 +102,34 @@ if [ "$(uci -q get system.@system[0].cronloglevel)" != "9" ]; then
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 fi
 
+# ── syslog ring size: keep local forensics alive during an incident ──────────
+# OpenWrt's default 64 KiB ring held **14 SECONDS** of history during the
+# 2026-08-11 outage (measured: 16:10:27 → 16:10:41, 552 of 573 lines routedns).
+# route10.pon-collect, .odi-health, .omci and .connlimit were ALL at zero lines
+# — every alert we emit was evicted before anyone could read it locally, and
+# the documented `grep " route10\." /var/log/messages` one-liner could only
+# ever return routedns.
+#
+# Cause is not a bug: routedns logs a WARN per failed resolution, so when DNS
+# upstreams die it emits ~285 KiB/min. The ring therefore collapses precisely
+# during the incident it exists to record — the same failure shape as a health
+# check that cannot pass while the thing it guards is degraded.
+#
+# ⚠ Deliberately NOT fixing this by quieting routedns. That stream's VOLUME is
+# load-bearing evidence for a sustained-failover alert on the ops side (they
+# asked to be told first if we ever gate it), so the volume is signal, not
+# cost. Widening our own buffer fixes our forensics without touching theirs.
+#
+# 8 MiB ≈ 28 min under that flood and days when healthy; it costs 8 MiB of the
+# ~476 MB free, i.e. under 2%. Not portal-modeled (Alta's cloud config has no
+# log-buffer key), and uci system is tmpfs/cloud-rebuilt → re-asserted here.
+if [ "$(uci -q get system.@system[0].log_size)" != "8192" ]; then
+    uci set system.@system[0].log_size='8192'
+    uci commit system
+    /etc/init.d/log restart >/dev/null 2>&1 || true
+    log "syslog ring resized to 8 MiB (64 KiB held only 14 s under routedns flood)"
+fi
+
 # ── LAN NTP server ───────────────────────────────────────────────────────────
 # Serve time on the LAN so a client without a battery-backed RTC can seed its
 # clock at boot without a WAN round-trip. Requested via the seam; the value
