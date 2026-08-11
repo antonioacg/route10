@@ -96,7 +96,30 @@ DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\n
 OMCI_LOGMODE=6
 OMCI_LOGMASK=0x3FFFFFFF
 OMCIDRAIN="echo __OMCI''LOG_S__; cat /tmp/omcilog.par /tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__; : > /tmp/omcilog.par; : > /tmp/omcilog"
-poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" 2>&1; }
+# ── MIB state poll — the durable half of the management-plane record ────────
+# The OMCI log is EPHEMERAL by construction: /tmp on the stick is tmpfs, the
+# logger is runtime-only, and an `ActivateSw` REBOOTS the stick -- so the one
+# event most worth catching is also the one most able to erase its own evidence.
+# The MIB is the durable complement: it is the state the log describes, it
+# survives the reboot, and it cannot be missed by a truncated drain or a dead
+# recorder. Log = early warning (StartSwDownload arrives before Activate);
+# MIB = authoritative after the fact. Neither alone is enough.
+#
+# ME 7  = software images, two banks. Measured 2026-08-11:
+#           slot 0  Active 0 Committed 0 Valid 1  V5R022C00S265
+#           slot 1  Active 1 Committed 1 Valid 1  V1.2.2-221209  <- running
+#         A push lands in the INACTIVE bank (slot 0 here), so a Version change
+#         there is the earliest durable evidence. Activate flips Active; only
+#         Commit makes it survive a power cycle.
+# ME 340 = the TR-069/ACS hook. Measured: AdminState 1 (locked), AcsAddress
+#         0xffff (null), AssociateTag 0xffff (null) -- i.e. present, wired to
+#         the VEIP at the same entity id 0x0601, and switched OFF. Any movement
+#         off those three values is the ISP turning on remote management.
+# Sentinel-wrapped (written __MIB''_* so the echoed command cannot self-match)
+# and stripped from RAW before the counter parsers run, for the same reason the
+# OMCI drain is: `Key: value` text must never collide with a counter label.
+MIBPOLL="echo __MIB''_S__; omcicli mib get 7; omcicli mib get 340; echo __MIB''_E__"
+poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" "$MIBPOLL" 2>&1; }
 is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
 RAW=$(poll_stick)
@@ -225,6 +248,23 @@ _omci_path=$(printf '%s\n' "$_omci_body" \
 [ -n "$_omci_path" ] && warn "OLT CHANGED THE DATA PATH: $(printf '%s' "$_omci_path" | tr '\n' '|')"
 
 RAW=$(printf '%s\n' "$RAW" | sed '/__OMCILOG_S__/,/__OMCILOG_E__/d')
+
+# ── MIB state: parse, then strip from RAW before the counter parsers see it ──
+_mib_body=$(printf '%s\n' "$RAW" | sed -n '/__MIB_S__/,/__MIB_E__/p' | sed '1d;$d')
+RAW=$(printf '%s\n' "$RAW" | sed '/__MIB_S__/,/__MIB_E__/d')
+
+# Field out of a specific ME instance. Blocks are `EntityID: 0x..` followed by
+# `Key: value` lines, so track which instance we are inside and take the first
+# matching key. Empty when the ME has no instances (ME 137/148/157 read that way
+# today) -- an absent value must stay empty, never default to something benign.
+mibf() {   # mibf <EntityID-suffix> <Field>
+    printf '%s\n' "$_mib_body" | awk -v id="EntityID: 0x$1" -v f="$2: " '
+        /^EntityID:/ { cur = ($0 == id); next }
+        cur && index($0, f) == 1 { print substr($0, length(f) + 1); exit }'
+}
+SW0_VER=$(mibf 00 Version);  SW0_ACT=$(mibf 00 Active);  SW0_COM=$(mibf 00 Committed)
+SW1_VER=$(mibf 01 Version);  SW1_ACT=$(mibf 01 Active);  SW1_COM=$(mibf 01 Committed)
+TR69_ADM=$(mibf 0601 AdminState); TR69_ACS=$(mibf 0601 AcsAddress); TR69_TAG=$(mibf 0601 AssociateTag)
 
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
 # `<label> : <value>` — grep the label, take the last colon-separated integer.
@@ -506,12 +546,24 @@ acc eth_leak_mc  "$ETH_LEAK_MC";   ETH_LEAK_MC=$ACC
 #
 # Counter going BACKWARDS is a reboot (it is cumulative since stick boot), not a
 # dead logger -- `-gt` alone excludes that, and the reboot handler owns it.
-OMCI_LOG_DEAD=0
+# ⚠ LATCHED, not edge-triggered, and that is load-bearing. Detection can only
+# fire on a cycle where the counter MOVED, and this OLT speaks in a burst of ~43
+# every 15 min -- so an edge flag reads 1 for one minute in fifteen while the
+# logger is dead the whole time, and an ops rule of the obvious shape
+# (`logger_dead == 1 for: 5m`) would NEVER fire. That is an alert wearing the
+# costume of a working one. So the flag LATCHES on detection and clears only
+# when a drain actually returns lines -- i.e. on proof of life, never on the
+# mere absence of new evidence.
+OMCI_DEAD_STATE=/var/run/.omci-dead
+if [ "${_omci_lines:-0}" -gt 0 ] 2>/dev/null && [ -f "$OMCI_DEAD_STATE" ]; then
+    rm -f "$OMCI_DEAD_STATE"
+    event "OMCI logger RECOVERED — ${_omci_lines} lines captured this cycle"
+fi
 PREV_RX=$(sqlite3 -readonly "$DB" "SELECT json_extract(json,'\$.omci2.rx_total') FROM pon WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
 case "$OMCI_RX_TOT" in ''|*[!0-9]*) : ;; *)
     case "$PREV_RX" in ''|*[!0-9]*) : ;; *)
         if [ "$OMCI_RX_TOT" -gt "$PREV_RX" ] && [ -z "$_omci_body" ]; then
-            OMCI_LOG_DEAD=1
+            : > "$OMCI_DEAD_STATE"
             # Rate-limited so a stick that refuses to arm cannot turn this into
             # a per-minute extra CLI session -- that would manufacture the wedge
             # class this script exists to avoid. Detection still runs every
@@ -529,8 +581,70 @@ case "$OMCI_RX_TOT" in ''|*[!0-9]*) : ;; *)
         fi ;;
     esac ;;
 esac
+# Read the LATCH, not the edge. /var/run is tmpfs, so a route10 reboot clears it
+# -- correct: post-boot we have no evidence either way, and the first cycle that
+# sees the counter move re-establishes it.
+OMCI_LOG_DEAD=0
+[ -f "$OMCI_DEAD_STATE" ] && OMCI_LOG_DEAD=1
 
-JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s},"omcilog":{"dead":%s,"lines":%s,"writes":%s}}' \
+# ── SHADOW MODE: record what we WOULD do; never do it ───────────────────────
+# Operator's framing, and it is the right one: we cannot yet judge whether an
+# automated response is safe, but we CAN write down the response we would have
+# proposed, and then contrast it later against what the event actually turned
+# out to need. That builds the evidence base for automation out of real events
+# instead of imagination -- and costs nothing if we never automate.
+#
+# ⛔ Nothing here executes. `propose` writes a row and a log line, full stop.
+# The bar for ever closing this loop is a proposal history that was RIGHT, on
+# this link, repeatedly -- not a plausible-looking mapping table.
+#
+# ⚠ And the precondition is upstream of the mapping: you cannot automate on a
+# channel whose silence you cannot verify. For 4.6 h today this one was dark
+# while its own status command reported armed. Until route10_pon_omci_logger_dead
+# has a track record, "no instruction arrived" and "the recorder is dead" are
+# the same observation, and an automaton would act confidently on the wrong one.
+PROPOSAL_SQL=""
+propose() {   # propose <tier> <observed> <action we would take>
+    _p_o=$(printf '%s' "$2" | sed "s/'/''/g")
+    _p_a=$(printf '%s' "$3" | sed "s/'/''/g")
+    PROPOSAL_SQL="$PROPOSAL_SQL INSERT INTO omci_proposal VALUES($TS,'$1','$_p_o','$_p_a');"
+    warn "PROPOSED (NOT APPLIED) [$1] $2 => $3"
+}
+
+# MIB state change detection. One query, pipe-joined, so a nine-field compare
+# costs one read. Empty PREV (first run after deploy) must NOT read as a change.
+PREV_MIB=$(sqlite3 -readonly "$DB" "SELECT COALESCE(json_extract(json,'\$.sw.s0_ver'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s1_ver'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s0_act'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s1_act'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s0_com'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s1_com'),'')||'|'||COALESCE(json_extract(json,'\$.tr069.admin'),'')||'|'||COALESCE(json_extract(json,'\$.tr069.acs'),'')||'|'||COALESCE(json_extract(json,'\$.tr069.tag'),'') FROM pon WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
+CUR_MIB="$SW0_VER|$SW1_VER|$SW0_ACT|$SW1_ACT|$SW0_COM|$SW1_COM|$TR69_ADM|$TR69_ACS|$TR69_TAG"
+if [ -n "$PREV_MIB" ] && [ "$PREV_MIB" != "||||||||" ] && [ "$PREV_MIB" != "$CUR_MIB" ]; then
+    err "MIB STATE CHANGED: [$PREV_MIB] -> [$CUR_MIB] (sw0_ver|sw1_ver|sw0_act|sw1_act|sw0_com|sw1_com|tr069_admin|tr069_acs|tr069_tag)"
+    _pv0=$(echo "$PREV_MIB" | cut -d'|' -f1); _pv1=$(echo "$PREV_MIB" | cut -d'|' -f2)
+    _pa=$(echo "$PREV_MIB" | cut -d'|' -f7);  _pc=$(echo "$PREV_MIB" | cut -d'|' -f8)
+    [ "$_pv0" != "$SW0_VER" ] && propose firmware \
+        "inactive bank version $_pv0 -> $SW0_VER (an OMCI push lands here first)" \
+        "capture flash vars NOW (GPON_SN, MAC_KEY, LAN_SDS_MODE) before any Activate; a stock image re-pins them from libmib defaults and that is what kills PPPoE, not the flash region itself"
+    [ "$_pv1" != "$SW1_VER" ] && propose firmware \
+        "RUNNING bank version $_pv1 -> $SW1_VER" \
+        "firmware already changed under us; verify GPON_SN + MAC_KEY survived and re-apply from project_odi_mac_key_fix if not"
+    { [ "$(echo "$PREV_MIB" | cut -d'|' -f3)" != "$SW0_ACT" ] || [ "$(echo "$PREV_MIB" | cut -d'|' -f5)" != "$SW0_COM" ]; } && propose firmware \
+        "bank 0 active/committed flags moved" \
+        "Activate reboots onto the other image and Commit makes it survive a power cycle; if Commit has NOT happened a power cycle reverts us -- decide before touching power"
+    [ "$_pa" != "$TR69_ADM" ] && propose tr069 \
+        "ME 340 AdminState $_pa -> $TR69_ADM (0=unlocked, 1=locked)" \
+        "ISP is enabling remote management; no route10 action -- there is no CWMP client on this stick to consume it (measured), so record the ACS chain from ME 137/148/157 and treat it as intel, not an outage"
+    [ "$_pc" != "$TR69_ACS" ] && propose tr069 \
+        "ME 340 AcsAddress $_pc -> $TR69_ACS (0xffff = null)" \
+        "read ME 157 for the ACS URL and ME 148 for the credentials the ISP intends for this line; still no route10 action"
+fi
+# Proposals for the log-derived detections (these fire on the INSTRUCTION, which
+# arrives before the state moves -- the earlier of the two signals).
+[ -n "$_omci_path" ] && propose datapath \
+    "OLT rewrote VLAN/bridge config: $(printf '%s' "$_omci_path" | head -1)" \
+    "compare the new tag against wan3's VLAN; if the C-VLAN moved, our nas0_0 bridging stops matching and PPPoE dies with NO fibre fault -- this is the case worth automating first, and the case an SLA visit would misdiagnose"
+printf '%s\n' "$_omci_mgmt" | grep -q 'AdminState' && propose adminlock \
+    "OLT set ONU AdminState (admin lock)" \
+    "traffic stops while PLOAM stays O5 -- do NOT chase a fibre fault or accept a modem swap; this is an ISP-side administrative action"
+
+JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s},"omcilog":{"dead":%s,"lines":%s,"writes":%s},"sw":{"s0_ver":"%s","s0_act":"%s","s0_com":"%s","s1_ver":"%s","s1_act":"%s","s1_com":"%s"},"tr069":{"admin":"%s","acs":"%s","tag":"%s"}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
     "$(alarm 'TX Too Long')" "$(alarm 'TX Mismatch')" \
@@ -554,7 +668,9 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
     "$(nz "$GEM_IDLE")" "$(nz "$GEM_NONIDLE")" "$(nz "$GEM_MFM")" \
     "$(nz "$USG_BLOCKS")" "$(nz "$USG_BYTES")" \
     "$(nz "$ETH_UNI")" "$(nz "$ETH_MCAST")" "$(nz "$ETH_FWD_MC")" "$(nz "$ETH_LEAK_MC")" \
-    "$OMCI_LOG_DEAD" "${_omci_lines:-0}" "${_omci_writes:-0}")
+    "$OMCI_LOG_DEAD" "${_omci_lines:-0}" "${_omci_writes:-0}" \
+    "$SW0_VER" "$SW0_ACT" "$SW0_COM" "$SW1_VER" "$SW1_ACT" "$SW1_COM" \
+    "$TR69_ADM" "$TR69_ACS" "$TR69_TAG")
 
 # Store the raw diag blob ONLY when a field failed to parse (JSON contains a
 # null). Parsers are verified against real output, so a healthy row is all
@@ -602,9 +718,15 @@ PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS pon (ts INTEGER PRIMARY KEY, json TEXT, raw TEXT);
 CREATE TABLE IF NOT EXISTS pon_totals (k TEXT PRIMARY KEY, v INTEGER);
 CREATE TABLE IF NOT EXISTS omci (ts INTEGER PRIMARY KEY, log TEXT);
+-- Shadow proposals: what we WOULD have done. Never executed. Kept a full year
+-- deliberately -- the whole value is contrasting an old proposal against how
+-- the event actually resolved, and these are a few rows a year, not a stream.
+CREATE TABLE IF NOT EXISTS omci_proposal (ts INTEGER, tier TEXT, observed TEXT, action TEXT);
 INSERT OR IGNORE INTO pon VALUES ($TS, '$JSON', '$RAW_COL');
 $TOTAL_SQL
 $OMCI_SQL
+$PROPOSAL_SQL
+DELETE FROM omci_proposal WHERE ts < $TS - 365*86400;
 DELETE FROM pon WHERE ts < $TS - 30*86400;
 " 2>&1 | grep -qi error && err "pon insert issue (see stderr)"
 

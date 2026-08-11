@@ -309,6 +309,14 @@ SELECT
   'route10_pon_omci_log_lines '         || COALESCE(json_extract(json,'\$.omcilog.lines'),'NaN')  || char(10) ||
   '# HELP route10_pon_omci_writes The OLT RECONFIGURING us, not just polling: count of Set/Create/Delete this cycle (…Rsp excluded - those are our own replies). Measured baseline is ZERO: over 52 min of capture on 2026-08-11 this OLT issued 8127 messages and not one write. Any sustained non-zero is the ISP changing our config, which is the difference between matching a config change and an SLA visit that swaps a working modem.' || char(10) ||
   'route10_pon_omci_writes '            || COALESCE(json_extract(json,'\$.omcilog.writes'),'NaN') || char(10) ||
+  '# HELP route10_pon_sw_image_info Software image banks read from OMCI ME 7 - the DURABLE half of the management record. An OMCI firmware push lands in the INACTIVE bank, so a version change on the inactive slot is the earliest evidence that survives the reboot ActivateSw causes. Active flips on Activate; Committed is what makes it survive a power cycle. Alert on changes to the label set, not on the value (always 1).' || char(10) ||
+  '# TYPE route10_pon_sw_image_info gauge' || char(10) ||
+  'route10_pon_sw_image_info{slot=\"0\",version=\"' || COALESCE(json_extract(json,'\$.sw.s0_ver'),'') || '\",active=\"' || COALESCE(json_extract(json,'\$.sw.s0_act'),'') || '\",committed=\"' || COALESCE(json_extract(json,'\$.sw.s0_com'),'') || '\"} 1' || char(10) ||
+  'route10_pon_sw_image_info{slot=\"1\",version=\"' || COALESCE(json_extract(json,'\$.sw.s1_ver'),'') || '\",active=\"' || COALESCE(json_extract(json,'\$.sw.s1_act'),'') || '\",committed=\"' || COALESCE(json_extract(json,'\$.sw.s1_com'),'') || '\"} 1' || char(10) ||
+  '# HELP route10_pon_tr069_admin_state OMCI ME 340 AdminState: 1=locked (TR-069 remote management OFF), 0=unlocked. Measured baseline is 1 with a null ACS pointer. This stick has NO CWMP client binary (verified on-box), so an unlock alone cannot make it dial out - but it means the ISP is trying, and the ACS URL/credentials then appear in ME 157/148.' || char(10) ||
+  'route10_pon_tr069_admin_state '      || COALESCE(NULLIF(json_extract(json,'\$.tr069.admin'),''),'NaN') || char(10) ||
+  '# HELP route10_pon_tr069_acs_configured 1 when OMCI ME 340 AcsAddress is a real pointer rather than the 0xffff null. Baseline 0. Going to 1 means the ISP has pointed this ONU at an ACS.' || char(10) ||
+  'route10_pon_tr069_acs_configured '   || CASE WHEN COALESCE(json_extract(json,'\$.tr069.acs'),'0xffff') = '0xffff' THEN '0' WHEN json_extract(json,'\$.tr069.acs') = '' THEN 'NaN' ELSE '1' END || char(10) ||
   'route10_pon_ds_plen_fail_total '      || COALESCE(json_extract(json,'\$.ds2.plen_fail'),'NaN')  || char(10) ||
   'route10_pon_ds_ploam_processed_total '|| COALESCE(json_extract(json,'\$.ds2.ploam_proc'),'NaN') || char(10) ||
   'route10_pon_ds_ploam_overflow_total ' || COALESCE(json_extract(json,'\$.ds2.ploam_ovf'),'NaN')  || char(10) ||
