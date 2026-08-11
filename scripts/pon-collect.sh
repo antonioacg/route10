@@ -95,7 +95,27 @@ DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\n
 # body -- otherwise the drain would capture its own command.
 OMCI_LOGMODE=6
 OMCI_LOGMASK=0x3FFFFFFF
-OMCIDRAIN="echo __OMCI''LOG_S__; cat /tmp/omcilog.par /tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__; : > /tmp/omcilog.par; : > /tmp/omcilog"
+# ⛔ ROOT CAUSE 2026-08-11, and it was OURS. The previous drain was one shell
+# line: `cat file1 file2; : > file1; : > file2` -- an UNCONDITIONAL truncate.
+# Measured by holding the collector lock across one OLT poll: the log is not a
+# steady ~6 KB/min as the old comment claimed, it is BURSTY and reached
+# **1,733,379 bytes in 150 s**. `cat` of 1.7 MB over telnet blows stick-exec's
+# timeout, the session dies -- and the stick's shell runs the truncate anyway.
+# So every burst we destroyed the OLT's messages WITHOUT READING THEM, recorded
+# zero lines, and the logger_dead latch then reported the silence we had just
+# manufactured. The 12/12 wedge-to-burst correlation was this `cat`, not a fault.
+#
+# Two changes, and the second matters more than the first:
+#   1. BOUNDED read via dd, so the transfer cannot blow the timeout. (`head`,
+#      `tr` and `wc` do not exist on this busybox; dd does -- verified.)
+#   2. The true on-disk SIZE is reported inside the drain, before the read, so
+#      any shortfall is a logged number instead of silence. Losing data is
+#      sometimes unavoidable at 1.7 MB/burst over telnet; NOT KNOWING we lost it
+#      is what turned a volume problem into six hours of "the logger is dead".
+# Paths are /var/tmp (the real location -- /tmp is a symlink to it, and omci_app
+# holds its fd on /var/tmp/omcilog).
+OMCI_DRAIN_KB=96
+OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; dd if=/var/tmp/omcilog.par bs=1024 count=$OMCI_DRAIN_KB 2>/dev/null; dd if=/var/tmp/omcilog bs=1024 count=$OMCI_DRAIN_KB 2>/dev/null; echo __OMCI''LOG_E__; : > /var/tmp/omcilog.par; : > /var/tmp/omcilog"
 # ── MIB state poll — the durable half of the management-plane record ────────
 # The OMCI log is EPHEMERAL by construction: /tmp on the stick is tmpfs, the
 # logger is runtime-only, and an `ActivateSw` REBOOTS the stick -- so the one
@@ -170,11 +190,24 @@ fi
 # ⚠ The cat-then-truncate is not atomic: a message written between the two
 # is lost. At OMCI rates that window is negligible, and losing a line beats
 # re-ingesting the whole file every minute.
-_omci_body=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCILOG_E__/p' | sed '1d;$d')
-OMCILOG=$(printf '%s' "$_omci_body" | head -c 32000 | sed "s/'/''/g")
-# Never truncate silently -- a capped capture that looks complete is how a
-# missing signal gets read as an absent one.
-[ ${#_omci_body} -gt 32000 ] && warn "OMCI drain truncated: ${#_omci_body} B drained, 32000 B stored (steady state is ~6 KB/min)"
+# The size header (between _S_ and _CUT_) is what the stick HAD; the body (after
+# _CUT_) is what we actually got. Comparing them is the whole point -- it turns
+# an invisible loss into a number.
+_omci_hdr=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCICUT__/p' | sed '1d;$d')
+_omci_body=$(printf '%s\n' "$RAW" | sed -n '/__OMCICUT__/,/__OMCILOG_E__/p' | sed '1d;$d')
+# busybox `ls -l` size is field 5. Sum both files; absent/unparsable -> 0.
+_omci_ondisk=$(printf '%s\n' "$_omci_hdr" | awk '/omcilog/ {s += $5} END {print s+0}')
+_omci_got=${#_omci_body}
+OMCILOG=$(printf '%s' "$_omci_body" | head -c 64000 | sed "s/'/''/g")
+
+# Never lose data silently. Two DISTINCT losses, reported separately because
+# they have different fixes: the transfer bound (raise OMCI_DRAIN_KB, or reduce
+# the logger's action mask so it stops emitting 1.7 MB per burst) and the row
+# storage bound (a /a/obs budget decision).
+if [ "$_omci_ondisk" -gt "$(( OMCI_DRAIN_KB * 1024 * 2 ))" ] 2>/dev/null; then
+    warn "OMCI drain BOUNDED: stick held ${_omci_ondisk} B, transferred ${_omci_got} B (cap ${OMCI_DRAIN_KB} KB/file) — the remainder was truncated UNREAD. Reduce the logger action mask or raise the cap; 0x3FFFFFFF logs far more than the OLT conversation."
+fi
+[ "$_omci_got" -gt 64000 ] && warn "OMCI row truncated: ${_omci_got} B drained, 64000 B stored"
 
 # ── upstream loss, measured from OMCI retransmissions ───────────────────────
 # THE signal this whole drain exists for. The OLT re-sends a request with the
