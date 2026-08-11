@@ -283,6 +283,36 @@ VEIP_ADM=$(mibf 0601 OperState)
 _chain=$(printf '%s\n' "$_mib_body" | grep -c '^EntityID')
 ACS_CHAIN=$(printf '%s\n' "$_mib_body" | sed -n '/NetworkAddress/,$p' | grep -c '^EntityID')
 
+# ── ACS endpoint capture: record WHO, never talk to them ────────────────────
+# The chain is empty today, so the per-field format of a POPULATED ME 157/148 is
+# UNVERIFIED -- we have never seen one. Do not pretend to parse it. Keep the
+# whole section verbatim (it is a few hundred bytes, once, on an event that has
+# never happened) and pull the URL with a permissive match, so a format we
+# guessed wrong degrades to "we stored everything" rather than to silence.
+if [ "$ACS_CHAIN" -gt 0 ] 2>/dev/null; then
+    ACS_BLOB=$(printf '%s\n' "$_mib_body" | sed -n '/NetworkAddress/,$p' | head -c 4000)
+    ACS_URL=$(printf '%s\n' "$ACS_BLOB" | grep -oE 'https?://[A-Za-z0-9._~:/?#@!$&*+,;=%-]+' | head -1)
+    # `\?` is a GNU sed extension -- NOT portable, and it silently leaves the
+    # scheme in place, after which the next rule cuts at the first ':' and hands
+    # you the host "https". Caught by the synthetic test; it would have shipped
+    # as a DNS lookup for a literal "https". Use an explicit scheme class.
+    ACS_HOST=$(printf '%s' "$ACS_URL" | sed -e 's|^[A-Za-z][A-Za-z0-9+.-]*://||' -e 's|[:/].*||')
+    err "ISP POPULATED THE ACS CHAIN — url=${ACS_URL:-<no url matched, see blob>} host=${ACS_HOST:-?} (ME 137/148/157 instances: $ACS_CHAIN)"
+    # DNS ONLY. Resolving a name is a question to the resolver, not contact with
+    # the host: no TCP, no TLS, no HTTP, and above all no CWMP Inform -- an
+    # Inform IS the request that makes the ACS send its queued work, so there is
+    # no read-only way to "just look". Operator decision 2026-08-11: log who
+    # they contracted for management; do not become their CPE.
+    if [ -n "$ACS_HOST" ]; then
+        ACS_ADDRS=$(timeout 3 drill -Q "$ACS_HOST" A 2>/dev/null | tr '\n' ' ')
+        ACS_ADDRS="$ACS_ADDRS$(timeout 3 drill -Q "$ACS_HOST" AAAA 2>/dev/null | tr '\n' ' ')"
+        [ -n "$ACS_ADDRS" ] && event "ACS host $ACS_HOST resolves to: $ACS_ADDRS"
+    fi
+    propose tr069 \
+        "ISP configured an ACS endpoint (host=${ACS_HOST:-?})" \
+        "record and analyse OFFLINE; do NOT send an Inform. An Inform is CPE-initiated and is what triggers the ACS to push its queued work (BOOTSTRAP is usually read as new-device-apply-full-template), it would present our SPOOFED serial to their management system, and a CPE that Informs then faults every RPC reads to their NOC as a failing device -- i.e. it manufactures the technician dispatch we are trying to avoid. There is still no CWMP client on this stick to comply even if we wanted to."
+fi
+
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
 # `<label> : <value>` — grep the label, take the last colon-separated integer.
 val() {
