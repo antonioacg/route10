@@ -4,6 +4,13 @@ Research date **2026-08-11**. Written so nobody repeats it. Everything below is
 from primary sources — driver source, package feeds, ANATEL act text, vendor
 datasheets, Alta forum posts with staff attribution. Inferences are labelled.
 
+⚠ **Standing evidence caveat.** `forum.openwrt.org` (HTTP 429) and
+`lore.kernel.org` / `w1.fi` (bot-walls) were unreachable to every agent, and
+AliExpress + Mercado Livre were captcha-blocked. So this file contains **no forum,
+mailing-list, or AliExpress-pricing evidence**. Code presence and vendor
+documentation are established; **real-hardware behaviour is not** — 6 GHz
+association, 320 MHz throughput and MLO stability are unverified by anyone here.
+
 Sibling research: [`office-switch-ofs-m1xf2gt4.md`](office-switch-ofs-m1xf2gt4.md)
 (same buying criteria, learned the expensive way).
 
@@ -89,7 +96,14 @@ NOT ANATEL's number and regdb is not encoding a Brazilian rule.
 `NO-IR` (which blocks AP-mode beaconing entirely) was present through **2025.02.20**
 and removed by **2025.07.10**. All three supported OpenWrt branches (24.10, 25.12,
 main) pin **2026.05.30**, safely past it. `country=US` still carries `NO-IR` — so
-stock OpenWrt can beacon on 6 GHz in Brazil where it cannot in the US.
+stock OpenWrt can beacon on 6 GHz in Brazil where it cannot in the US. (The
+circulating US "fix" is a third-party patched regdb rewriting US 6 GHz from
+`(12), NO-OUTDOOR, NO-IR` to `(30), NO-OUTDOOR` — that is an explicit **compliance
+override**, not a bug fix. Named here so it isn't mistaken for one.)
+
+**Brazil's spectrum position is genuinely better than the EU's.** EU 6 GHz is
+5945–6425 — **480 MHz total**, room for exactly *one* 320 MHz channel placement, so
+two EU APs cannot get non-overlapping 320 MHz channels. Brazil's full 1200 MHz can.
 
 **Does this bite an Alta AP?** Almost certainly **not** — INFERRED. Alta APs run
 Qualcomm's proprietary WiFi stack (evidenced by `qcawifi-scanner` on the AP and
@@ -126,8 +140,13 @@ under `country=BR` on OpenWrt. Absence of evidence, not a negative result.
 |---|---|
 | 320 MHz | Mature — `CMD_CBW_320MHZ` since Jan 2023 |
 | 6 GHz | Present (MT7996 only, see below) |
-| MLO | **Usable-but-maturing.** AP capability 2025-08-27, client 2025-09-01, eMLSR 2026-02-03, still bug-fixed 2026-08-01. A data-path black-hole bug was fixed 2026-07-26 |
+| MLO | **Usable-but-maturing.** AP capability 2025-08-27, client 2025-09-01, eMLSR 2026-02-03, still bug-fixed 2026-08-01. A data-path black-hole bug was fixed 2026-07-26. Genuinely **STR + EMLSR** across up to 3 links (`IEEE80211_EML_CAP_EMLSR_SUPP`, `MT7996_MAX_RADIOS 3`), not single-radio MLO. ⚠ The config path depends on an **OpenWrt-local hostapd patch** — upstream hostapd has no config-file way to pin a link id |
 | EPCS | **Absent** — explicitly disabled by a MediaTek engineer 2025-09-04 ("not yet ready"), never re-enabled |
+| 4K-QAM | EHT-MCS **12/13** (mt7996 advertises 13). ⚠ MCS 14/15 are DUP/MRU modes — a common misstatement |
+
+⚠ **6 GHz is not reachable from LuCI.** Hand-edit `/etc/config/wireless`:
+`band=6g`, a valid country, a **PSC channel** (5, 21, 37 … 229), and encryption
+`sae` or `owe`.
 
 ### ⛔ Only MT7996 is tri-band
 
@@ -150,6 +169,36 @@ unit transmitted nothing. **BPI-R4 + BE14 is the best-evidenced** (wiki document
 
 ⚠ **None of the MT7996 devices is a ceiling AP. None takes PoE.** The OpenWrt path
 to tri-band WiFi 7 means running a router as a dumb AP on a barrel jack.
+
+### ⛔ 6 GHz roaming is broken on OpenWrt — three independent causes
+
+Decisive for a **multi-AP** deployment, which is what "a second AP beats a faster
+one" implies. All three confirmed from source:
+
+1. **`dawn` cannot represent 6 GHz.** `enum dawn_bands` has exactly two members,
+   `max_band_freq[] = { 2500, 5925 }`. A 6 GHz frequency exceeds the last band,
+   falls through the loop, logs a warning, and is **steered using 5 GHz
+   parameters**. Every per-band tunable (`rssi`, `chan_util`, `initial_score`) is a
+   two-element array — there is nowhere to put 6 GHz values. (HEAD 2026-08-10,
+   actively maintained.)
+2. **`usteer` cannot distinguish 5 from 6 GHz.** `struct sta_info` carries only
+   `seen_2ghz`/`seen_5ghz`, and band classification is a bare `freq < 4000` /
+   `freq > 4000` threshold. 5↔6 GHz band steering is impossible. (Pinned
+   2026-05-19.)
+3. **FT-SAE is broken on MT7996** by an open unmerged driver bug, and the
+   hostapd-side FT+SAE fix merged **three weeks after** the current release — it is
+   in no shipped tag. SAE is *mandatory* on 6 GHz.
+
+Neither daemon has any MLD/link awareness.
+
+**Guidance:** put the roaming SSID on 2.4/5 GHz where FT-PSK works; let 6 GHz be an
+SAE-only bonus link. A single mixed-mode SSID produces exactly that, since OpenWrt
+auto-upgrades 6 GHz to SAE.
+
+**Alta plausibly sidesteps all three** — INFERRED. It runs QCA's stack with its own
+`qcawifi-scanner`, min-RSSI and 11k neighbour reports rather than dawn/usteer, and
+802.11 r/k/v is on the AP7 Pro datasheet. The three failures above are specific to
+the OpenWrt userspace daemons and the mt76 driver.
 
 ### Two more traps
 
@@ -391,6 +440,13 @@ a router on a shelf with a barrel jack.
 dependable, EPCS is absent, 6 GHz is a same-room band with the client capped 6 dB
 below the AP, and half the household's phones can't use it. What justifies the
 spend is per-client radio telemetry and `rcstats-mon`.
+
+**For a multi-AP house the roaming finding is close to decisive.** On the OpenWrt
+path, 6 GHz roaming fails three independent ways (dawn blind, usteer blind, FT-SAE
+broken and unshipped). Alta ships its own steering stack and standards-based
+r/k/v. If the plan is two APs rather than one fast one — and the coverage evidence
+points that way — that gap is the difference between a network that roams and one
+that doesn't.
 
 **If coverage is the real complaint, a second AP beats a faster one.**
 
