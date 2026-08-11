@@ -345,3 +345,30 @@ FROM pon ORDER BY ts DESC LIMIT 1;
 
 # ── live, but read-only-cheap ───────────────────────────────────────────────
 echo "route10_pstore_files $(ls /sys/fs/pstore 2>/dev/null | wc -l)"
+
+# ── optical thresholds (optical-thresholds.sh, static, refreshed daily) ─────
+# Each module's OWN declared alarm/warning limits, read from its SFF-8472 A2h
+# page. Exported as data so nothing downstream hardcodes a dBm figure: margin
+# is route10_optical_power_dbm - route10_optical_threshold_dbm{level="low_warning"}.
+#
+# ⚠ The two modules differ enormously -- W2 (GPON/WAN) floors at -30.00/-28.86
+# dBm, L4 (office BiDi) at -18.01/-16.00. A single shared threshold line is
+# wrong for both. Always join on the module label.
+q "file:/a/obs/rt.sql?mode=ro" "
+SELECT
+  'route10_optical_threshold_timestamp_seconds ' || ts || char(10) ||
+  group_concat(
+    'route10_optical_threshold_dbm{module=\"' || upper(m.key) || '\",param=\"' || p.key ||
+    '\",level=\"' || l.key || '\"} ' || l.value, char(10))
+FROM optical o, json_each(o.json) m, json_each(m.value) p, json_each(p.value) l
+WHERE o.ts = (SELECT max(ts) FROM optical)
+  AND m.key IN ('w2','l4') AND p.key IN ('tx','rx') AND l.value IS NOT NULL
+GROUP BY o.ts;
+SELECT
+  group_concat(
+    'route10_optical_threshold{module=\"' || upper(m.key) || '\",param=\"' || p.key ||
+    '\",level=\"' || l.key || '\"} ' || l.value, char(10))
+FROM optical o, json_each(o.json) m, json_each(m.value) p, json_each(p.value) l
+WHERE o.ts = (SELECT max(ts) FROM optical)
+  AND m.key IN ('w2','l4') AND p.key IN ('temp','vcc','bias') AND l.value IS NOT NULL;
+"

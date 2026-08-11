@@ -509,6 +509,12 @@ $OMCI_SQL
 DELETE FROM pon WHERE ts < $TS - 30*86400;
 " 2>&1 | grep -qi error && err "pon insert issue (see stderr)"
 
+# ── optical thresholds (static; at most once a day) ─────────────────────────
+# Runs HERE, inside our lock, so route10 keeps exactly ONE stick-CLI user. It
+# must never get its own cron entry -- a second concurrent telnet session is
+# the wedge class this script is built to avoid. Self-rate-limits internally.
+[ -x /cfg/scripts/optical-thresholds.sh ] && /cfg/scripts/optical-thresholds.sh >/dev/null 2>&1
+
 # Stick reboot: uptime going backwards is worth a line (and resets the counters).
 # Both operands must be validated separately — an empty PREV_UP (first run) fed to
 # `[ -lt ]` is a shell error, not a skip.
