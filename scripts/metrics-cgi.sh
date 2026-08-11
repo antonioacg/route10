@@ -302,7 +302,22 @@ SELECT
   'route10_pon_ds_bwmap_invalid_total{slot=\"0\"} ' || COALESCE(json_extract(json,'\$.bw.invalid0'),'NaN') || char(10) ||
   'route10_pon_ds_bwmap_invalid_total{slot=\"1\"} ' || COALESCE(json_extract(json,'\$.bw.invalid1'),'NaN') || char(10) ||
   'route10_pon_omci_requests_total '    || COALESCE(json_extract(json,'\$.omci_tx.req'),'NaN')  || char(10) ||
-  'route10_pon_omci_retransmits_total ' || COALESCE(json_extract(json,'\$.omci_tx.retx'),'NaN')
+  'route10_pon_omci_retransmits_total ' || COALESCE(json_extract(json,'\$.omci_tx.retx'),'NaN') || char(10) ||
+  'route10_pon_ds_plen_fail_total '      || COALESCE(json_extract(json,'\$.ds2.plen_fail'),'NaN')  || char(10) ||
+  'route10_pon_ds_ploam_processed_total '|| COALESCE(json_extract(json,'\$.ds2.ploam_proc'),'NaN') || char(10) ||
+  'route10_pon_ds_ploam_overflow_total ' || COALESCE(json_extract(json,'\$.ds2.ploam_ovf'),'NaN')  || char(10) ||
+  'route10_pon_ds_ploam_unknown_total '  || COALESCE(json_extract(json,'\$.ds2.ploam_unk'),'NaN')  || char(10) ||
+  'route10_pon_ds_bwmap_received_total ' || COALESCE(json_extract(json,'\$.ds2.bw_total'),'NaN')   || char(10) ||
+  'route10_pon_ds_bwmap_overflow_total ' || COALESCE(json_extract(json,'\$.ds2.bw_ovf'),'NaN')     || char(10) ||
+  'route10_pon_ds_gem_los_total '        || COALESCE(json_extract(json,'\$.gem.los'),'NaN')        || char(10) ||
+  'route10_pon_ds_gem_hec_corrected_total ' || COALESCE(json_extract(json,'\$.gem.hec'),'NaN')     || char(10) ||
+  'route10_pon_ds_gem_bad_length_total ' || COALESCE(json_extract(json,'\$.gem.mislen'),'NaN')     || char(10) ||
+  'route10_pon_ds_gem_over_interleave_total ' || COALESCE(json_extract(json,'\$.gem.over_il'),'NaN') || char(10) ||
+  'route10_pon_ds_eth_fcs_error_total '  || COALESCE(json_extract(json,'\$.eth.fcs_err'),'NaN')    || char(10) ||
+  'route10_pon_us_dbru_sent_total '      || COALESCE(json_extract(json,'\$.us2.dbru'),'NaN')       || char(10) ||
+  'route10_pon_omci_crc_error_total '    || COALESCE(json_extract(json,'\$.omci2.crc_err'),'NaN')  || char(10) ||
+  'route10_pon_ds_omci_received_total '  || COALESCE(json_extract(json,'\$.omci2.rx_total'),'NaN') || char(10) ||
+  'route10_pon_us_omci_sent_total '      || COALESCE(json_extract(json,'\$.omci2.tx_total'),'NaN')
 FROM pon ORDER BY ts DESC LIMIT 1;
 "
 

@@ -73,7 +73,7 @@ trap 'rm -rf "$LOCK"' EXIT
 TS=$(date +%s)
 
 # One clean session: uptime (reboot detection) + the diag batch via stdin pipe.
-DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\ngpon show counter global active\ngpon show counter global us-plm\ngpon show counter global us-phy\ngpon show counter global ds-omci\ngpon show counter global ds-bw\nexit\n" | diag'
+DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\ngpon show counter global active\ngpon show counter global us-plm\ngpon show counter global us-phy\ngpon show counter global ds-omci\ngpon show counter global ds-bw\ngpon show counter global us-omci\ngpon show counter global ds-gem\ngpon show counter global ds-eth\ngpon show counter global us-dbr\nexit\n" | diag'
 
 # ── OMCI message log drain ──────────────────────────────────────────────────
 # The stick can log OMCI messages (the OLT's actual instruction channel) via
@@ -248,6 +248,36 @@ BW_CRC=$(val "CRC Err RX BwMap")
 BW_INV0=$(val "Invalid BwMap 0")
 BW_INV1=$(val "Invalid BwMap 1")
 
+# ── second wave: layers we were entirely blind to (added 2026-08-11) ────────
+# Audit after the outage: we were exporting 14 of the ~52 counter fields the
+# stick actually offers. DS GEM, DS ETH, US OMCI and US DBR were collected
+# ZERO percent -- i.e. the GEM and ethernet layers of the downstream path had
+# no telemetry at all, and OMCI was measured in one direction only.
+#
+# ⚠ RESET SEMANTICS ARE PER-FIELD, NOT PER-GROUP. Measured by double-read
+# 12 s apart on 2026-08-11: within DS OMCI, `Processed OMCI` resets on read
+# while `Total RX OMCI` is cumulative-since-boot. Accumulating a cumulative
+# counter double-counts without bound, so the two classes are handled
+# separately below. Anything reset-on-read goes through acc(); anything
+# cumulative is stored raw and left for Prometheus, whose counter semantics
+# already handle the reset at stick reboot.
+PLEN_FAIL=$(val "PLEN fail")
+PLOAM_PROC=$(val "Proc RX PLOAMd")
+PLOAM_OVF=$(val "Overflow Rx PLOAM")
+PLOAM_UNK=$(val "Unknown Rx PLOAM")
+OMCI_CRC=$(val "CRC Error OMCI")
+BW_TOTAL=$(val "Total RX BwMap")
+BW_OVF=$(val "Overflow BwMap")
+GEM_LOS=$(val "D/S GEM LOS")
+GEM_HEC=$(val "D/S HEC correct")
+GEM_MISLEN=$(val "Mis GEM Pkt Len")
+GEM_OVIL=$(val "Over Interleave")
+ETH_FCS=$(val "FCS Error")
+US_DBRU=$(val "TX DBRu")
+# cumulative-since-boot -- do NOT accumulate these two
+OMCI_RX_TOT=$(val "Total RX OMCI")
+OMCI_TX_TOT=$(val "total TX OMCI")
+
 # Re-activation loop alert. These counters reset on read, so RANGING_REQ is
 # already "rangings in the last minute" -- no rate maths needed. Threshold 3
 # tolerates a legitimate one-off re-activation (recovery, stick reboot) while
@@ -308,8 +338,22 @@ acc bw_invalid0  "$BW_INV0";     BW_INV0=$ACC
 acc bw_invalid1  "$BW_INV1";     BW_INV1=$ACC
 acc omci_req     "$OMCI_REQ";    OMCI_REQ=$ACC
 acc omci_retx    "$OMCI_RETX";   OMCI_RETX=$ACC
+acc plen_fail    "$PLEN_FAIL";   PLEN_FAIL=$ACC
+acc ploam_proc   "$PLOAM_PROC";  PLOAM_PROC=$ACC
+acc ploam_ovf    "$PLOAM_OVF";   PLOAM_OVF=$ACC
+acc ploam_unk    "$PLOAM_UNK";   PLOAM_UNK=$ACC
+acc omci_crc     "$OMCI_CRC";    OMCI_CRC=$ACC
+acc bw_total     "$BW_TOTAL";    BW_TOTAL=$ACC
+acc bw_ovf       "$BW_OVF";      BW_OVF=$ACC
+acc gem_los      "$GEM_LOS";     GEM_LOS=$ACC
+acc gem_hec      "$GEM_HEC";     GEM_HEC=$ACC
+acc gem_mislen   "$GEM_MISLEN";  GEM_MISLEN=$ACC
+acc gem_ovil     "$GEM_OVIL";    GEM_OVIL=$ACC
+acc eth_fcs      "$ETH_FCS";     ETH_FCS=$ACC
+acc us_dbru      "$US_DBRU";     US_DBRU=$ACC
+# OMCI_RX_TOT / OMCI_TX_TOT are cumulative -- deliberately NOT passed to acc()
 
-JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s}}' \
+JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
     "$(alarm 'TX Too Long')" "$(alarm 'TX Mismatch')" \
@@ -320,7 +364,12 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
     "$(nz "$TX_SN_PLOAM")" "$(nz "$TX_BOH")" \
     "$(nz "$OMCI_PROC")" "$(nz "$OMCI_DROP")" \
     "$(nz "$BW_CRC")" "$(nz "$BW_INV0")" "$(nz "$BW_INV1")" \
-    "$(nz "$OMCI_REQ")" "$(nz "$OMCI_RETX")")
+    "$(nz "$OMCI_REQ")" "$(nz "$OMCI_RETX")" \
+    "$(nz "$PLEN_FAIL")" "$(nz "$PLOAM_PROC")" "$(nz "$PLOAM_OVF")" "$(nz "$PLOAM_UNK")" \
+    "$(nz "$BW_TOTAL")" "$(nz "$BW_OVF")" \
+    "$(nz "$GEM_LOS")" "$(nz "$GEM_HEC")" "$(nz "$GEM_MISLEN")" "$(nz "$GEM_OVIL")" \
+    "$(nz "$ETH_FCS")" "$(nz "$US_DBRU")" \
+    "$(nz "$OMCI_CRC")" "$(nz "$OMCI_RX_TOT")" "$(nz "$OMCI_TX_TOT")")
 
 # Store the raw diag blob ONLY when a field failed to parse (JSON contains a
 # null). Parsers are verified against real output, so a healthy row is all
