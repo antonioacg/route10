@@ -11,6 +11,15 @@ mailing-list, or AliExpress-pricing evidence**. Code presence and vendor
 documentation are established; **real-hardware behaviour is not** — 6 GHz
 association, 320 MHz throughput and MLO stability are unverified by anyone here.
 
+⚠ **`openwrt.org` itself is now behind an Anubis proof-of-work bot-challenge**
+(observed 2026-08-11) — the wiki and its per-device "what works" tables are no
+longer scriptable. Manifests still are: fetch
+`downloads.openwrt.org/releases/<ver>/.overview.json` and grep the profile name.
+That is now the cheapest reliable support check, and it is what the Cudy and
+Zbtlink calls below rest on. Alibaba/AliExpress/DHgate/DuckDuckGo all served
+anti-bot walls too — **treat "not found" as "unreachable" unless a source returned
+a structured empty result** (Kabum's `"totalItemsCount":0` is a real zero).
+
 Sibling research: [`office-switch-ofs-m1xf2gt4.md`](office-switch-ofs-m1xf2gt4.md)
 (same buying criteria, learned the expensive way).
 
@@ -235,28 +244,47 @@ below means *unreachable*, not *unavailable*. Landed estimates use 1.6× and
 |---|---|---|---|
 | **House AP** | TP-Link **EAP660 HD v1** | R$1,799 domestic (Kabum/Amazon.br) | 4x4:4 radio, 2.5 GbE, PoE+, no EOL flag, real BR retail |
 | **Cheap lab** | **Cudy AP3000 v1** | **R$676.61** Kabum | MT7981B, 2.5 GbE, 802.3af/at. Cheapest route to an open mac80211 radio |
-| **Bleeding edge** | **Zbtlink ZBT-Z8803BE** | no price reached | The only MT7996 + 2.5 GbE + **10G SFP+** box |
+| ~~Bleeding edge~~ | ~~**Zbtlink ZBT-Z8803BE**~~ | **unbuyable** | MT7996 is real, but snapshot-only + no price on 12 channels. See below |
 
-### Zbtlink ZBT-Z8803BE — the experimenter's pick
+**Cudy AP3000 v1 support is confirmed from the release manifests** — profile
+`cudy_ap3000-v1` present in **both** `24.10.8` and `25.12.5` `.overview.json`, on
+`mediatek/filogic`, OpenWrt's mature mt76 platform. ⚠ Not wiki-confirmed ("WiFi:
+works" table unreachable — see the bot-wall note below), so: two consecutive stable
+releases on a well-supported target, not a family-level guess, but not a wiki
+citation either.
 
-Silicon verified via the **firmware package the build pulls**
+### Zbtlink ZBT-Z8803BE — NOT a purchase. A someday.
+
+Silicon is real: verified via the **firmware package the build pulls**
 (`kmod-mt7996-firmware`), not the DTS node name — its node is `mt7996@0,0` and so
 is the BE450's, which is MT7992. **Node names lie; package selection doesn't.**
+MT7988A (Filogic 880, quad A73), 1 GB RAM, MT7996 tri-band with its own EEPROM
+nvmem cell.
 
-- **MT7988A** (Filogic 880, quad A73), **1 GB RAM**
-- **MT7996** tri-band, dedicated EEPROM nvmem cell
-- **1x 2.5 GbE**, **1x 10G SFP+ cage** (`phy-mode = "10gbase-r"`), 3x 1 GbE,
-  2x USB3, PWM fan with a 100 °C thermal trip
+⛔ **But it fails on two independent grounds, and neither is maturity-snobbery.**
 
-A BPI-R4-class machine in a retail chassis *with* a PSU and case — arguably a
-better experiment target than the bare board, and the SFP+ cage is directly
-relevant given route10 already runs an SFP+ stick.
+**1. No price exists on any reachable channel.** zbtlink.com refuses connections;
+Zbtlink's AliExpress store 404s; AliExpress, Alibaba and DHgate serve anti-bot
+walls; DuckDuckGo served a CAPTCHA; Bing returned no coverage at all. **Kabum is a
+genuine zero** (`"totalItemsCount":0` from its own JSON — a real "not sold here",
+not a block). No shipping signal obtainable either.
 
-⚠ **Not in `openwrt-25.12` at all** — main/SNAPSHOT only. No stable images, no
-upgrade-path guarantee, **no wiki page and therefore no documented
-broken-functions list**. Unknown unknowns, not known-and-accepted.
-⚠ 6 GHz is capability-inferred, not unit-confirmed — it has its own EEPROM nvmem
-cell and so carries the same risk class as BPI-R4's zeroed-TX-power bug.
+**2. The port is active reverse-engineering, not a settled device.** Present in the
+snapshot manifest only — **absent from both 24.10.8 and 25.12.5**. The community
+porting fork's devicetree files are literally named `z8803be-emmc-research.dts` and
+`z8803be-emmc-vendor-fixed-draft.dts`.
+
+⚠ **Therefore treat its spec sheet as a hypothesis, not a datasheet.** The 10G SFP+
+cage, port count and speeds were read out of that devicetree — and the porter's own
+README flags the SFP+ as *"not physically verified"*. A draft DTS written by
+someone reverse-engineering a board is a record of what they *think* is there.
+⚠ 6 GHz is capability-inferred, never unit-confirmed — same risk class as BPI-R4's
+zeroed-TX-power EEPROM bug.
+
+**Decision-grade conclusion:** *6 GHz-capable OpenWrt hardware that is both
+stable-release-supported and purchasable from Brazil did not exist in Aug 2026.*
+Which makes the **Alta AP7 Pro the only route to tri-band WiFi 7 in this market** —
+open radio or not.
 
 ### Cudy AP3000 v1 — the PHY swap is a CLOSED issue
 
