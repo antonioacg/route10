@@ -74,7 +74,29 @@ TS=$(date +%s)
 
 # One clean session: uptime (reboot detection) + the diag batch via stdin pipe.
 DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\ngpon show counter global active\ngpon show counter global us-plm\ngpon show counter global us-phy\ngpon show counter global ds-omci\ngpon show counter global ds-bw\nexit\n" | diag'
-poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" 2>&1; }
+
+# ── OMCI message log drain ──────────────────────────────────────────────────
+# The stick can log OMCI messages (the OLT's actual instruction channel) via
+# `omcicli set logfile <mode> <actMask>` -- mode 2=Parsed | 4=WithTimestamp.
+# It writes to /tmp/omcilog, which is tmpfs and therefore lost on every stick
+# reboot, so we drain it into the same /a sqlite DB as everything else and
+# truncate. Riding the EXISTING once-a-minute session keeps pon-collect the
+# sole CLI user (a separate cron would be a second one -- see the wedge notes).
+#
+# ⚠ UNPROVEN. Enabled 2026-08-11 and never observed to write a single byte,
+# while the hardware DS-OMCI counter kept incrementing. It may be a stub in
+# this firmware build. So an EMPTY omci table means "captured nothing", NOT
+# "the OLT sent nothing" -- never reason from its silence. Kept because the
+# cost is one `cat` per minute and the payoff, if it does work, is the OLT's
+# instructions in plain text.
+#
+# The sentinels are written __OMCI''LOG_* so the ECHOED command line (telnet
+# echoes what we send) does not itself match the sed range that extracts the
+# body -- otherwise the drain would capture its own command.
+OMCI_LOGMODE=6
+OMCI_LOGMASK=0x3FFFFFFF
+OMCIDRAIN="echo __OMCI''LOG_S__; cat /tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__; : > /tmp/omcilog"
+poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" 2>&1; }
 is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
 RAW=$(poll_stick)
@@ -106,6 +128,18 @@ if is_wedged "$RAW"; then
     exit 0
 fi
 [ -f "$STATE" ] && { rm -f "$STATE"; event "stick CLI recovered — PON telemetry resumed"; }
+
+# ── split the OMCI drain out of RAW before anything parses it ───────────────
+# Must happen before the val()/alarm() greps: OMCI log text is arbitrary and
+# could otherwise collide with a counter label. Capped at 32 KB/cycle so a
+# chatty or runaway log cannot bloat a row (the /a/obs 500 MB janitor in
+# stats-archive.sh is the backstop, not the first line of defence).
+# ⚠ The cat-then-truncate is not atomic: a message written between the two
+# is lost. At OMCI rates that window is negligible, and losing a line beats
+# re-ingesting the whole file every minute.
+OMCILOG=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCILOG_E__/p' \
+    | sed '1d;$d' | head -c 32000 | sed "s/'/''/g")
+RAW=$(printf '%s\n' "$RAW" | sed '/__OMCILOG_S__/,/__OMCILOG_E__/d')
 
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
 # `<label> : <value>` — grep the label, take the last colon-separated integer.
@@ -269,6 +303,11 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
 # the one blob worth having — the 2026-08-11 outage was diagnosed entirely
 # from raws captured during the O2/O3/O4 cycle. A non-operational PON is a
 # bounded window, so the ~6 KB/min only applies while something is wrong.
+# Only rows with actual OMCI text are stored -- an empty drain writes nothing,
+# so the table stays empty rather than filling with blank per-minute rows.
+OMCI_SQL=""
+[ -n "$OMCILOG" ] && OMCI_SQL="INSERT OR IGNORE INTO omci VALUES($TS,'$OMCILOG');DELETE FROM omci WHERE ts < $TS - 30*86400;"
+
 _raw_keep() { printf '%s' "$RAW" | head -c 6000 | sed "s/'/''/g"; }
 case "$JSON" in
     *null*)             RAW_COL=$(_raw_keep) ;;
@@ -279,8 +318,10 @@ sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS pon (ts INTEGER PRIMARY KEY, json TEXT, raw TEXT);
 CREATE TABLE IF NOT EXISTS pon_totals (k TEXT PRIMARY KEY, v INTEGER);
+CREATE TABLE IF NOT EXISTS omci (ts INTEGER PRIMARY KEY, log TEXT);
 INSERT OR IGNORE INTO pon VALUES ($TS, '$JSON', '$RAW_COL');
 $TOTAL_SQL
+$OMCI_SQL
 DELETE FROM pon WHERE ts < $TS - 30*86400;
 " 2>&1 | grep -qi error && err "pon insert issue (see stderr)"
 
@@ -290,7 +331,15 @@ DELETE FROM pon WHERE ts < $TS - 30*86400;
 PREV_UP=$(sqlite3 -readonly "$DB" "SELECT json_extract(json,'\$.uptime') FROM pon WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
 case "$UPTIME" in ''|*[!0-9]*) : ;; *)
     case "$PREV_UP" in ''|*[!0-9]*) : ;; *)
-        [ "$UPTIME" -lt "$PREV_UP" ] && event "stick REBOOTED: uptime ${PREV_UP}s -> ${UPTIME}s (PON counters reset)" ;;
+        if [ "$UPTIME" -lt "$PREV_UP" ]; then
+            event "stick REBOOTED: uptime ${PREV_UP}s -> ${UPTIME}s (PON counters reset)"
+            # The OMCI logger is RUNTIME-ONLY: omci_app is started with
+            # `-f off 0`, so every reboot silently disarms it and the drain
+            # above would quietly return nothing forever. Re-assert it here --
+            # on reboot only, so the steady state stays one session per minute.
+            python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK" >/dev/null 2>&1 \
+                && event "OMCI logfile re-armed after stick reboot (mode $OMCI_LOGMODE mask $OMCI_LOGMASK)"
+        fi ;;
     esac ;;
 esac
 
