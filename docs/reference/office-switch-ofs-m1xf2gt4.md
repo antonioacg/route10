@@ -439,19 +439,59 @@ Remaining true caveat: on OpenWrt DSA, `/proc/net/dev` counters for switch ports
 count only CPU-port traffic, so a naive SNMP IF-MIB undercounts hardware-forwarded
 traffic badly. Use `ethtool -S`.
 
-### Buying: the stable-vs-AliExpress fork collapses for us
+### Buying: the answer is a Zyxel from Amazon Brazil, not AliExpress
 
 Every AliExpress-buyable OpenWrt 2.5G+SFP+ unit is **snapshot-only**; everything in a
-**stable** release is retail channel (Zyxel, Plasma Cloud) with **zero** AliExpress
-presence. That looks like a hard trade — but **we need snapshot regardless**, because
-the BiDi i2c fix is absent from the stable branch (verified at `openwrt-25.12` HEAD,
-which includes 25.12.5). So "it ships in stable" buys us nothing, and the marketplace
-option stops being a compromise.
+**stable** release is retail channel with **zero** AliExpress presence (Zyxel
+confirmed absent across four models and multiple query variants — clean negative, not
+a search artifact).
 
-Leading candidate on that logic: **Hasivo F1100W-4SX-4XGT**, ~US$211, 4x SFP+ +
-4x RJ45 multi-gig, RTL9303 rev B, chipset known by teardown (the support commit names
-the RAM and flash part numbers). Better port fit than the Zyxel XGS1210-12, which is
-8x1G with only two 2.5G ports.
+⚠ **I briefly argued that fork collapses because "we need snapshot regardless for the
+BiDi module". THAT WAS WRONG, and the error is instructive: the i2c fix is
+BOARD-SPECIFIC, not target-wide.** Checked in `main`:
+
+| DTS | `clock-frequency` entries |
+|---|---|
+| `rtl9303_xikestor_sks8300-8x.dts` | **8** |
+| `rtl9302_zyxel_xgs1x10-12-common.dtsi` | **0** |
+| `rtl9302_zyxel_xgs1250-12.dts` | **0** |
+
+The bug was reported on XikeStor/ONTi cages and fixed there. Zyxel boards never
+carried the workaround, so there is no reason to avoid stable on a Zyxel. *(Inference
+worth naming: absence of a fix means the board was never reported broken — not proof
+it cannot be. But it removes the known blocker.)*
+
+**So the snapshot constraint applies to the AliExpress candidates and NOT to Zyxel**,
+which inverts the conclusion: buy retail, run stable.
+
+**Amazon Brazil carries Zyxel with domestic stock — no import markup:**
+
+| Model | Ports | OpenWrt | Amazon.com.br |
+|---|---|---|---|
+| **Zyxel XGS1250-12** | 8x1G + 3x10GBASE-T + **1x SFP+** | **stable since 22.03** — longest-supported rtl930x device | **R$1,768 (~US$347)**, direct BR listing |
+| Zyxel XGS1010-12 | 8x1G + 2x2.5G + 2xSFP+ | 25.12 (A1) | R$938–1,157 (~US$184–227) |
+| Zyxel XGS1210-12 | 8x1G + 2x2.5G + 2xSFP+ | stable 25.12 | not clearly listed on .com.br; ~US$199–248 on .com, BR shipping unconfirmed |
+
+**XGS1250-12 fits us**: one SFP+ is all the BiDi uplink needs, its 10GBASE-T ports
+cover the two 2.5G clients, and the 1G ports cover the rest. ⚠ Verify NBASE-T
+negotiates 2.5G and that the 1G ports still do 100M (port 2 runs a device at
+`100Full`). ⚠ A1/B1 revisions exist here too — check which you receive.
+
+At **~US$347 domestic** against the Hasivo F1100W's **~US$367 landed**, the retail
+route is cheaper *and* avoids snapshot firmware, blind revision roulette and import
+tax. The AliExpress path is the worse deal on every axis.
+
+Leading candidate on that logic: **Hasivo F1100W-4SX-4XGT**, 4x SFP+ + 4x RJ45
+multi-gig, RTL9303 rev B, chipset known by teardown (the support commit names the RAM
+and flash part numbers). Better port fit than the Zyxel XGS1210-12, which is 8x1G
+with only two 2.5G ports.
+
+⛔ **PRICE THE LANDED COST, NOT THE STICKER.** Import markup to Brazil runs
+**1.5–1.8x**, measured across six official-store listings with ship-to Brazil set:
+SKS8310-8X +51%, ZX-SWTGW2C8F +55%, SR-ST3408F +64%, **F1100W-4SX-4XGT +74%**,
+SKS8300-12E2T2X +81%, S1100W-8XGT-SE +82%. So the F1100W is **~US$365 landed**, not
+~US$211. Every AliExpress price in any research on this topic must be multiplied
+before it enters a decision.
 
 ⛔ **Two buying traps, both about silicon/variant drift under an unchanged model
 number** — the same disease as everything else in this document:
