@@ -83,8 +83,8 @@ telnet probes — they orphan the lock too.
   - `/cfg/scripts/pon-collect.sh` (`* * * * *` cron) — PON-layer telemetry from
     the ODI stick via `stick-exec` clean-telnet (PLOAM state, LOS/LOF/SD alarms,
     BIP/FEC error counters, rogue-SD, stick uptime, plus activation / upstream /
-    OMCI / BWMAP counters) → `/a/obs/rt.sql` `pon` table → 29 `route10_pon_*`
-    metrics. The **leading** fibre-degradation signal the SFF-8472 DDM can't
+    OMCI / BWMAP counters) → `/a/obs/rt.sql` `pon` table → 23 `route10_pon_*`
+    metric **names** (30 series — quote names, series churn with labels). The **leading** fibre-degradation signal the SFF-8472 DDM can't
     show. Diag batch goes through `diag` **stdin + `exit`**
     (never bare `diag <subcmd>`, which strands the interactive prompt and wedges
     the single CLI); atomic `mkdir` overlap lock; raw blob kept on a parse
