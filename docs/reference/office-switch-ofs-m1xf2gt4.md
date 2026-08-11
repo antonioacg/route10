@@ -21,7 +21,7 @@ is unreachable" — the exact ambiguity the dead-man beat pair exists to resolve
 |---|---|---|
 | Model | `OFS-M1XF2GT4` | `info.cgi`, and the `<title>` on every page |
 | Brand | OptFocus (Shenzhen OptFocus Technology Co., Ltd) | Alta portal client list, "Make" field |
-| **SoC** | **Realtek `RTL8372`** | **`strings` on its own config backup** — see below. Not inferred from port count. |
+| **SoC** | **Realtek RTL837x**, almost certainly `RTL8372` | `strings` on its own config backup. ⚠ See the confidence note below — this is FIRMWARE-reported, not silicon-verified. |
 | Firmware | `V100.9.9.1.7`, dated June 7 2025 | `info.cgi` |
 | Hardware | `V2.1` | `info.cgi` |
 | MAC | `cc:52:89:0a:d5:8e` (OUI `CC:52:89`) | ARP, Alta portal |
@@ -31,8 +31,27 @@ is unreachable" — the exact ambiguity the dead-man beat pair exists to resolve
 | Current address | `192.168.10.153` by DHCP, hostname `OFS-M1XF2GT4` | `/cfg/dhcp.leases`, 2026-08-10 |
 
 **Finding the SoC:** `GET /config_back.cgi?cmd=conf_backup` returns a 2,669-byte
-binary. `strings` on it yields `RTL8372`. That is how the chipset was established —
-no teardown, no FCC filing, no guessing from the port layout.
+binary. `strings` on it yields `RTL8372`.
+
+⚠ **How much that proves — an honest grading.** That string is *firmware-reported*,
+the same class of evidence as a boot banner, and banners in this family are
+documented to lie: a TrendNet TEG-S562 announces `RTL8373` over an `RTL8372` die.
+Vendors also swap N / non-N silicon silently under one model number.
+
+| Claim | Confidence |
+|---|---|
+| RTL837x family (not Marvell/Econet, not RTL930x) | **Very high** — our string, plus boot logs, the 8051/CGI architecture, and independent surveys all agree |
+| Specifically RTL8372 (vs 8373) | **High** — RTLPlayground's runtime profiles report `isRTL8373 = 0` on these boards |
+| The `N` suffix (`RTL8372N`) | **Unconfirmed for our board.** No teardown photo or FCC filing exists for any model in this class; nobody has ever quoted a silkscreen suffix |
+
+The decisive test is reading chip-ID register `0x0004` over MDIO (a confirmed-good
+read on a 4+2 board in this family returned `0x83727000`) — which needs the serial
+console, so **we cannot do it without opening the case**. Nothing in the published
+record substitutes for it. This matters only if we ever flash: **brand and model
+prefix do NOT predict silicon** (Hasivo `S600WP-4GT` is RTL8372 but `S600WP-5GT-SE`
+is RTL9303; Horaco `HR-SWTGW124AS` is RTL8372 but `ZX-SWTG3424S` is RTL9301).
+⛔ Treat AliExpress and vendor listings as worthless for chip ID — a community table
+lists six units as RTL8373 from vendor pages while runtime code says RTL8372.
 
 ## Management surface — the whole of it
 
@@ -132,9 +151,12 @@ this is a genuinely one-directional signal that nothing has ever observed here.
 `RxBad` is not necessarily CRC (it lumps error causes together), and 1,239 against
 16.5 M good is ~0.0075%. Trend it; do not diagnose from one sample.
 
-**Still unobtainable:** far-end Rx *optical power*. That needs DDM, which this
-firmware does not expose, so degradation still shows only as errors after the fact
-rather than as light level beforehand.
+**Still unobtainable:** far-end Rx *optical power*. That needs DDM, which **this
+firmware version** does not expose, so degradation shows only as errors after the
+fact rather than as falling light beforehand. ⚠ Not a silicon limit — the `V200.x`
+firmware generation reportedly has a DDM tab, and the SoC's I2C controller is wired
+to the SFP module. See the firmware section; the upgrade path is real but carries
+two documented brick modes.
 
 ## Config persistence — `save.cgi` is a separate step
 
@@ -219,7 +241,10 @@ is ever segmented this belongs on an isolated management VLAN.
 | Fact | Source |
 |---|---|
 | ODM is **HRUI / hongyavision**, board family `SWTG###AS`; our 4x2.5G + 2xSFP+ managed unit is the **`SWTG024AS`** board | [up-n-atom/SWTG118AS](https://github.com/up-n-atom/SWTG118AS) |
-| Same-PCB siblings: **Horaco ZX-SWTG124AS**, **Sodola SL-SWTG124AS-D**, **XikeStor SKS3200M-4GPY2XF** | as above + vendor manuals |
+| Our board is **`PCB-SWTG024AS-V2.1.x_19023`** — matches the `V2.1` this unit reports | up-n-atom + RTLPlayground device docs |
+| **Closest twins (same PCB rev): XikeStor `SKS3200-4E2X` (V2.1.0) and Sodola `SL902-SWTGW124AS` (V2.1.1)** — search under these, not under OptFocus | RTLPlayground issue #15 (carries a flash dump + stock firmware for the XikeStor — our recovery baseline) |
+| Wider same-design family: Horaco ZX-SWTG124AS, Sodola SL-SWTG124AS-D, MokerLink `2G040210GSM`, Binardat `2G06-04210GSM`, YuLinca `2G06210GSMN`, Lianguo `LG-SWTG124AS`, keepLiNK. **No AmpCom 4+2 managed exists.** | brand sweep |
+| ODM confirmed by a hidden `/Hengrui_mp_cfg` admin page on V2.1 boards, plus HRUI's catalogue entry `HR903-SWTG024AS` | up-n-atom / HRUI |
 | OptFocus and Horaco ship **MD5-identical firmware** (`b06c8b3f1882573b2927bdbc2a0ee8bf`, PCB `SWTG024AS-A-V2.0.1`) | [RTLPlayground #40](https://github.com/logicog/RTLPlayground/issues/40) |
 | `V100.x`/`V200.x` is the **newer, hardened** HRUI generation; the older line is `v1.9.x`. The AES/UID algorithm and bootloader password both changed at the boundary. | up-n-atom |
 
@@ -275,6 +300,30 @@ original flash first.
 **SNMP will never arrive**: an 8-bit 8051 core with ≤2 MB SPI flash has no room for
 an SNMP stack. This is a hardware-class ceiling, not a vendor oversight.
 
+### ⚠ `V200.x` reportedly ADDS the SFP+ DDM tab — the one real path to far-end optics
+
+`V100.x` (ours) and `V200.x` are two generations of the same HRUI firmware, and the
+successor is reported to add the **SFP+ DDM tab this firmware lacks**. So far-end
+optical power is *not* a silicon limit — the I2C controller is wired to the SFP
+MOD-DEF lines and reads the SFF-8472 EEPROM. It is a firmware-version limit.
+
+That is the only credible route to the reading we actually wanted. It is also the
+riskiest thing in this document, and **not recommended without a flash dump first**:
+
+1. **Cross-flash can lock you out of the web UI.** Sodola V200 onto a XikeStor —
+   same design, one PCB rev apart — booted fine over serial but `admin/admin` and
+   manual cookie-setting both failed. No recovery documented.
+2. **Strapping differs between boards of the same design**: *"the 'reset factory
+   default' pin is pulled down in some hardware and will cause reset loop."* Same
+   ODM design, different resistors.
+3. **No V200 image for our model is published anywhere**, so any attempt means a
+   sibling's image — and our exact silicon suffix is unverified (see above).
+
+Both recorded failure modes leave a device that **boots and is useless**, on a
+switch carrying opi5pro, AdGuard and the syslog collector. If this is ever
+attempted: dump the flash with a SOIC-8 clip + CH341A first, and do it at a planned
+maintenance window, never opportunistically.
+
 ### The spontaneous factory reset is a documented complaint on this exact model
 
 CNX Software, reviewing this class, names *"the OPTFOCUS OFS-MX1F2GT4 with four
@@ -313,11 +362,31 @@ the `rtl930x` target is **not cleanly verified** by anyone, and on OpenWrt DSA t
 SNMP IF-MIB would undercount hardware-forwarded traffic badly. We could spend money
 and land somewhere worse than a working `port.cgi?page=stats`.
 
+### A page we deliberately did NOT fetch
+
+`/Hengrui_mp_cfg` — the hidden ODM manufacturing page that would have confirmed the
+HRUI attribution on our own unit. Skipped on purpose: this firmware is *proven* to
+have state-changing GET endpoints (`ftdft.cgi` wipes the config), "mp" means mass
+production, and this switch carries opi5pro, AdGuard and the syslog collector. The
+attribution is already established from the board string and the 12/12 web-UI
+fingerprint match; confirming it locally was not worth an unknown vendor action on
+production infrastructure. **Do not fetch it casually either.**
+
 ### Verdict
 
-**Keep the stock firmware. Flash nothing.** Build the exporter on
-`port.cgi?page=stats`, accept that far-end optical power is unavailable, and treat
-`RxBadPkt` on port 5 as the far-direction signal we did not previously have.
+**Keep the stock firmware. Flash nothing** — not RTLPlayground (broken on this exact
+model), not a sibling's V100 image, and not a V200 image without a flash dump and a
+maintenance window. Build the exporter on `port.cgi?page=stats` and treat `RxBadPkt`
+on port 5 as the far-direction signal we did not previously have.
+
+If far-end optical power ever becomes worth real risk, the ranked options are:
+1. **V200.x firmware** from a same-PCB twin — cheapest, two documented brick modes,
+   needs a SOIC-8 dump first.
+2. **Replace the switch** with an OpenWrt-supported RTL930x unit — but DDM there is
+   unproven and DSA counters undercount hardware-forwarded traffic.
+3. Accept the limit and rely on `RxBadPkt` + our own `eth5` CRC and flap counters.
+
+Option 3 is where we are, and it is a defensible place to stay.
 
 ## Local artifacts
 
