@@ -376,14 +376,65 @@ Reading is safe; `regset` and bootloader entry are where risk starts. The loader
 also has a **failsafe firmware-upload page at `192.168.1.1`** if the runtime fails,
 forced by holding ESC at power-on.
 
-### If we ever want true optical telemetry, it means new hardware
+### If we ever want true optical telemetry, it means new hardware — and it WOULD work
 
-OpenWrt 25.12 with working 2.5G copper — best candidate **Zyxel XGS1210-12**
-(RTL9302B, 8x1G + 2x2.5G + 2xSFP+). ⚠ Two caveats that undercut the idea: SFP DDM on
-the `rtl930x` target is **not cleanly verified** by anyone, and on OpenWrt DSA the
-`/proc/net/dev` counters for switch ports only count CPU-port traffic, so naive
-SNMP IF-MIB would undercount hardware-forwarded traffic badly. We could spend money
-and land somewhere worse than a working `port.cgi?page=stats`.
+⚠ **Corrected 2026-08-11.** An earlier revision said SFP DDM on OpenWrt's `rtl930x`
+target was "not cleanly verified by anyone". **That was wrong** — see the note on how
+it was wrong, below, because the failure mode is reusable.
+
+**DDM on rtl930x is confirmed working**, with a real user's decoded `ethtool -m`
+output on real hardware ([openwrt#19505](https://github.com/openwrt/openwrt/issues/19505),
+TP-Link TL-ST1008F v2, RTL9303):
+
+```
+Laser output power                    : 0.2799 mW / -5.53 dBm
+Receiver signal average optical power : 0.0000 mW / -inf dBm
+```
+
+The `-inf dBm` Rx is the proof: no fibre was plugged in, so that is a live read of
+the SFF-8472 **A2h diagnostic page**, not a static EEPROM string. Corroborated by an
+hwmon `temp1_input` channel appearing on module insertion, an upstream-merged
+`sfp-thermal` zone with a 110 °C trip, and the source path (`i2c_block_size = 16`
+clears the hwmon gate in `sfp.c`; the cages hang off the SoC SMBus via
+`i2c-rtl9300.c`).
+
+⛔ **THE CAVEAT THAT MATTERS FOR US — it is about BiDi specifically.** The rtl9300
+SFP i2c bus ran too fast for some cages, and the reported victim was a **10G BiDi
+module** (`ATS SFP-10G-BX`) flapping with `failed to read SFP soft status: -EIO`
+([#21665](https://github.com/openwrt/openwrt/issues/21665)). Fixed by dropping the
+SFP i2c buses to 50 kHz — merged 2026-03-07 and 2026-03-14. **OpenWrt 25.12.0 was
+tagged 2026-03-03, so the fix is main/snapshot ONLY.** Since LOS and TX-fault are
+read over that same bus, i2c flakiness presents as **link flapping**, not just absent
+telemetry — on the fibre carrying opi5pro, AdGuard and the syslog collector. We run a
+BiDi module. Any purchase here means running **snapshot** firmware, or verifying the
+backport first.
+
+Candidates (every row tied to a DTS filename whose prefix states the SoC):
+
+| Model | Ports | Status | Note |
+|---|---|---|---|
+| **Zyxel XGS1210-12** | 8x1G + 2x2.5G + 2xSFP+ | stable 25.12 | Matches our real mix exactly. All four SFP signals wired (`los`, `tx-fault`, `mod-def0`, `tx-disable`). ⚠ open, unresolved [#21205](https://github.com/openwrt/openwrt/issues/21205): a 2.5G port dies after days of uptime, recurred on 25.12 HEAD |
+| Zyxel XMG1915-10E | 8x2.5G + 2xSFP+ | snapshot | Headroom option; `led_set0` has no 10M bit — no 10BASE-T devices |
+| Hasivo S600WP-5GT-2SX-SE | 5x2.5G + 2xSFP+ | snapshot | Smallest sensible box |
+
+Clear negatives: **Hasivo S1100W-8XGT-SE has no SFP cage at all** despite being in
+stable; XikeStor SKS8300-8X/8310-8X and TP-Link TL-ST1008F v2 have **zero copper**;
+Horaco ZX-SWTGW2C8F, NicGiga S100-0800S-M and Vimin VM-S100-0800MS likewise (verified
+by grepping their DTS for `mdio_bus`/`PHY_C45` — no matches, despite model names
+implying copper). Nothing smaller than ~7 ports exists with a genuine SFP+ cage.
+
+Remaining true caveat: on OpenWrt DSA, `/proc/net/dev` counters for switch ports
+count only CPU-port traffic, so a naive SNMP IF-MIB undercounts hardware-forwarded
+traffic badly. Use `ethtool -S`.
+
+⛔ **How the "not verified" error happened, because it will happen again.** Three
+independent sweeps returned a clean negative and one found the artifact. The
+negatives searched the wrong *surface* — one used GitHub **code** search when the
+evidence was in an **issue** thread; another was HTTP-429'd off the OpenWrt forum for
+its whole run and correctly logged that as *unreached* rather than *absent*.
+**A single quoted artifact outweighs any number of absence-of-evidence sweeps.**
+Treat "nobody has posted X" as a hypothesis about your search coverage, never as a
+finding — and name the surfaces actually searched.
 
 ### A page we deliberately did NOT fetch
 
