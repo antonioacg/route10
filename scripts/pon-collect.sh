@@ -421,7 +421,7 @@ esac
 # CONTENT but only while the PON is not in O5 -- the window where it is worth
 # anything -- instead of a permanent firehose into the collector. `all` is
 # there if the full stream is genuinely wanted; `off` disables shipping.
-OMCI_SYSLOG=fault            # off | fault | all
+OMCI_SYSLOG=all              # off | fault | all
 OMCI_SYSLOG_MAXLINES=500
 
 _ship=0

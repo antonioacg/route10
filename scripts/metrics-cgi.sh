@@ -165,6 +165,17 @@ SELECT group_concat(line, char(10)) FROM (
 # the denominator before displaying a ratio:
 #   route10_host_tcp_unanswered / route10_host_tcp_flows   and   flows >= 10
 #
+# ⚠ CONDITIONAL EMITTER — absence means "nothing to report", NEVER "removed".
+# The series come from json_each() over $.ct.stall4, which obs-collect fills
+# with the top-N LAN hosts holding OUTBOUND TCP conntrack entries to PUBLIC
+# destinations. No such flows ⇒ empty array ⇒ json_each yields no rows ⇒ the
+# names vanish from /metrics entirely. That is normal, and it is guaranteed
+# during a WAN outage: no internet means nothing dials out, so the metric
+# that measures failed outbound connections has nothing to measure.
+# Consumers diffing the name set must treat these as may-be-absent (asked by
+# ops 2026-08-11, after they saw them disappear at outage onset and correctly
+# asked rather than filing it as a regression).
+#
 # ⚠ p2p makes SYN_SENT normal. A torrent host dials peers that are simply gone,
 # so it sits high on a perfectly healthy day. Read a host against ITS OWN trailing
 # baseline, never against an absolute threshold or against other hosts.
