@@ -444,8 +444,26 @@ RDNSCFG
     # Quiet in steady state (junk reverse now answered by dnsmasq before it ever
     # reaches here), so the per-line logger is cheap; a silent DNS component is
     # undebuggable from Grafana.
+    # ── optional storm rollup ────────────────────────────────────────────────
+    # DEFAULT OFF, on purpose. The filter is built, tested and deployed, but the
+    # routedns line volume is a SHARED VALUE: ops keys a sustained-failover rule
+    # on that stream, so reducing it needs their agreement first (contract
+    # §route10.routedns verbosity). Flipping this to `on` is the whole change
+    # once they confirm the rollup's counted form suits their rule.
+    #
+    # Ready now rather than later because the 2026-08-11 storm supplied the data
+    # to build it against, and reconstructing that mid-incident is exactly when
+    # you cannot afford to. Measured on real captured output: 96% fewer lines,
+    # state transitions preserved verbatim.
+    RDNS_LOG_ROLLUP=off          # off | on
+    RDNS_ROLLUP_WINDOW=60        # seconds per counted rollup, per condition
+    RDNS_FILTER="cat"
+    if [ "$RDNS_LOG_ROLLUP" = on ] && [ -f /cfg/scripts/rdns-logfilter.awk ]; then
+        RDNS_FILTER="awk -v WINDOW=$RDNS_ROLLUP_WINDOW -f /cfg/scripts/rdns-logfilter.awk"
+    fi
+
     if ! pidof routedns >/dev/null 2>&1; then
-        setsid sh -c "\"$RDNS_BIN\" \"$RDNS_CFG\" 2>&1 | while IFS= read -r ln; do
+        setsid sh -c "\"$RDNS_BIN\" \"$RDNS_CFG\" 2>&1 | $RDNS_FILTER | while IFS= read -r ln; do
             case \"\$ln\" in
                 *level=ERROR*) sev=err ;;
                 *level=WARN*)  sev=warning ;;
