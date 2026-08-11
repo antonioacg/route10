@@ -83,19 +83,19 @@ DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\n
 # truncate. Riding the EXISTING once-a-minute session keeps pon-collect the
 # sole CLI user (a separate cron would be a second one -- see the wedge notes).
 #
-# ⚠ UNPROVEN. Enabled 2026-08-11 and never observed to write a single byte,
-# while the hardware DS-OMCI counter kept incrementing. It may be a stub in
-# this firmware build. So an EMPTY omci table means "captured nothing", NOT
-# "the OLT sent nothing" -- never reason from its silence. Kept because the
-# cost is one `cat` per minute and the payoff, if it does work, is the OLT's
-# instructions in plain text.
+# ⚠ PARSED MODE WRITES TO `<logfile>.par`, NOT the path `omcicli get logfile`
+# reports. `get logfile` says "/tmp/omcilog"; with mode 2/6 (Parsed) the output
+# actually lands in /tmp/omcilog.par and the reported path stays 0 bytes. That
+# cost hours on 2026-08-11 -- the empty file was read as "the feature is a stub"
+# when 281 KB of the OLT's conversation was sitting in the sibling path. Drain
+# BOTH: raw mode (1) uses the bare name, parsed (2) uses .par.
 #
 # The sentinels are written __OMCI''LOG_* so the ECHOED command line (telnet
 # echoes what we send) does not itself match the sed range that extracts the
 # body -- otherwise the drain would capture its own command.
 OMCI_LOGMODE=6
 OMCI_LOGMASK=0x3FFFFFFF
-OMCIDRAIN="echo __OMCI''LOG_S__; cat /tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__; : > /tmp/omcilog"
+OMCIDRAIN="echo __OMCI''LOG_S__; cat /tmp/omcilog.par /tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__; : > /tmp/omcilog.par; : > /tmp/omcilog"
 poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" 2>&1; }
 is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
@@ -137,8 +137,11 @@ fi
 # ⚠ The cat-then-truncate is not atomic: a message written between the two
 # is lost. At OMCI rates that window is negligible, and losing a line beats
 # re-ingesting the whole file every minute.
-OMCILOG=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCILOG_E__/p' \
-    | sed '1d;$d' | head -c 32000 | sed "s/'/''/g")
+_omci_body=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCILOG_E__/p' | sed '1d;$d')
+OMCILOG=$(printf '%s' "$_omci_body" | head -c 32000 | sed "s/'/''/g")
+# Never truncate silently -- a capped capture that looks complete is how a
+# missing signal gets read as an absent one.
+[ ${#_omci_body} -gt 32000 ] && warn "OMCI drain truncated: ${#_omci_body} B drained, 32000 B stored (steady state is ~6 KB/min)"
 RAW=$(printf '%s\n' "$RAW" | sed '/__OMCILOG_S__/,/__OMCILOG_E__/d')
 
 # ── parsers (against real 2026-08-08 output) ────────────────────────────────
