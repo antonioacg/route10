@@ -123,11 +123,28 @@ fi
 # 8 MiB ≈ 28 min under that flood and days when healthy; it costs 8 MiB of the
 # ~476 MB free, i.e. under 2%. Not portal-modeled (Alta's cloud config has no
 # log-buffer key), and uci system is tmpfs/cloud-rebuilt → re-asserted here.
-if [ "$(uci -q get system.@system[0].log_size)" != "8192" ]; then
-    uci set system.@system[0].log_size='8192'
-    uci commit system
-    /etc/init.d/log restart >/dev/null 2>&1 || true
-    log "syslog ring resized to 8 MiB (64 KiB held only 14 s under routedns flood)"
+# ⛔ `uci system.@system[0].log_size` is INERT on this build — do not "fix" this
+# by setting it. Verified by reading the thing that decides rather than the
+# thing that reports: this firmware's /etc/init.d/syslogd builds its args as
+#     procd_append_param command -n -b "$backlog" -t -u $opts
+# with NO `-s` anywhere, so busybox falls back to its 200 KB default and the uci
+# key is never consulted. There is also no logd (`logread` returns 0 lines), so
+# the key has no second consumer either. Setting it changes nothing at all —
+# which is exactly what happened on the first attempt at this fix, and it read
+# as working because `uci get` faithfully returned the value nobody uses.
+#
+# The real control is syslogd's own `-s SIZE_KB`. Patch it into the init (which
+# lives on tmpfs and is restored by firmware on boot, hence re-applied here) and
+# restart. Idempotent via the grep. Keeps `-R` forwarding intact by editing the
+# arg line rather than re-launching syslogd by hand outside procd.
+if ! grep -q '\-t -u -s ' /etc/init.d/syslogd 2>/dev/null; then
+    sed -i 's|procd_append_param command -n -b "$backlog" -t -u \$opts|procd_append_param command -n -b "$backlog" -t -u -s 8192 $opts|' /etc/init.d/syslogd
+    if grep -q '\-t -u -s 8192' /etc/init.d/syslogd; then
+        /etc/init.d/syslogd restart >/dev/null 2>&1 || true
+        log "syslogd rotation raised to 8 MB/file (default 200 KB held ~40 s under routedns flood)"
+    else
+        warn "syslogd init patch did not apply — arg line changed upstream, /var/log/messages stays at the 200 KB default"
+    fi
 fi
 
 # ── LAN NTP server ───────────────────────────────────────────────────────────
