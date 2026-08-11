@@ -158,6 +158,29 @@ firmware generation reportedly has a DDM tab, and the SoC's I2C controller is wi
 to the SFP module. See the firmware section; the upgrade path is real but carries
 two documented brick modes.
 
+## Port map — what is actually plugged into it (2026-08-11)
+
+From `mac.cgi?page=fwd_tbl` joined with `port.cgi`. We had never had this before;
+the office side was previously an unlit box.
+
+| Port | Device | Negotiated |
+|---|---|---|
+| 1 | `e6:35:01:bf:dd:b7` — **opi5pro** (`.200` / `.241` AdGuard / `.242` syslog) | **1000Full** |
+| 2 | `ce:56:a2:6d:75:93` (`.17`) | 100Full |
+| 3 | `00:e0:4c:68:01:25` — operator's Mac | 2500Full |
+| 4 | `a0:ce:c8:a8:ae:5f` (`.72`) | 2500Full |
+| 5 | 11 MACs incl. route10 `bc:b9:23:81:97:14` and `eth5` `be:b9:23:84:97:14` | **10GFull** — the BiDi fibre uplink |
+| 6 | — | empty SFP cage |
+
+**Replacement sizing:** only **4 copper + 1 SFP+** is actually required, and only two
+of the copper links run at 2.5G. Any future "what do we buy" question starts here,
+not from the current unit's 4+2 layout.
+
+⚠ **opi5pro negotiates 1000Full on a 2.5G-capable port.** The Orange Pi 5 Pro has
+2.5GbE and the Mac on port 3 gets 2500Full through the same switch, so the switch is
+not the limit — suspect cable (Cat5e / bad run) or NIC-side negotiation. Unrelated to
+the fibre work; recorded because it is free performance nobody was looking at.
+
 ## Config persistence — `save.cgi` is a separate step
 
 Settings pages **Apply** to the running config. `save.cgi` is a distinct page that
