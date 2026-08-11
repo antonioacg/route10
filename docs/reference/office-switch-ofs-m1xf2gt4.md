@@ -571,6 +571,57 @@ attribution is already established from the board string and the 12/12 web-UI
 fingerprint match; confirming it locally was not worth an unknown vendor action on
 production infrastructure. **Do not fetch it casually either.**
 
+## Buying criteria — what this cost us, distilled
+
+Written here because this file is where the next purchase decision will start.
+
+**1. Prefer a box you can run YOUR OWN CODE on. That is the whole criterion.**
+⛔ Do NOT make "does it speak SNMP" the test. SNMP is the **legacy floor** — a polled
+protocol with a MIB indirection layer, a fixed counter set, and no way to add a metric
+you need. It is what you settle for when you cannot run code on the device. A box
+running OpenWrt gives `ethtool -S`, `/sys`, and a real Prometheus exporter running
+*on the device* — the same pattern as this repo's own `/metrics` CGI. That is strictly
+better than being polled, and it is extensible: every metric we added this session
+(DNS ladder, carrier flaps, eth5 CRC, SFP voltage/bias) exists because we could put
+code on the box. None of them would have been reachable over SNMP.
+
+Ranked, best to worst:
+1. **Can run an exporter on it** (OpenWrt, or any box with a shell) — buy this.
+2. **Documented programmatic read path** (HTTP/JSON/CGI you can scrape). Workable —
+   it is how `daemon-odi-w2-ddm.sh` reads the stick, and how we would scrape
+   `port.cgi?page=stats` here.
+3. **SNMP only** — legacy, coarse, but at least polled and standard.
+4. **Web UI only, undocumented** — what we bought. Everything becomes archaeology.
+
+**2. Check the OpenWrt Table of Hardware for the EXACT model AND revision.** Never the
+brand, never the model prefix. The same vendor ships RTL8372 (cannot run Linux) and
+RTL9303 (fine) under adjacent names, and A1/B1 revisions of one model need different
+images because the PHYs sit at different MDIO addresses.
+
+**3. Verify the specific capability you are buying FOR has been demonstrated on that
+model** — not on the family. SFP DDM is confirmed on one TP-Link and merely inferred
+on every other rtl930x board. Buying on a family-level inference is how you spend
+money and still not get the reading.
+
+**4. Multiply AliExpress sticker by 1.5–1.8 for landed cost to Brazil.** Measured
+across six listings; the tax is disclosed by AliExpress itself at checkout.
+
+**5. Buy for the ports you USE, not the ports you have.** Our real requirement is four
+copper and one SFP+ cage, not the 4+2 the current box happens to have.
+
+**6. Ask the seller in writing for board revision, RAM and SKU variant.** Marketplace
+listings for this class disclose colour and nothing else, while OpenWrt ships separate
+images per revision.
+
+⚠ **Honest counterweight, so this is not read as pure regret:** a full-OpenWrt build
+was largely not available when this gear was bought — the rtl930x target had *one*
+device in 24.10 stable, and there is still no OpenWrt-supported 4-port multi-gig
+switch with an SFP+ cage at any price. The floor is 10–12 ports. And OpenWrt would
+have brought its own open bugs (a 2.5G port dying after days of uptime, SerDes
+calibration failures on copper SFPs, an i2c bug that specifically broke BiDi optics).
+The signal that actually mattered turned out to be in the switch we already own, at an
+unlinked URL, for free.
+
 ### Verdict
 
 **Keep the stock firmware. Flash nothing** — not RTLPlayground (broken on this exact
