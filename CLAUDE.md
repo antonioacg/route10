@@ -82,12 +82,43 @@ telnet probes — they orphan the lock too.
     Source: `scripts/obs-collect.sh`.
   - `/cfg/scripts/pon-collect.sh` (`* * * * *` cron) — PON-layer telemetry from
     the ODI stick via `stick-exec` clean-telnet (PLOAM state, LOS/LOF/SD alarms,
-    BIP/FEC error counters, rogue-SD, stick uptime) → `/a/obs/rt.sql` `pon` table
-    → 19 `route10_pon_*` metrics. The **leading** fibre-degradation signal the
-    SFF-8472 DDM can't show. Diag batch goes through `diag` **stdin + `exit`**
+    BIP/FEC error counters, rogue-SD, stick uptime, plus activation / upstream /
+    OMCI / BWMAP counters) → `/a/obs/rt.sql` `pon` table → 29 `route10_pon_*`
+    metrics. The **leading** fibre-degradation signal the SFF-8472 DDM can't
+    show. Diag batch goes through `diag` **stdin + `exit`**
     (never bare `diag <subcmd>`, which strands the interactive prompt and wedges
-    the single CLI); atomic `mkdir` overlap lock; raw blob stored only on a parse
-    anomaly. Sole stick-CLI user, so 1-min is safe. **Self-heals a wedge**: on a
+    the single CLI); atomic `mkdir` overlap lock; raw blob kept on a parse
+    anomaly **or any non-O5 row** (a bad PON is the window worth full context
+    for). Sole stick-CLI user, so 1-min is safe.
+    - **`onu_state` parses O1–O7**, not just O5. Before 2026-08-11 every other
+      state read `null`/NaN, so **O7 (the OLT deliberately disabling us via
+      `Disable_Serial_Number`) was indistinguishable from O2 (harmless
+      standby)**. O5→O2 is `Deactivate_ONU-ID` — a *soft* refusal where the OLT
+      still accepts our SN. Those need opposite responses; warns on O7.
+    - **`ranging_req` is the loop detector** — a healthy ONU ranges ONCE and
+      stays in O5, so a sustained rate IS the "OLT admits us then drops us"
+      fault. Warns ≥3/cycle. ⛔ **Never alert on `sn_req`** — that is the OLT's
+      broadcast discovery window, 30–38/min even when healthy.
+    - **UPSTREAM LOSS, measured** (`omci_tx.req`/`retx`): the OLT re-sends a
+      request with the SAME transaction ID on a ~1 s timeout when our reply
+      doesn't arrive, so duplicate request TCIs read the one direction DDM
+      **structurally cannot** see (it reports light we EMIT, never what the OLT
+      receives). Warns >5% with a ≥20 sample gate. 2026-08-11 outage = 18.3%.
+    - **OMCI log drain** → `omci` table, **7-day** retention (raw text is
+      ~9.6 KB/min while faulting; 30 d would be ~415 MB of a 500 MB `/a/obs`
+      budget and would make the janitor evict the 2-y rollups). The *signal* is
+      already at 30 d as `omci_tx.*`. ⛔ **Parsed mode writes to
+      `/tmp/omcilog.par`, NOT the `/tmp/omcilog` that `omcicli get logfile`
+      reports** — the reported path stays 0 bytes forever; that cost hours on
+      2026-08-11. Logger is runtime-only (`omci_app -f off 0`), so pon-collect
+      re-arms it on its reboot detection.
+    - **Raw OMCI lines → syslog tag `route10.omci`** (`daemon.info`, separate
+      from `route10.pon-collect` so a firehose never rides the alert stream).
+      Gated to non-O5 by default (~164 lines/min while faulting). busybox
+      syslogd truncates the payload at **221 B** (measured, not the "~256 B" in
+      the observability note), so over-long lines are split `c<seq>.<i>/<n>|…`
+      and rejoin byte-identically; verified by round trip.
+    **Self-heals a wedge**: on a
     detected wedge it runs `stick-unwedge.sh` once (rate-limited 1/5min) and
     re-polls, so a wedge costs ~1 cycle (<90 s staleness), not an open-ended
     stall — only a wedge that needs a stick reboot stays stale. Source:
