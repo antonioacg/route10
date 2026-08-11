@@ -73,7 +73,7 @@ trap 'rm -rf "$LOCK"' EXIT
 TS=$(date +%s)
 
 # One clean session: uptime (reboot detection) + the diag batch via stdin pipe.
-DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\nexit\n" | diag'
+DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\ngpon show counter global ds-phy\ngpon show counter global ds-plm\ngpon show counter global active\ngpon show counter global us-plm\ngpon show counter global us-phy\ngpon show counter global ds-omci\ngpon show counter global ds-bw\nexit\n" | diag'
 poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" 2>&1; }
 is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
@@ -154,6 +154,47 @@ PLOAM_CRC=$(val "CRC Err RX PLOAM")
 ROGUE_LONG=$(val "SD too long count")
 ROGUE_MIS=$(val "SD mismatch count")
 
+# ── activation / upstream / OMCI / BWMAP counters ───────────────────────────
+# Added 2026-08-11 after an outage that took an hour to characterise using
+# exactly these five counter groups, read by hand. They answer the questions
+# the ds-phy/ds-plm set cannot:
+#   active   RANGING_REQ is the loop detector. A healthy ONU ranges ONCE and
+#            stays in O5, so a sustained non-zero rate IS the "activating and
+#            being dropped" fault, named directly instead of inferred from a
+#            state that happens to read O2 at each 60-s sample.
+#   us-plm   TX_SN_PLOAM proves OUR side answers the OLT -- it separates "our
+#            laser is dead" from "the OLT will not keep us", which the local
+#            DDM cannot do (it reads emitted light, never what the OLT hears).
+#   us-phy   TX_BOH: upstream bursts actually leaving.
+#   ds-omci  provisioning progress. OMCI only starts AFTER activation
+#            succeeds, so ~0 here while ranging churns places the failure
+#            before OMCI -- which is what pointed at the pre-OMCI gate.
+#   ds-bw    grant-layer integrity; BWMAP CRC/invalid can rise while ds-phy
+#            BIP/FEC stay clean.
+SN_REQ=$(val "SN Req")
+RANGING_REQ=$(val "Ranging Req")
+TX_SN_PLOAM=$(val "TX S/N PLOAM")
+TX_BOH=$(val "TX BOH")
+OMCI_PROC=$(val "Processed OMCI")
+OMCI_DROP=$(val "Dropped OMCI")
+BW_CRC=$(val "CRC Err RX BwMap")
+BW_INV0=$(val "Invalid BwMap 0")
+BW_INV1=$(val "Invalid BwMap 1")
+
+# Re-activation loop alert. These counters reset on read, so RANGING_REQ is
+# already "rangings in the last minute" -- no rate maths needed. Threshold 3
+# tolerates a legitimate one-off re-activation (recovery, stick reboot) while
+# the fault case sits an order of magnitude above it (~10/min measured on
+# 2026-08-11). Emitted-error alert, never a silence check.
+# NOTE: deliberately NOT alerting on SN_REQ. That counts the OLT's broadcast
+# discovery window and ran ~30-38/min throughout the outage; it is background
+# traffic, and we have no healthy baseline for it yet, so treating it as a
+# fault signal would manufacture a permanent false alarm.
+case "$RANGING_REQ" in
+    ''|*[!0-9]*) ;;
+    *) [ "$RANGING_REQ" -ge 3 ] && warn "PON re-activation loop: ranging_req=$RANGING_REQ in this cycle (onu_state=${ONU:-?}) — OLT is ranging then dropping us; healthy is 0" ;;
+esac
+
 # ── accumulate the ds counters into running totals ──────────────────────────
 # The stick's ds-phy/ds-plm counters RESET ON EVERY READ (proven 2026-08-08:
 # two reads 1 s apart returned 60 then 0) — each poll's value is "count since
@@ -186,14 +227,30 @@ acc fec_uncor_cw "$FEC_UNC";   FEC_UNC=$ACC
 acc sf_los       "$SF_LOS";    SF_LOS=$ACC
 acc ploam_rx     "$PLOAM_RX";  PLOAM_RX=$ACC
 acc ploam_crc    "$PLOAM_CRC"; PLOAM_CRC=$ACC
+# Same reset-on-read contract as the ds set above, so same accumulation. The
+# alert above already consumed the per-cycle delta, which is why it runs
+# BEFORE this point -- acc() overwrites each variable with the running total.
+acc sn_req       "$SN_REQ";      SN_REQ=$ACC
+acc ranging_req  "$RANGING_REQ"; RANGING_REQ=$ACC
+acc tx_sn_ploam  "$TX_SN_PLOAM"; TX_SN_PLOAM=$ACC
+acc tx_boh       "$TX_BOH";      TX_BOH=$ACC
+acc omci_proc    "$OMCI_PROC";   OMCI_PROC=$ACC
+acc omci_drop    "$OMCI_DROP";   OMCI_DROP=$ACC
+acc bw_crc_err   "$BW_CRC";      BW_CRC=$ACC
+acc bw_invalid0  "$BW_INV0";     BW_INV0=$ACC
+acc bw_invalid1  "$BW_INV1";     BW_INV1=$ACC
 
-JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s}}' \
+JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
     "$(alarm 'TX Too Long')" "$(alarm 'TX Mismatch')" \
     "$(nz "$BIP_BITS")" "$(nz "$BIP_BLK")" "$(nz "$FEC_COR")" "$(nz "$FEC_UNC")" \
     "$(nz "$SF_LOS")" "$(nz "$PLOAM_RX")" "$(nz "$PLOAM_CRC")" \
-    "$(nz "$ROGUE_LONG")" "$(nz "$ROGUE_MIS")")
+    "$(nz "$ROGUE_LONG")" "$(nz "$ROGUE_MIS")" \
+    "$(nz "$SN_REQ")" "$(nz "$RANGING_REQ")" \
+    "$(nz "$TX_SN_PLOAM")" "$(nz "$TX_BOH")" \
+    "$(nz "$OMCI_PROC")" "$(nz "$OMCI_DROP")" \
+    "$(nz "$BW_CRC")" "$(nz "$BW_INV0")" "$(nz "$BW_INV1")")
 
 # Store the raw diag blob ONLY when a field failed to parse (JSON contains a
 # null). Parsers are verified against real output, so a healthy row is all
