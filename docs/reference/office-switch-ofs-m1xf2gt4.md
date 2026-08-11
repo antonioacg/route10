@@ -401,9 +401,21 @@ clears the hwmon gate in `sfp.c`; the cages hang off the SoC SMBus via
 ⛔ **THE CAVEAT THAT MATTERS FOR US — it is about BiDi specifically.** The rtl9300
 SFP i2c bus ran too fast for some cages, and the reported victim was a **10G BiDi
 module** (`ATS SFP-10G-BX`) flapping with `failed to read SFP soft status: -EIO`
-([#21665](https://github.com/openwrt/openwrt/issues/21665)). Fixed by dropping the
-SFP i2c buses to 50 kHz — merged 2026-03-07 and 2026-03-14. **OpenWrt 25.12.0 was
-tagged 2026-03-03, so the fix is main/snapshot ONLY.** Since LOS and TX-fault are
+([#21665](https://github.com/openwrt/openwrt/issues/21665) — body contains `Bidi`,
+`-EIO`, `soft status`, `transmit fault`). Fixed by dropping the SFP i2c buses to
+50 kHz — PRs [#22209](https://github.com/openwrt/openwrt/pull/22209) and
+[#22210](https://github.com/openwrt/openwrt/pull/22210). **The fix is main/snapshot
+ONLY**, verified first-hand against raw sources rather than relayed:
+
+| Check | Result |
+|---|---|
+| `v25.12.0` tag date | **2026-03-03T00:16:17Z** |
+| PRs merged | **2026-03-07** and **2026-03-14** — both AFTER the tag |
+| `clock-frequency` in `rtl9303_xikestor_sks8300-8x.dts` | branch `openwrt-25.12`: **0** · `main`: **8** |
+| i2c bus-speed patch in `realtek/patches-6.18` | `openwrt-25.12`: **0** · `main`: **1** |
+
+Re-check those four before any purchase — once a stable release carries the fix,
+this whole caveat evaporates and the decision changes. Since LOS and TX-fault are
 read over that same bus, i2c flakiness presents as **link flapping**, not just absent
 telemetry — on the fibre carrying opi5pro, AdGuard and the syslog collector. We run a
 BiDi module. Any purchase here means running **snapshot** firmware, or verifying the
