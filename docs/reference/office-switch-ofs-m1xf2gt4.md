@@ -439,6 +439,43 @@ Remaining true caveat: on OpenWrt DSA, `/proc/net/dev` counters for switch ports
 count only CPU-port traffic, so a naive SNMP IF-MIB undercounts hardware-forwarded
 traffic badly. Use `ethtool -S`.
 
+### Buying: the stable-vs-AliExpress fork collapses for us
+
+Every AliExpress-buyable OpenWrt 2.5G+SFP+ unit is **snapshot-only**; everything in a
+**stable** release is retail channel (Zyxel, Plasma Cloud) with **zero** AliExpress
+presence. That looks like a hard trade — but **we need snapshot regardless**, because
+the BiDi i2c fix is absent from the stable branch (verified at `openwrt-25.12` HEAD,
+which includes 25.12.5). So "it ships in stable" buys us nothing, and the marketplace
+option stops being a compromise.
+
+Leading candidate on that logic: **Hasivo F1100W-4SX-4XGT**, ~US$211, 4x SFP+ +
+4x RJ45 multi-gig, RTL9303 rev B, chipset known by teardown (the support commit names
+the RAM and flash part numbers). Better port fit than the Zyxel XGS1210-12, which is
+8x1G with only two 2.5G ports.
+
+⛔ **Two buying traps, both about silicon/variant drift under an unchanged model
+number** — the same disease as everything else in this document:
+
+1. **F1100W ships in EIGHT variants under one model number** — v1.02 has 512 MB RAM,
+   v1.03 has 256 MB, plus optional PoE daughterboard and optional RJ45 console.
+   OpenWrt ships **separate images**, and the 256 MB image runs on a 512 MB board but
+   **not the reverse**. Marketplace listings are silent on all four axes. Confirm the
+   revision with the seller in writing before buying.
+2. **Zyxel XGS1210-12 changed silicon without changing its name** — A1 uses RTL8226
+   PHYs, B1 uses RTL8221B, separate OpenWrt profiles, wrong image = wrong link speeds.
+
+⚠ **MUST VERIFY BEFORE BUYING, and it comes from our own port map:** the F1100W's
+copper ports are documented as 10G/5G/2.5G/1G — **100M is not listed**, and port 2 of
+our current switch runs a device at `100Full`. A switch whose copper will not
+negotiate 100M would strand that host. Check the PHY's supported speeds (RTL8261BE)
+before committing.
+
+⚠ DDM is confirmed on the **RTL9303 family** (the TP-Link artifact above), but there
+is **no model-specific confirmation** for the F1100W, SKS7300-4X4T, SKS8300-8X,
+SKS8310-8X or S600WP-5GT-2SX-SE. A targeted sweep using ethtool's output field labels
+returned zero hits for those exact boards. Same driver stack ⇒ inferred-likely, not
+verified-in-practice.
+
 ⛔ **How the "not verified" error happened, because it will happen again.** Three
 independent sweeps returned a clean negative and one found the artifact. The
 negatives searched the wrong *surface* — one used GitHub **code** search when the
