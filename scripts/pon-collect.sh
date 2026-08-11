@@ -122,7 +122,27 @@ alarm() {
 nz() { case "$1" in ''|*[!0-9]*) echo null ;; *) echo "$1" ;; esac; }
 
 UPTIME=$(printf '%s\n' "$RAW" | sed -n 's/^\([0-9][0-9]*\)\.[0-9].*/\1/p' | head -1)
-ONU=$(printf '%s\n' "$RAW" | sed -n 's/.*Operation State(O\([0-9]\)).*/\1/p' | head -1)
+# Match the state number generically, NOT just "Operation State(O5)". Each
+# state has its own label — "Standby State(O2)", "Serial Number State(O3)",
+# "Ranging State(O4)", "Emergency Stop State(O7)" — so an O5-only regex left
+# every non-operational state parsing as null, i.e. indistinguishable from a
+# broken parser AND from each other. That mattered on 2026-08-11: O7 (the OLT
+# sent Disable_Serial_Number — a DELIBERATE refusal of this ONU) read exactly
+# like O2 (harmless standby), so the metrics could not tell "we are banned"
+# from "we are mid-activation".
+ONU=$(printf '%s\n' "$RAW" | sed -n 's/.*State(O\([0-9]\)).*/\1/p' | head -1)
+
+# O7 is the ONE state that says the OLT is refusing us ON PURPOSE: it is
+# entered only on a Disable_Serial_Number PLOAM (ban, SN conflict, or a
+# deprovisioned line). Every other non-O5 state is the activation cycle
+# failing to complete — a link problem, not a decision. Alerting on them
+# separately is the whole point: "they cut us off" and "the link won't hold"
+# need opposite responses, and the O5-only regex above used to make the two
+# look identical. Emitted-error alert (never a silence check) — the string is
+# stable, ops may key a rule on it.
+if [ "$ONU" = "7" ]; then
+    warn "onu_state=O7 EMERGENCY STOP — OLT sent Disable_Serial_Number: deliberate refusal of this ONU (ban/SN-conflict/deprovision), NOT a link fault"
+fi
 
 BIP_BITS=$(val "BIP Error bits")
 BIP_BLK=$(val "BIP Error blocks")
@@ -185,9 +205,18 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
 # rate-limited to once/5min; if that fails, warn on TRANSITION to unreachable
 # and event on recovery (never every cycle). So a healthy steady state is a
 # 60-s cadence; a wedge costs ~1-2 cycles, not an open-ended stall.
+#
+# Also kept whenever the ONU is NOT in O5. Until 2026-08-11 those rows carried
+# a raw blob only as a side effect of the O5-only state regex (every other
+# state parsed as null); generalising that regex would have silently dropped
+# the one blob worth having — the 2026-08-11 outage was diagnosed entirely
+# from raws captured during the O2/O3/O4 cycle. A non-operational PON is a
+# bounded window, so the ~6 KB/min only applies while something is wrong.
+_raw_keep() { printf '%s' "$RAW" | head -c 6000 | sed "s/'/''/g"; }
 case "$JSON" in
-    *null*) RAW_COL=$(printf '%s' "$RAW" | head -c 6000 | sed "s/'/''/g") ;;
-    *)      RAW_COL='' ;;
+    *null*)             RAW_COL=$(_raw_keep) ;;
+    *'"onu_state":5,'*) RAW_COL='' ;;
+    *)                  RAW_COL=$(_raw_keep) ;;
 esac
 sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;
