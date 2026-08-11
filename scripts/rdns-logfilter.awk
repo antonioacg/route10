@@ -44,6 +44,17 @@
     if (match($0, /msg="[^"]*"/)) sig = substr($0, RSTART, RLENGTH)
     key = sev "|" sig
 
+    # Emitted as `original_msg="<text>"`, NOT `original=msg="<text>"`.
+    # logfmt reads key=value, so a value that itself begins unquoted with `msg=`
+    # terminates at the first space -- yielding original="msg=\"failing" and
+    # leaving `over`, `to`, `resolver"` as stray tokens. A nested key=value
+    # inside an unquoted value is not representable in logfmt. Caught by ops
+    # before the format was ever seen in anger; it would first have been parsed
+    # mid-incident, which is the worst possible time to discover a bad parser.
+    sigval = sig
+    sub(/^msg=/, "", sigval)
+    if (sigval == "other") sigval = "\"other\""
+
     now = (TESTMODE ? NR : systime())
 
     if (!(key in seen)) {                 # new condition => emit verbatim, now
@@ -55,8 +66,8 @@
 
     cnt[key]++
     if (now - t0[key] >= WINDOW) {        # sustained => one counted line
-        printf "level=%s msg=\"routedns-rollup\" suppressed=%d window=%d%s original=%s\n", \
-               lvl, cnt[key], (now - t0[key]), (TESTMODE ? "lines" : "s"), sig
+        printf "level=%s msg=\"routedns-rollup\" suppressed=%d window=%d%s original_msg=%s\n", \
+               lvl, cnt[key], (now - t0[key]), (TESTMODE ? "lines" : "s"), sigval
         fflush()
         cnt[key] = 0; t0[key] = now
     }
