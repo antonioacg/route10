@@ -1,2 +1,5 @@
 .DS_Store
 CLAUDE.local.md
+
+# Claude Code local worktree state — never commit
+.claude/worktrees/
