@@ -140,7 +140,21 @@ OMCI_LOGMASK=0x3FFFFFFF
 # there was never 1.7 MB of data to move, only 1.7 MB of our own padding.
 # (nc IS the right tool for a one-off byte-exact pull -- it is what diagnosed
 # this, since telnet strips NULs and the stick has no od/wc/du to see them.)
-OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; sed -n '/^\[/p' /var/tmp/omcilog.par 2>/dev/null; sed -n '/^\[/p' /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
+# ⛔ STOPGAP 2026-08-12 — this filters on the stick and that is the WRONG SIDE.
+# Measured on the live 2,559,307 B file, CLI-alive asserted before each run:
+#     sed -n '/^\[/p'   10379 ms   <- OVER the 10 s timeout: the wedge loop
+#     grep -a '^\['      8792 ms   <- only ~1.2 s of headroom
+#     awk  '/^\[/'      19456 ms
+#     nc (whole file)    1835 ms   + 1 ms to filter the same bytes on route10
+# The hole is ~99% of the file and every stick-side tool must scan all of it.
+# ⭐ The cost that matters is NOT the truncate cadence: the hole equals every
+# byte omci_app has written SINCE STICK BOOT, and only an omci_app restart
+# resets it. Measured growth ~2.5 MB/day at mask 0x3FFFFFFF, and grep costs
+# ~3.4 s/MB, so this buys ~10 days and then wedges again. A STICK REBOOT IS NOT
+# A FIX EITHER — it resets the offset and we are back at the 10 s wall inside a
+# day. The durable fixes are (a) move the bytes with nc and filter here, and
+# (b) cut the action mask so the offset grows slower. Both are follow-ups.
+OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; grep -a '^\[' /var/tmp/omcilog.par 2>/dev/null; grep -a '^\[' /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
 # ── MIB state poll — the durable half of the management-plane record ────────
 # The OMCI log is EPHEMERAL by construction: /tmp on the stick is tmpfs, the
 # logger is runtime-only, and an `ActivateSw` REBOOTS the stick -- so the one
@@ -174,7 +188,14 @@ OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/
 #
 # ⛔ Reading the ACS pointer is NOT following it. Nothing here dials out.
 MIBPOLL="echo __MIB''_S__; omcicli mib get 7; omcicli mib get 340; omcicli mib get 329; omcicli mib get 137; omcicli mib get 148; omcicli mib get 157; echo __MIB''_E__"
-poll_stick() { python3 "$STICK_EXEC" "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" "$MIBPOLL" 2>&1; }
+# --timeout 45 (default 10) because the drain legitimately takes ~9 s against a
+# 2.5 MB hole. Raising it does NOT slow wedge detection: a wedged CLI fails at
+# BANNER stage inside open_session (~0 s, "empty banner"), never at the per-command
+# timeout — verified live. What the old 10 s bought was the opposite of safety: the
+# drain overran it, stick-exec closed the socket abruptly, and that ORPHANED a
+# /bin/login+/bin/sh holding the single CLI. i.e. the timeout was manufacturing the
+# very wedge it was blamed on. 4x45 s worst case is bounded by the collector lock.
+poll_stick() { python3 "$STICK_EXEC" --timeout 45 "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" "$MIBPOLL" 2>&1; }
 is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
 RAW=$(poll_stick)
