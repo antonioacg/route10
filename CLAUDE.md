@@ -39,7 +39,10 @@ telnet probes — they orphan the lock too.
   Alta dashboard. See `reference_odi_ddm_blocker.md`.
 - `/cfg/scripts/lan-prefix-track.sh` — hotplug `ifupdate` event (instant) +
   `* * * * *` cron backstop, no daemon. State-diffs br-lan's GUA /64 in
-  `/var/run/.lan-prefix.env`; on an ISP prefix rotation it deprecates the OUTGOING
+  **`/cfg/scripts/.lan-prefix.env`** (persistent, NOT `/var/run` — tmpfs state was
+  blind to a rotation spanning a reboot, which is exactly when clients are most
+  stranded; that cost a real outage 2026-08-09); on an ISP prefix rotation it
+  deprecates the OUTGOING
   /64 to all LAN nodes via `ra-deprecate.py` (multicast RA, preferred **and** valid
   lifetime 0 per RFC 9096). The event hook is `/etc/hotplug.d/iface/89-lan-prefix`
   → `scripts/hotplug-lan-prefix.sh`. dnsmasq stops advertising a rotated-away prefix but
@@ -48,6 +51,20 @@ telnet probes — they orphan the lock too.
   *preferred* address for up to 24 h. Quiet when healthy. Log:
   `/cfg/scripts/prefix-track.log`. Sources: `scripts/lan-prefix-track.sh` +
   `scripts/ra-deprecate.py`. See `project_route10_stale_ipv6_prefix.md`.
+  **Also owns the ONLY WAN→LAN v6 accept we have** (2026-08-12): a *prefix-relative*
+  inbound pinhole for the ops p2p listener, `<current /64>:<IID>` on one port,
+  TCP+UDP, stateful — approved against `ops/NETWORK-CONTRACT.md` §"IPv6 inbound
+  perimeter", which requires a contract entry to exist *before* any such rule. It
+  lives here because only the IID is stable and the /64 rotates: the same tick that
+  re-points it **deletes the stale one**, so a rotation can never leave an accept
+  into a prefix somebody else now owns. ⭐ **Warn-only by operator decision** —
+  `RT10_P2P6` logs `route10.p2p6 warn:` (total conns to the listener) and
+  `route10.p2p6 srcwarn:` (one remote /64 over-connecting) and then ACCEPTs; nothing
+  rejects. A cap guessed wrong on a first exposure throttles real peers silently, and
+  "slow torrent" is the last symptom anyone traces to a firewall counter — so measure
+  first, bound later on data. Values `P2P6_IID`/`P2P6_PORT` come from `/cfg/seam.env`;
+  **removing them tears the hole down on the next tick** (the revocation sweep runs
+  unconditionally — verified live, closes to 0 jumps and reopens).
 - **Observability stack on `/a` (2026-08-08, post-wedge)** — Alta's firmware
   `rcstats` daemon writes per-minute load/mem/temp (min-avg-max), per-switch-port
   and per-client DPI counters to the SQLite DB **`/a/stats.sql`** (`/a` = 3.1 G
@@ -521,7 +538,7 @@ ssh route10 'grep " route10\." /var/log/messages | tail -20'
 ssh route10 'grep " route10\.odi-health" /var/log/messages | tail'   # one component
 
 # LAN prefix-rotation self-heal — last-seen /64 + any deprecation events
-ssh route10 'cat /var/run/.lan-prefix.env; tail -3 /cfg/scripts/prefix-track.log 2>/dev/null'
+ssh route10 'cat /cfg/scripts/.lan-prefix.env; tail -3 /cfg/scripts/prefix-track.log 2>/dev/null'
 
 # Manually deprecate a stale LAN /64 to every device (what the cron does on rotation)
 ssh route10 'python3 /cfg/scripts/ra-deprecate.py 2804:2488:XXXX:YYYY::/64 br-lan 3'
@@ -545,7 +562,7 @@ ifconfig en13 inet6 | grep -E "deprecated|inet6 2"   # `deprecated` flag = route
 | odi-health | running | `/cfg/scripts/odi-health.log`, 5 min cadence; carries switch CRC (flap-hunt folded in) |
 | W2 DDM daemon | running | populates Alta dashboard DDM |
 | flap-hunt / lcp-watch | RETIRED 2026-07-15 | deletion test — redundant; CRC folded into odi-health |
-| lan-prefix-track | cron (`* * * * *`) | deprecates a rotated-away LAN /64; state `/var/run/.lan-prefix.env`, log `/cfg/scripts/prefix-track.log` |
+| lan-prefix-track | cron (`* * * * *`) | deprecates a rotated-away LAN /64; state `/cfg/scripts/.lan-prefix.env`, log `/cfg/scripts/prefix-track.log` |
 
 ## Cross-repo seam with `ops` (homelab)
 

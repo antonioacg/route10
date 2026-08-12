@@ -95,4 +95,114 @@ fi
 # SLAAC address, so tailscale-reconcile.sh's plain MASQUERADE handles v6 exit
 # egress rotation-proof with no per-tick upkeep (verified live: exit-node curl -6
 # egresses from the WAN GUA and round-trips). Single owner = the reconcile.
+
+# ── v6 inbound pinhole for the ops p2p listener (contract §IPv6 inbound perimeter)
+#
+# THE ONLY WAN→LAN v6 ACCEPT WE HAVE. On native v6 there is no NAT, so this
+# FORWARD policy is the sole boundary between the internet and every LAN host's
+# GUA. Approved 2026-08-12 against a contract entry, which the invariant requires
+# BEFORE any such rule exists. Scope is one address, one port, both protocols.
+#
+# WHY IT LIVES HERE and not in post-cfg: the destination is *prefix-relative*.
+# Only the IID is stable (EUI-64, ops-owned); the /64 rotates with the ISP PD.
+# This script already watches exactly that rotation and already re-runs on the
+# `ifupdate` hotplug + the 1-min cron, so the pinhole re-points itself and, on a
+# rotation, the stale one is DELETED rather than left as an orphaned hole into a
+# prefix we no longer own. The same cron also re-asserts it after an fw3 reload
+# flushes our directly-inserted rules.
+#
+# ⭐ INFORMATIVE, NOT RESTRICTIVE (operator decision 2026-08-12). The thresholds
+# below only LOG; nothing here rejects or drops. This is a first exposure and we
+# do not yet know its normal shape — a cap guessed wrong throttles legitimate
+# peers silently, and "slow torrent" is exactly the symptom nobody would trace
+# back to a firewall counter. So we measure first and can bound later, on data.
+# The v4 CGNAT guard in post-cfg.sh is the opposite trade for the opposite reason
+# (there, running out of CGNAT sessions takes the whole LAN's v4 down).
+#
+# ⚠ Contract values are NOT hardcoded — absent from /cfg/seam.env ⇒ clean no-op,
+# i.e. the safe default for a firewall hole is "does not exist". Thresholds are
+# OURS (route10 tuning, not a shared value) and stay in this file.
+P2P6_WARN_SRC=24      # concurrent conns from ONE remote /64 — a legit peer uses 1-4
+P2P6_WARN_TOTAL=800   # concurrent inbound to the listener — a torrent client caps ~200-400
+
+[ -f /cfg/seam.env ] && . /cfg/seam.env 2>/dev/null
+
+# `want` is the ONE destination allowed to hold a pinhole right now. Empty when
+# the contract values are absent — and that is the OFF SWITCH: the revocation
+# sweep below runs unconditionally, so with no `want` every jump is stale and the
+# hole is torn down on the next tick. Keeping the sweep inside the "configured"
+# branch would have made deleting the seam.env lines *orphan* the rule instead of
+# closing it — an off switch that leaves the door open is worse than none.
+want=""
+if [ -n "$P2P6_IID" ] && [ -n "$P2P6_PORT" ]; then
+    want="${net%::/64}:$P2P6_IID"     # <current /64>:<ops-owned IID>
+fi
+
+# Revoke any jump aimed at an address we no longer hold — prefix rotated, IID
+# changed, or the pinhole switched off entirely. This is the half that makes the
+# hole close by itself; without it a rotation leaves a permanent accept into a
+# prefix somebody else now owns.
+ip6tables -w -S FORWARD 2>/dev/null | grep -- '-j RT10_P2P6$' | while read -r _rule; do
+    if [ -n "$want" ]; then
+        case "$_rule" in
+            *" -d $want/128 "*) continue ;;
+        esac
+    fi
+    ip6tables -w -D FORWARD ${_rule#-A FORWARD } 2>/dev/null \
+        && event "p2p6 pinhole REVOKED (stale destination): ${_rule#-A FORWARD }"
+done
+
+if [ -n "$want" ]; then
+    mark="p2p6 $want $P2P6_PORT $P2P6_WARN_SRC $P2P6_WARN_TOTAL"
+
+    ip6tables -w -N RT10_P2P6      2>/dev/null || true
+    ip6tables -w -N RT10_P2P6_LOGT 2>/dev/null || true
+    ip6tables -w -N RT10_P2P6_LOGS 2>/dev/null || true
+
+    # Rebuild only when the address or a threshold moved (marker encodes both).
+    # An unchanged re-run must not flush the chain: connlimit's accounting lives
+    # in it, and a flush every minute would reset the very counts we are here to
+    # observe — the guard would then be structurally incapable of ever warning.
+    if ! ip6tables -w -S RT10_P2P6 2>/dev/null | grep -qF -- "$mark"; then
+        for _c in RT10_P2P6 RT10_P2P6_LOGT RT10_P2P6_LOGS; do
+            ip6tables -w -F "$_c" 2>/dev/null || true
+        done
+        # Log prefixes are a published interface (ops may key on them) and are
+        # DISTINCT from "route10.connlimit warn:/block:" on purpose — those four
+        # strings are frozen and consumed by existing ops rules; feeding this
+        # firehose into them would corrupt an alert that already works.
+        # iptables caps --log-prefix at 29 chars; both fit with room to spare.
+        ip6tables -w -A RT10_P2P6_LOGT -m limit --limit 6/hour --limit-burst 3 \
+            -j LOG --log-prefix "route10.p2p6 warn: " --log-level warning 2>/dev/null || true
+        # Per-source: gate on `recent` so one noisy peer cannot bury the rest,
+        # then a shared rate backstop for a spoofed-source storm.
+        ip6tables -w -A RT10_P2P6_LOGS -m recent --name p2p6s --rcheck --seconds 600 -j RETURN 2>/dev/null || true
+        ip6tables -w -A RT10_P2P6_LOGS -m recent --name p2p6s --set 2>/dev/null || true
+        ip6tables -w -A RT10_P2P6_LOGS -m limit --limit 60/hour --limit-burst 10 \
+            -j LOG --log-prefix "route10.p2p6 srcwarn: " --log-level warning 2>/dev/null || true
+
+        # Both tiers are non-terminating: they log and fall through to ACCEPT.
+        ip6tables -w -A RT10_P2P6 \
+            -m connlimit --connlimit-above "$P2P6_WARN_TOTAL" --connlimit-mask 128 --connlimit-daddr \
+            -j RT10_P2P6_LOGT 2>/dev/null || true
+        ip6tables -w -A RT10_P2P6 \
+            -m connlimit --connlimit-above "$P2P6_WARN_SRC" --connlimit-mask 64 --connlimit-saddr \
+            -j RT10_P2P6_LOGS 2>/dev/null || true
+        ip6tables -w -A RT10_P2P6 -j ACCEPT 2>/dev/null || true
+        ip6tables -w -A RT10_P2P6 -m comment --comment "$mark" -j RETURN 2>/dev/null || true
+        event "p2p6 pinhole chain built: dst=$want port=$P2P6_PORT (warn-only: src>$P2P6_WARN_SRC/64, total>$P2P6_WARN_TOTAL)"
+    fi
+
+    # Stateful: only NEW is steered here; replies ride fw3's ESTABLISHED accept.
+    for _proto in tcp udp; do
+        if ! ip6tables -w -C FORWARD -i pppoe-wan3 -o br-lan -d "$want" \
+                -p "$_proto" --dport "$P2P6_PORT" -m conntrack --ctstate NEW \
+                -j RT10_P2P6 2>/dev/null; then
+            ip6tables -w -I FORWARD 1 -i pppoe-wan3 -o br-lan -d "$want" \
+                -p "$_proto" --dport "$P2P6_PORT" -m conntrack --ctstate NEW \
+                -j RT10_P2P6 2>/dev/null \
+                && event "p2p6 pinhole OPEN: $_proto/$P2P6_PORT -> $want"
+        fi
+    done
+fi
 exit 0
