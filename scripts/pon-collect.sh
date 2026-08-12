@@ -68,7 +68,10 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null || exit 0   # stale holder — reclaim
 fi
 echo $$ > "$LOCK/pid"
-trap 'rm -rf "$LOCK"' EXIT
+# Also drop the nc capture: it is up to ~2.5 MB of mostly-NUL in tmpfs and there
+# is no reason to hold it between cycles. Expanded at trap time, so it is fine
+# that OMCI_RAW is defined further down (and harmless if we exit before that).
+trap 'rm -rf "$LOCK"; rm -f "$OMCI_RAW"' EXIT
 
 TS=$(date +%s)
 
@@ -140,21 +143,82 @@ OMCI_LOGMASK=0x3FFFFFFF
 # there was never 1.7 MB of data to move, only 1.7 MB of our own padding.
 # (nc IS the right tool for a one-off byte-exact pull -- it is what diagnosed
 # this, since telnet strips NULs and the stick has no od/wc/du to see them.)
-# ⛔ STOPGAP 2026-08-12 — this filters on the stick and that is the WRONG SIDE.
-# Measured on the live 2,559,307 B file, CLI-alive asserted before each run:
+# ⭐ nc TRANSPORT 2026-08-12 — filtering on the stick was the WRONG SIDE.
+# Measured on the live 2,559,307 B file, CLI-alive asserted before each run
+# (a wedged CLI returns an error in ~0 s and will happily masquerade as a fast
+# tool -- three of these "timings" were that error before I put a control in):
 #     sed -n '/^\[/p'   10379 ms   <- OVER the 10 s timeout: the wedge loop
 #     grep -a '^\['      8792 ms   <- only ~1.2 s of headroom
 #     awk  '/^\[/'      19456 ms
-#     nc (whole file)    1835 ms   + 1 ms to filter the same bytes on route10
-# The hole is ~99% of the file and every stick-side tool must scan all of it.
-# ⭐ The cost that matters is NOT the truncate cadence: the hole equals every
-# byte omci_app has written SINCE STICK BOOT, and only an omci_app restart
-# resets it. Measured growth ~2.5 MB/day at mask 0x3FFFFFFF, and grep costs
-# ~3.4 s/MB, so this buys ~10 days and then wedges again. A STICK REBOOT IS NOT
-# A FIX EITHER — it resets the offset and we are back at the 10 s wall inside a
-# day. The durable fixes are (a) move the bytes with nc and filter here, and
-# (b) cut the action mask so the offset grows slower. Both are follow-ups.
-OMCIDRAIN="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''CUT__; grep -a '^\[' /var/tmp/omcilog.par 2>/dev/null; grep -a '^\[' /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
+#     nc (whole file)    1835 ms   + 1 ms to filter the same bytes HERE
+# The hole is ~99% of the file, so every stick-side tool drags a regex engine
+# over 2.5 MB of NUL on a Lexra MIPS. nc never parses: it is read()/write().
+#
+# ⭐ Why this is a fix and a reboot is not: the hole equals every byte omci_app
+# has written SINCE STICK BOOT -- NOT a function of our truncate cadence -- and
+# only an omci_app restart clears it. Growth is ~2.5 MB/day at mask 0x3FFFFFFF.
+# A reboot resets the offset and we are back at the same wall inside a day, for
+# an ~80 s WAN outage on a single fibre. Moving the bytes cheaply is what
+# actually scales; cutting the action mask (slower growth) is the complement.
+#
+# ⛔ DIRECTION IS A SAFETY DECISION, not a preference. route10 LISTENS and the
+# stick CONNECTS OUT. The inverse was measured and is dangerous: an `nc -l` on
+# the stick that nobody connects to OUTLIVES its stick-exec session (observed --
+# a later probe was answered by an earlier round's listener), and the abandoned
+# session then holds the single CLI. This way, if our listener is missing the
+# stick's connect is REFUSED instantly and the command returns.
+# ⚠ That fast-refuse depends on the ACCEPT rule below: the kernel must see the
+# SYN to answer RST. If the stick's packets were DROPped instead, its nc would
+# hang until TCP timeout, blow the 45 s limit, and orphan the session -- i.e.
+# the firewall rule is load-bearing for STICK SAFETY, not only for security.
+OMCI_NC_PORT=9099
+OMCI_NC_BIND=192.168.1.2       # route10's ont_mgmt0 address; what the stick dials
+OMCI_NC_PEER=192.168.1.1       # the stick
+OMCI_RAW=/var/run/.pon-omci.raw
+
+# ⛔ `nc -s` binds an ADDRESS, not an interface. VERIFIED by injection: a LAN
+# host reached 192.168.1.2:9099 and its bytes landed in the capture. That is an
+# ALERTING-integrity hole, not merely a data one -- injected text feeds the
+# write-verb detector that pages on "OLT SENT A FIRMWARE/REBOOT COMMAND". So the
+# port is closed to everyone but the stick. Own chain: order-safe and idempotent
+# without caring where in INPUT it lands (fw3 reloads flush it; we re-add next
+# cycle, which is a 1-minute self-heal).
+omci_fw_ensure() {
+    iptables -w -n -L RT10_OMCIPULL >/dev/null 2>&1 || {
+        iptables -w -N RT10_OMCIPULL 2>/dev/null
+        iptables -w -A RT10_OMCIPULL -i ont_mgmt0 -s "$OMCI_NC_PEER" -j ACCEPT
+        iptables -w -A RT10_OMCIPULL -j DROP
+    }
+    iptables -w -C INPUT -p tcp --dport "$OMCI_NC_PORT" -j RT10_OMCIPULL 2>/dev/null \
+        || iptables -w -I INPUT 1 -p tcp --dport "$OMCI_NC_PORT" -j RT10_OMCIPULL
+}
+
+OMCI_NC_PID=
+# Must be silent on stdout: poll_stick's output is captured into $RAW.
+omci_listen_start() {
+    rm -f "$OMCI_RAW"
+    timeout 60 /usr/bin/nc -l -p "$OMCI_NC_PORT" -s "$OMCI_NC_BIND" > "$OMCI_RAW" 2>/dev/null &
+    OMCI_NC_PID=$!
+    _i=0
+    while [ "$_i" -lt 30 ]; do
+        netstat -ltn 2>/dev/null | grep -q "$OMCI_NC_BIND:$OMCI_NC_PORT " && return 0
+        _i=$(( _i + 1 )); sleep 0.1
+    done
+    kill "$OMCI_NC_PID" 2>/dev/null; OMCI_NC_PID=
+    return 1
+}
+omci_listen_finish() {
+    [ -n "$OMCI_NC_PID" ] || return 0
+    _j=0
+    while [ "$_j" -lt 100 ] && kill -0 "$OMCI_NC_PID" 2>/dev/null; do _j=$(( _j + 1 )); sleep 0.1; done
+    kill "$OMCI_NC_PID" 2>/dev/null
+    wait "$OMCI_NC_PID" 2>/dev/null
+    OMCI_NC_PID=
+}
+
+# The stick now only REPORTS the size over telnet and PIPES the bytes over nc.
+OMCISIZE="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
+OMCIPULL="cat /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null | nc $OMCI_NC_BIND $OMCI_NC_PORT"
 # ── MIB state poll — the durable half of the management-plane record ────────
 # The OMCI log is EPHEMERAL by construction: /tmp on the stick is tmpfs, the
 # logger is runtime-only, and an `ActivateSw` REBOOTS the stick -- so the one
@@ -195,7 +259,15 @@ MIBPOLL="echo __MIB''_S__; omcicli mib get 7; omcicli mib get 340; omcicli mib g
 # drain overran it, stick-exec closed the socket abruptly, and that ORPHANED a
 # /bin/login+/bin/sh holding the single CLI. i.e. the timeout was manufacturing the
 # very wedge it was blamed on. 4x45 s worst case is bounded by the collector lock.
-poll_stick() { python3 "$STICK_EXEC" --timeout 45 "cat /proc/uptime" "$DIAG" "$OMCIDRAIN" "$MIBPOLL" 2>&1; }
+# The listener is armed around EVERY poll, because poll_stick is also called a
+# second time by the unwedge path -- a retry with no listener would leave the
+# stick dialling a closed port and lose that cycle's log.
+poll_stick() {
+    omci_fw_ensure 2>/dev/null
+    omci_listen_start 2>/dev/null
+    python3 "$STICK_EXEC" --timeout 45 "cat /proc/uptime" "$DIAG" "$OMCISIZE" "$MIBPOLL" "$OMCIPULL" 2>&1
+    omci_listen_finish 2>/dev/null
+}
 is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
 
 RAW=$(poll_stick)
@@ -236,13 +308,18 @@ fi
 # ⚠ The cat-then-truncate is not atomic: a message written between the two
 # is lost. At OMCI rates that window is negligible, and losing a line beats
 # re-ingesting the whole file every minute.
-# The size header (between _S_ and _CUT_) is what the stick HAD; the body (after
-# _CUT_) is what we actually got. Comparing them is the whole point -- it turns
-# an invisible loss into a number.
-_omci_hdr=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCICUT__/p' | sed '1d;$d')
-_omci_body=$(printf '%s\n' "$RAW" | sed -n '/__OMCICUT__/,/__OMCILOG_E__/p' | sed '1d;$d')
+# The header is what the stick HAD; the nc capture is what we actually GOT.
+# ⭐ Under nc these are finally the SAME QUANTITY -- both whole-file byte counts
+# -- so the comparison is a true integrity check. It was NOT comparable while we
+# filtered on the stick (apparent size ~99% hole vs filtered text), and the old
+# code carried an explicit warning never to compare them. nc inverts that.
+_omci_hdr=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCILOG_E__/p' | sed '1d;$d')
 # busybox `ls -l` size is field 5. Sum both files; absent/unparsable -> 0.
 _omci_ondisk=$(printf '%s\n' "$_omci_hdr" | awk '/omcilog/ {s += $5} END {print s+0}')
+_omci_xfer=$(wc -c < "$OMCI_RAW" 2>/dev/null || echo 0)
+case "$_omci_xfer" in ''|*[!0-9]*) _omci_xfer=0 ;; esac
+# The filter runs HERE, where it costs ~1 ms instead of ~9 s on the stick.
+_omci_body=$(grep -a '^\[' "$OMCI_RAW" 2>/dev/null)
 _omci_got=${#_omci_body}
 OMCILOG=$(printf '%s' "$_omci_body" | head -c 64000 | sed "s/'/''/g")
 
@@ -260,20 +337,19 @@ OMCILOG=$(printf '%s' "$_omci_body" | head -c 64000 | sed "s/'/''/g")
 # survivable; OOM-ing the process that terminates our only fibre is not. Above
 # the guard we truncate anyway and say so at err.
 OMCI_RAMGUARD=$(( 4 * 1024 * 1024 ))
-if [ "${_omci_got:-0}" -gt 0 ] 2>/dev/null; then
-    python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
-    # ⚠ Do NOT compare captured bytes against the file's apparent size -- they
-    # are not the same quantity. Apparent size is ~99% NUL hole (see above); the
-    # capture is the filtered text. A naive `ondisk > got` test would warn on
-    # every healthy cycle. Only a *shrinking* line count is meaningful, and the
-    # honest signal for a partial read is the drop of the closing sentinel,
-    # which shows up as a short/empty body and is handled below.
+if [ "${_omci_ondisk:-0}" -le 0 ] 2>/dev/null; then
+    # Nothing on the stick. Normal between bursts: after a good drain the file
+    # is genuinely 0 until omci_app's next write re-creates the hole.
     :
+elif [ "${_omci_xfer:-0}" -ge "${_omci_ondisk:-0}" ] 2>/dev/null; then
+    # Proof we hold every byte the stick reported. `-ge` not `-eq` on purpose:
+    # the file can only GROW between the `ls` and the pull, never shrink.
+    python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
 elif [ "${_omci_ondisk:-0}" -gt "$OMCI_RAMGUARD" ] 2>/dev/null; then
     python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
-    err "OMCI log ${_omci_ondisk} B UNREADABLE over telnet and past the ${OMCI_RAMGUARD} B ram guard — truncated UNREAD to protect omci_app (ramfs is 23 MB total and omci_app is the GPON MAC). This is data loss, chosen deliberately over risking the fibre."
+    err "OMCI log ${_omci_ondisk} B UNPULLABLE (nc delivered ${_omci_xfer} B) and past the ${OMCI_RAMGUARD} B ram guard — truncated UNREAD to protect omci_app (ramfs is 23 MB total and omci_app is the GPON MAC). This is data loss, chosen deliberately over risking the fibre."
 elif [ "${_omci_ondisk:-0}" -gt 0 ] 2>/dev/null; then
-    warn "OMCI log holds ${_omci_ondisk} B but the read returned nothing — NOT truncating; will retry next cycle."
+    warn "OMCI pull SHORT: stick held ${_omci_ondisk} B, nc delivered ${_omci_xfer} B — NOT truncating; will retry next cycle."
 fi
 [ "${_omci_got:-0}" -gt 64000 ] && warn "OMCI row truncated: ${_omci_got} B drained, 64000 B stored"
 

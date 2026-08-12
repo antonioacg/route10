@@ -129,6 +129,24 @@ telnet probes — they orphan the lock too.
       reports** — the reported path stays 0 bytes forever; that cost hours on
       2026-08-11. Logger is runtime-only (`omci_app -f off 0`), so pon-collect
       re-arms it on its reboot detection.
+      ⭐ **The bytes move over `nc`, not telnet (2026-08-12).** The log is ~99%
+      NUL hole and the hole equals every byte `omci_app` has written **since
+      stick boot** (~2.5 MB/day at mask `0x3FFFFFFF`) — only an `omci_app`
+      restart clears it, so **a stick reboot is NOT a fix**: it resets the offset
+      and hits the same wall inside a day, for an ~80 s WAN outage. Measured at
+      2.5 MB: `sed` 10.4 s (over stick-exec's 10 s ⇒ orphaned session ⇒ the CLI
+      wedge *we* were manufacturing), `grep` 8.8 s, **`nc` 1.8 s** + 1 ms to
+      filter on route10. ⛔ **route10 LISTENS, the stick dials out** — the
+      inverse was measured and is unsafe: an `nc -l` nobody connects to outlives
+      its session and holds the single CLI. Port 9099 is fenced by the
+      **`RT10_OMCIPULL`** chain (ACCEPT `192.168.1.1` on `ont_mgmt0`, DROP else)
+      because `nc -s` binds an *address*, not an interface — a LAN host was
+      verified able to inject into the capture, which feeds the write-verb
+      pager. ⚠ That ACCEPT is **load-bearing for stick safety**: the kernel must
+      answer RST so a missing listener refuses instantly; a DROP would hang the
+      stick's `nc` past the timeout and orphan the session. Truncate is gated on
+      `received >= reported` — now genuinely comparable, since nc moves the whole
+      file (it was not comparable while we filtered stick-side).
     - **Raw OMCI lines → syslog tag `route10.omci`** (`daemon.info`, separate
       from `route10.pon-collect` so a firehose never rides the alert stream).
       Gated to non-O5 by default (~164 lines/min while faulting). busybox
