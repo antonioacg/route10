@@ -303,6 +303,59 @@ Residual risk, entirely avoidable:
 ⚠ If either bites, the AP3000 has **only one Ethernet port** — no PHY driver means
 no network, and recovery is **UART-only** (case open, USB-TTL, 115200, 3.3 V).
 
+### Cudy AP11000 — cheap tri-band WiFi 7, scrapeable, but a poor instrument
+
+R$1,159.60 domestic (Mercado Livre, in stock, free shipping) — well under half an
+imported AP7 Pro, **with a 10G SFP+ cage the AP7 Pro doesn't have**.
+
+- **Qualcomm IPQ5322**, 1.5 GHz quad, 512 MB DDR4, 128 MB NAND (Cudy datasheet)
+- Tri-band WiFi 7, **2T2R on ALL three bands**: 5760 / 4320 / 688 Mbps
+- 1x 10G SFP+, 1x 2.5 GbE PoE-in
+- **802.3at required** — 20 W max, 12 W idle; af's 12.95 W is *below the idle
+  floor*. ⚠ Two SKUs: bare **AP11000** ships with NO adapter or injector;
+  **AP11000_P** bundles a *passive* 48 V injector (not an 802.3at PSE). Cudy's own
+  POE48-18W accessory is 18 W against a 20 W max — marginal; POE52-30W has headroom
+
+⚠ **The 5 GHz radio is half the AP7 Pro's.** Both are 2x2 on 6 GHz (5.76 vs
+5.8 Gbps — near-identical), but 5 GHz is 4320 vs 8600 Mbps, exactly the 2x2-vs-4x4
+ratio. The "11000" headline comes from 320 MHz on 6 GHz, i.e. the same-room band.
+
+**Telemetry — scrapeable, undocumented.** Stock firmware IS OpenWrt + LuCI
+(`luci-static`, LuCI `git-25.105`) but with proprietary **qca-wifi UMAC + NSS**
+(`ath0/1/2`, `wlan_cfg80211_change_station`), NOT mac80211.
+
+- ⛔ **No SNMP, no remote syslog** — verified three ways (spec page, full UI menu
+  enumeration, C200P controller docs). Nothing reaches Loki.
+- ✅ `/cgi-bin/luci/admin/status/statistic` returns **raw JSON** with `assoclist`
+  keyed by client MAC: `signal`, `noise`, `tx_rate`, `rx_rate`, `tx_packets`,
+  `rx_packets`, `inactive`, `tx_mhz`/`rx_mhz`. Plus
+  `/admin/network/devices/devlist?detail=1` (per-client signal + duration, 6 G
+  column). Auth scriptable: `sha256(sha256(pass+salt)+token)`.
+- ⚠ Undocumented ⇒ no changelog obligation; a firmware update can remove it.
+- **Gives the symptom fields, not the cause fields**: no retries, no airtime, no
+  per-chain RSSI, no deauth reason codes, no `rrm_beacon_req`.
+- No Prometheus exporter exists for Cudy (zero GitHub hits). Nearest prior art is
+  the Home Assistant `usersaynoso/ha-cudy-router`, which scrapes the same endpoint
+  family — but two of its endpoints 404 here and it has no concept of `wlan20`
+  (6 GHz). Adaptation, not installation.
+
+⚠ **Firmware-quality evidence from Cudy's OWN 48-h demo syslog**: **890 `eth1` PHY
+link down/up cycles**, recurring uhttpd Lua exceptions, and the 6 GHz radio
+reporting `channel 5, frequency 2.432` (it is 5.975 GHz — a parsing hazard). The
+flap count may be bench cable-pulling; the Lua exceptions and the reporting bug are
+firmware defects regardless. ✅ Positive: 802.11k/v roaming genuinely works (BTM
+requests, RSSI-driven steering).
+
+⛔ **OpenWrt is not a someday.** Recent Cudy PRs tally **40 mediatek/filogic,
+19 ramips, 0 Qualcomm** — Cudy's OpenWrt cooperation is entirely a MediaTek
+phenomenon. `qualcommbe` is IPQ95xx-only; `ipq5322` returns nothing; no GPL source
+is published (`cudy.com/pages/gpl` and siblings all 404).
+
+**Note the architecture:** AP7 Pro and AP11000 are the *same class* — Qualcomm,
+proprietary qca-wifi, closed radio. Alta simply gives far better access to it
+(root shell, per-second `rcstats-mon` JSON, remote syslog). Only the **AP3000** is
+mac80211, and only mac80211 answers *why*.
+
 ### Ruled out, and why
 
 | Device | Reason |
@@ -521,6 +574,18 @@ on*. This research adds:
    WAX220 non-orderable at source; WAX218 has no live channel.
 6. **The revision trap recurs.** TP-Link lists EAP670 v1/v2/v3 simultaneously and
    retail listings don't say which ships.
+7. ⭐ **Look for a vendor FIRMWARE EMULATOR before buying.** Cudy publishes one at
+   `support.cudy.com/emulator/<MODEL>/` — a live instance of the device's real web
+   UI. It answered the entire management-surface question (which endpoints exist,
+   what JSON they return, whether SNMP/remote-syslog exist, what the menu tree is)
+   **at zero cost, without owning the device**. TP-Link, Zyxel and others publish
+   these too. This is the cheapest possible answer to criterion #1, and it is the
+   check that would have spared the whole
+   [office-switch](office-switch-ofs-m1xf2gt4.md) archaeology.
+8. **A vendor's own demo unit ships a real syslog.** Cudy's emulator carries a 48-h
+   log from their demo box — which is how the AP11000's 890 PHY flaps, uhttpd Lua
+   exceptions and 6 GHz channel-reporting bug surfaced. Primary evidence about
+   firmware quality, published by the vendor, before purchase.
 
 ---
 
