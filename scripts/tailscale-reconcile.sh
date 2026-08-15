@@ -18,6 +18,9 @@
 #      chains, so these must be re-assertable at any time).
 #   4. br-lan GRO off (mesh->LAN bulk-transfer blackhole fix, see
 #      project_route10_mesh_offload_blackhole.md).
+#   5. dnsmasq mesh listener — tailscale0 in dhcp.@dnsmasq[0].interface, so
+#      dnsmasq binds the tailnet addresses and off-LAN split-DNS answers
+#      (2026-08-14: the cloud dhcp regen dropped it for ~20 h, silently).
 #
 # Idempotent, non-destructive, quiet when converged. NO connectivity gate and
 # NO revert path — the retired sideload boot hook's "revert all rules if one
@@ -162,5 +165,25 @@ ens6nat POSTROUTING -s fd7a:115c:a1e0::/48 -o pppoe-wan3 -j MASQUERADE
 
 # ── 4. br-lan GRO off (mesh->LAN bulk-transfer blackhole fix) ─────────────────
 ethtool -K br-lan gro off 2>/dev/null
+
+# ── 5. dnsmasq mesh listener (off-LAN split-DNS) ──────────────────────────────
+# Headscale split-DNS points mesh clients at this node's TAILNET addresses for
+# the split domain. dnsmasq is interface-list + bind-dynamic: without tailscale0
+# in dhcp.@dnsmasq[0].interface it neither binds the tailnet addresses nor
+# accepts a query that ingresses on tailscale0 (bind-dynamic does per-arrival-
+# interface access control). The entry is OURS, not the cloud's: an Alta apply
+# that regenerates /etc/config/dhcp drops it, and the apply restarts dnsmasq
+# AFTER post-cfg has completed — a one-shot re-add there loses that race (it
+# lost on 2026-08-14: ~20 h of silently dead off-LAN split-DNS, on-LAN fine,
+# every assertion on both sides green). Convergence lives HERE so both callers
+# re-assert it; mesh-health assertion 6 detects the missing BIND. bind-dynamic
+# tolerates tailscale0 coming/going, so the uci entry + reload is the whole fix.
+if [ -d /sys/class/net/tailscale0 ] \
+   && ! uci -q get dhcp.@dnsmasq[0].interface 2>/dev/null | grep -qw tailscale0; then
+    uci add_list dhcp.@dnsmasq[0].interface='tailscale0'
+    uci commit dhcp
+    /etc/init.d/dnsmasq reload >/dev/null 2>&1
+    event "dnsmasq tailscale0 listener re-added (cloud dhcp regen drops it) — off-LAN split-DNS rebound"
+fi
 
 exit 0

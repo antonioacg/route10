@@ -34,6 +34,15 @@
 #      of ops's split-DNS ACL rule and the autoApprovers key, so mesh DNS was
 #      silently dead. Server-side state — WARN only, not healable from here.
 #
+#   6. MESH DNS LISTENER — dnsmasq must be BOUND on :53 at the tailnet addresses
+#      Headscale's split-DNS advertises for this node. An Alta cloud apply
+#      regenerates /etc/config/dhcp WITHOUT our tailscale0 interface entry and
+#      restarts dnsmasq AFTER post-cfg has completed, so a one-shot re-add races
+#      the regen — it lost on 2026-08-14 (~20 h of dead off-LAN split-DNS while
+#      on-LAN answered fine and assertions 1-5 plus every ops layer stayed
+#      green). Asserts the BIND (outcome), not the uci entry (intent). Heal:
+#      reconcile (its step 5 owns the convergence).
+#
 # Design notes:
 #   - Assertion 3's expected grants are DERIVED from AdvertiseRoutes (minus the
 #     exit-node defaults, which the filter fragments); assertion 2 is what makes
@@ -244,6 +253,34 @@ print(" ".join((d.get("Self") or {}).get("Tags") or []))
             *" $TS_NODE_TAG "*) : ;;
             *) warn "node is MISSING its ACL tag '$TS_NODE_TAG' (has: $TAGS) — ops's split-DNS rule and autoApprovers key on it, so mesh clients cannot resolve the split domain and new routes would not auto-approve. Server-side: ask ops to re-apply the forced tag." ;;
         esac
+    fi
+fi
+
+# ===== Assertion 6: dnsmasq bound on the tailnet addresses (off-LAN split-DNS) ===
+# The 2026-08-14 fault: a cloud apply regenerated /etc/config/dhcp without our
+# tailscale0 interface entry and restarted dnsmasq — off-LAN mesh clients got
+# connection refused on :53 for ~20 h while everything above read green. Assert
+# the OUTCOME (the actual bind), so any future path to the same dead listener is
+# caught, whatever drops it. Addresses come from the live interface; no address
+# yet (daemon just started) ⇒ nothing to assert, next tick covers it.
+dns_missing() {
+    LISTEN=$(netstat -uln 2>/dev/null)
+    M=""
+    [ -n "$TS4" ] && ! echo "$LISTEN" | grep -qF "$TS4:53 " && M="$M $TS4"
+    [ -n "$TS6" ] && ! echo "$LISTEN" | grep -qF "$TS6:53 " && M="$M $TS6"
+    echo "$M"
+}
+if [ -d /sys/class/net/tailscale0 ]; then
+    TS4=$(ip -4 -o addr show tailscale0 2>/dev/null | awk '{sub(/\/.*/,"",$4); print $4; exit}')
+    TS6=$(ip -6 -o addr show tailscale0 2>/dev/null | awk '$4 ~ /^fd7a:/ {sub(/\/.*/,"",$4); print $4; exit}')
+    DNS_MISSING=$(dns_missing)
+    if [ -n "$DNS_MISSING" ]; then
+        warn "dnsmasq NOT listening on tailnet address(es):$DNS_MISSING — off-LAN split-DNS is dead (mesh clients get connection refused; on-LAN unaffected — the 2026-08-14 cloud-regen class); healing via reconcile"
+        heal
+        sleep 2   # dnsmasq reload + bind-dynamic settle
+        DNS_MISSING=$(dns_missing)
+        [ -z "$DNS_MISSING" ] && event "healed: dnsmasq tailnet listener rebound (${TS4}${TS6:+ / $TS6})" \
+                              || err "heal FAILED: dnsmasq still not listening on:$DNS_MISSING"
     fi
 fi
 

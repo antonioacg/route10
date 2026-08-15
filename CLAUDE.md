@@ -214,7 +214,11 @@ telnet probes — they orphan the lock too.
   stream to stderr), daemon via the FIRMWARE init (stop/settle/start for
   daemon-level changes; `reload` for routes), tailscale0 firewall accepts + NAT
   both families (fw3 reloads flush them; our inserted v6 MASQUERADE shadows the
-  pinned-GUA SNAT Alta's daemon appends), br-lan GRO off. Idempotent, quiet,
+  pinned-GUA SNAT Alta's daemon appends), br-lan GRO off, **and the dnsmasq
+  tailscale0 listener** (`dhcp.@dnsmasq[0].interface` — off-LAN split-DNS; the
+  entry is ours, so an Alta apply that regenerates `/etc/config/dhcp` drops it
+  and restarts dnsmasq AFTER post-cfg completed, which killed off-LAN split-DNS
+  for ~20 h on 2026-08-14). Idempotent, quiet,
   **no connectivity gate / no revert** (the retired sideload hook's one-ping
   revert caused the 2026-07-22 outage). Called by post-cfg (every boot/reapply)
   and mesh-health (heal). The old sideload (`/a/tailscale` + fork
@@ -252,7 +256,12 @@ telnet probes — they orphan the lock too.
   advertised subnet route, asserted on DSTs never SRCs (2026-07-20 stale-daemon
   class; QUIET on Alta's slimmed build — `debug netmap` is compiled out/404);
   (4) tailscale0 firewall accepts + NAT present in both families (fw3-flush
-  class). Log: `/cfg/scripts/mesh-health.log`. Source: `scripts/mesh-health.sh`.
+  class); (5) node still carries its ops ACL tag (2026-08-07 untagged-rejoin
+  class; server-side, WARN only); (6) dnsmasq BOUND on `:53` at the tailnet
+  addresses — asserts the outcome, not the uci entry (2026-08-14 cloud-regen
+  class: ~20 h of dead off-LAN split-DNS that every other assertion on both
+  sides missed; heal via reconcile step 5).
+  Log: `/cfg/scripts/mesh-health.log`. Source: `scripts/mesh-health.sh`.
   See `project_route10_tailscale_stale_binary_filter.md`, `project_route10_native_tailscale.md`.
 - `/cfg/post-cfg.sh` — runs after every Alta cloud-config reapply. Source:
   `scripts/post-cfg.sh`. **Idempotent**. Jobs:
