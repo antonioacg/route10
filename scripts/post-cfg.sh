@@ -922,6 +922,20 @@ if [ -x "$PONCOLLECT" ]; then
     fi
 fi
 
+# ── AX73 WiFi AP metrics passthrough ────────────────────────────────────────
+# ax73-scrape.sh caches the AP's ax73_* exposition every minute; metrics-cgi
+# appends the cache so ops's ONE scrape of route10:9100 carries WiFi telemetry
+# too (route10 owns all networking concerns — single seam, operator decision
+# 2026-08-16). Closes the AP-side blind spot the lan-probe note below
+# describes: route10 has no radios, so a WiFi fault was otherwise invisible.
+AX73SCRAPE=/cfg/scripts/ax73-scrape.sh
+if [ -x "$AX73SCRAPE" ]; then
+    if ! grep -qF "$AX73SCRAPE" /etc/crontabs/root 2>/dev/null; then
+        echo "* * * * * $AX73SCRAPE" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── external dead-man: "Router + internet" / "Router's home network" ────────
 # (ops NETWORK-CONTRACT "Dead-man heartbeats"). route10 → WAN → healthchecks.io
 # every 2 min, never touching opi5pro — so a stopped beat tells ops whether the

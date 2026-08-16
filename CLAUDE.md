@@ -171,6 +171,19 @@ telnet probes — they orphan the lock too.
     iPhone answered every echo in all 11 minutes it passed traffic and lost all 5 in
     all 5 idle minutes, so ICMP reports iOS power-save, not the link. Valid only for
     the vacuum/AP/wired controls. Source: `scripts/lan-probe.sh`.
+  - `/cfg/scripts/ax73-scrape.sh` (`* * * * *` cron, 2026-08-16) — caches the AX73
+    WiFi AP's Prometheus page (`http://192.168.10.11:9100/metrics`, static IP on the
+    AP, owned by the **wifi-ap agent** — seam `~/git/agent-seam-wifi`) to
+    `/tmp/ax73-metrics.prom`; metrics-cgi appends it verbatim so ops's single scrape
+    of route10:9100 carries WiFi telemetry (route10 fronts ALL networking — one seam,
+    operator decision). Closes the "route10 has no radios" AP blind spot lan-probe
+    couldn't: per-station RSSI/rates/retries, per-BSS clients, radio noise/channel,
+    driver `wl` counters. **Format-filtered on `^ax73_` + numeric value** — one
+    malformed AP line would make Prometheus reject route10's ENTIRE exposition, so
+    WiFi must never be able to take down router metrics. On failure serves the last
+    good cache; consumers gate on `route10_ax73_up` +
+    `route10_ax73_scrape_timestamp_seconds`. Log: transitions only. Source:
+    `scripts/ax73-scrape.sh`.
   - **Passive experience signal** (in `obs-collect.sh`'s existing conntrack pass) —
     `route10_host_tcp_flows` / `_unanswered` per host: SYN_SENT that never
     established, i.e. the reported symptom itself. Inverts the probe's flaw — a
@@ -182,11 +195,11 @@ telnet probes — they orphan the lock too.
     burst cannot be missed, but it names a window, never which burst.
   - **`/metrics` exporter** — second uhttpd on **`192.168.10.1:9100`** (LAN-only
     bind, relaunched by post-cfg), CGI at `/cfg/scripts/metrics-www/metrics`
-    serving newest stats.sql + rt.sql rows (no live probing in the request
-    path). Shared value — governed by ops `NETWORK-CONTRACT.md` §"route10
-    metrics scrape"; ops scrapes every 2 min, trending telemetry ONLY (dies with
-    the LAN; the `/cfg` + `/a` records are the outage complement). Source:
-    `scripts/metrics-cgi.sh`.
+    serving newest stats.sql + rt.sql rows **+ the AX73 `ax73_*` cache** (no live
+    probing in the request path). Shared value — governed by ops
+    `NETWORK-CONTRACT.md` §"route10 metrics scrape"; ops scrapes every 2 min,
+    trending telemetry ONLY (dies with the LAN; the `/cfg` + `/a` records are
+    the outage complement). Source: `scripts/metrics-cgi.sh`.
   - Syslog app names **`route10.odi-health` and `route10.dhcp-watchdog` are
     FROZEN** — ops's `Route10SyslogSilent` dead-man alert keys on their absence
     (contract-recorded). Never rename/retire them without telling ops first.

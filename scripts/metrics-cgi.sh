@@ -386,3 +386,16 @@ FROM optical o, json_each(o.json) m, json_each(m.value) p, json_each(p.value) l
 WHERE o.ts = (SELECT max(ts) FROM optical)
   AND m.key IN ('w2','l4') AND p.key IN ('temp','vcc','bias') AND l.value IS NOT NULL;
 "
+
+# ── AX73 WiFi AP passthrough (ax73-scrape.sh cron cache; NO live probe) ─────
+# The ax73_* namespace is owned by the wifi-ap agent's exporter on
+# 192.168.10.11:9100; ax73-scrape.sh (* * * * *) caches it, format-filtered so
+# a malformed AP line can never invalidate this whole exposition. route10
+# fronts for the AP so ops has ONE metrics seam. On AP/scrape failure the last
+# good samples keep being served — gate on the two meta-metrics below.
+set -- $(cat /tmp/ax73-metrics.status 2>/dev/null); AXTS=${1:-0}; AXUP=${2:-0}
+printf '%s\n' \
+  '# HELP route10_ax73_up Last AX73 WiFi AP metrics scrape succeeded (1) or not (0). On 0 the ax73_* samples below are the LAST GOOD cache, deliberately still served - gate every ax73_* query on this AND on route10_ax73_scrape_timestamp_seconds, which stops advancing when the AP is unreachable.' \
+  "route10_ax73_up $AXUP" \
+  "route10_ax73_scrape_timestamp_seconds $AXTS"
+cat /tmp/ax73-metrics.prom 2>/dev/null
