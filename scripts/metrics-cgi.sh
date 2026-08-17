@@ -387,6 +387,48 @@ WHERE o.ts = (SELECT max(ts) FROM optical)
   AND m.key IN ('w2','l4') AND p.key IN ('temp','vcc','bias') AND l.value IS NOT NULL;
 "
 
+# ── LAN client identity: mac -> ip/host/name (leases + curated targets) ─────
+# The join half of the WiFi telemetry (2026-08-17): ax73_sta_* keys stations by
+# MAC, and client MACs churn (iOS private addressing), so Grafana needs a
+# route10-side info metric to filter/legend by NAME. Reads two live LOCAL files
+# (no probing): /cfg/dhcp.leases (dnsmasq authority: mac/ip/hostname) and
+# /cfg/lan-probe.targets (operator-curated names, NOT in git).
+#   mac  — UPPERCASED to byte-match the ax73_* label case (join requirement).
+#   host — raw lease hostname, "" when the client sent none; kept RAW so its
+#          values byte-match route10_host_flows{host} (cross-metric key).
+#   name — display/filter label, never empty: targets IP match -> targets
+#          dhcp_name chase -> lease hostname -> the IP itself. IP match FIRST:
+#          it is the operator's explicit current pin, while the chase is the
+#          follow-a-rotation heuristic — with two iPhones both able to present
+#          hostname "iPhone", chase-first mislabeled .47 as iPhone-148
+#          (observed live 2026-08-17 before the flip). The one device
+#          class this cannot name is a private-MAC client that sends no DHCP
+#          hostname (only the Alta portal knows those) — it shows as its IP.
+# v4 leases only (the v6 rows carry DUIDs, not MACs — a MAC regex gates rows).
+# Join is on(mac) group_left(...); an unleased MAC has NO series here, so ops
+# joins with an `or` fallback to avoid dropping stations (recipe in seam mail).
+TF=/cfg/lan-probe.targets; [ -f "$TF" ] || TF=/dev/null
+printf '%s\n' '# HELP route10_client_info Current v4 DHCP lease per client: mac (uppercase, joins ax73_sta_* on(mac)), ip, host (raw lease hostname, matches route10_host_flows), name (curated display name, never empty; falls back to the IP). Series exists only while a lease does - join with an or-fallback so unleased stations are not dropped.'
+awk -v tf="$TF" '
+FILENAME == tf {
+    if ($0 ~ /^[ \t]*#/ || NF < 3) next
+    tname[$1] = $2
+    if (NF >= 4) dname[$4] = $2
+    next
+}
+$2 ~ /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/ && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {
+    mac = toupper($2); ip = $3; host = $4
+    name = ""
+    if (ip in tname)                    name = tname[ip]
+    if (name == "" && host != "*" && (host in dname)) name = dname[host]
+    if (name == "" && host != "*")      name = host
+    if (name == "")                     name = ip
+    h = (host == "*") ? "" : host
+    gsub(/[\\"]/, "", name); gsub(/[\\"]/, "", h)
+    printf "route10_client_info{mac=\"%s\",ip=\"%s\",host=\"%s\",name=\"%s\"} 1\n", mac, ip, h, name
+}
+' "$TF" /cfg/dhcp.leases 2>/dev/null
+
 # ── AX73 WiFi AP passthrough (ax73-scrape.sh cron cache; NO live probe) ─────
 # The ax73_* namespace is owned by the wifi-ap agent's exporter on
 # 192.168.10.11:9100; ax73-scrape.sh (* * * * *) caches it, format-filtered so

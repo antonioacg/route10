@@ -196,7 +196,10 @@ telnet probes — they orphan the lock too.
   - **`/metrics` exporter** — second uhttpd on **`192.168.10.1:9100`** (LAN-only
     bind, relaunched by post-cfg), CGI at `/cfg/scripts/metrics-www/metrics`
     serving newest stats.sql + rt.sql rows **+ the AX73 `ax73_*` cache** (no live
-    probing in the request path). Shared value — governed by ops
+    probing in the request path) **+ `route10_client_info{mac,ip,host,name}`**
+    (live local read of dhcp.leases + lan-probe.targets — the name half of the
+    WiFi join: `ax73_sta_*` joins `on(mac) group_left(name)`; mac UPPERCASED to
+    byte-match ax73 labels, `host` byte-matches `route10_host_flows`). Shared value — governed by ops
     `NETWORK-CONTRACT.md` §"route10 metrics scrape"; ops scrapes every 2 min,
     trending telemetry ONLY (dies with the LAN; the `/cfg` + `/a` records are
     the outage complement). Source: `scripts/metrics-cgi.sh`.
