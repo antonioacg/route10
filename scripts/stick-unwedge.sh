@@ -96,10 +96,36 @@ fi
 # --- 2. Enumerate the process table via injected `ps` -------------------------
 # Parsing happens HERE, in a full shell on Route10 (spaces/awk/grep all fine) —
 # only the final kill payload needs tab-encoding.
+#
+# ⚠ POLL for the result, never a fixed sleep (2026-08-18, cost ~35 min of dead
+# PON telemetry and six failed self-heals). Our injected line runs AFTER Boa's
+# own `ping -4 -c 4 -w 5`, so at +5 s the page still renders `ping wait` and
+# boa_result returns NO process table. An empty PS then falls through the awk
+# with zero matches — indistinguishable from "no orphans", and the do-nothing
+# branch is the one it takes: `rm cli.pid` on a wedge whose holder is a live
+# orphaned /bin/sh. That is the exact shape of a probe with no control, so the
+# read below is gated on the ps HEADER being present, not on elapsed time.
 log "reading stick process table..."
 boa_inject "ps%09%3e%09/tmp/ping.tmp" >/dev/null
-sleep 5
-PS=$(boa_result)
+PS=''
+i=0
+while [ "$i" -lt 10 ]; do
+    sleep 3
+    i=$((i + 1))
+    PS=$(boa_result)
+    # The control: a real process table carries the `ps` header. `ping wait`,
+    # `PING failed` and a bounced Boa login all lack it, and all three would
+    # otherwise parse as "no orphans".
+    case "$PS" in *"PID USER"*) break ;; esac
+    PS=''
+done
+if [ -z "$PS" ]; then
+    log "ERROR: could not read the stick process table (Boa never rendered one in ~30 s)."
+    log "       NOT treating that as 'no orphans' — a wedge holder would be missed."
+    log "       Falling back to a blind clear: killall login + rm cli.pid."
+    boa_inject "killall%09-9%09login%0arm%09-f%09/var/run/cli.pid" >/dev/null
+    PS=''
+fi
 
 # Targets = the wedge-holding processes, and ONLY those:
 #   - /bin/login and /bin/login -p   (the CLI gate; console + telnet logins)
@@ -129,6 +155,8 @@ if [ -n "$TARGETS" ]; then
     # tab-separate the pids for the space-free injection
     KILL_ARGS=$(echo "$TARGETS" | tr '\n' ' ' | sed 's/ *$//' | sed 's/ /%09/g')
     boa_inject "kill%09-9%09${KILL_ARGS}%0arm%09-f%09/var/run/cli.pid" >/dev/null
+elif [ -z "$PS" ]; then
+    : # unread process table — the blind clear above already ran; say nothing new
 else
     log "no orphaned login/sh/diag processes — treating as a pure lock-file wedge, removing cli.pid"
     boa_inject "rm%09-f%09/var/run/cli.pid" >/dev/null
