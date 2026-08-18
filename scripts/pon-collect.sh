@@ -348,6 +348,9 @@ elif [ "${_omci_xfer:-0}" -ge "${_omci_ondisk:-0}" ] 2>/dev/null; then
 elif [ "${_omci_ondisk:-0}" -gt "$OMCI_RAMGUARD" ] 2>/dev/null; then
     python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
     err "OMCI log ${_omci_ondisk} B UNPULLABLE (nc delivered ${_omci_xfer} B) and past the ${OMCI_RAMGUARD} B ram guard — truncated UNREAD to protect omci_app (ramfs is 23 MB total and omci_app is the GPON MAC). This is data loss, chosen deliberately over risking the fibre."
+    # We discarded these bytes ourselves. The logger_dead latch below must not
+    # then read the empty drain as "the recorder is dead" — see its note.
+    _omci_guard_drop=1
 elif [ "${_omci_ondisk:-0}" -gt 0 ] 2>/dev/null; then
     warn "OMCI pull SHORT: stick held ${_omci_ondisk} B, nc delivered ${_omci_xfer} B — NOT truncating; will retry next cycle."
 fi
@@ -807,7 +810,17 @@ fi
 PREV_RX=$(sqlite3 -readonly "$DB" "SELECT json_extract(json,'\$.omci2.rx_total') FROM pon WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
 case "$OMCI_RX_TOT" in ''|*[!0-9]*) : ;; *)
     case "$PREV_RX" in ''|*[!0-9]*) : ;; *)
-        if [ "$OMCI_RX_TOT" -gt "$PREV_RX" ] && [ -z "$_omci_body" ]; then
+        # ⛔ NOT on a cycle where the ram guard truncated the log UNREAD. There
+        # the drain is empty because WE emptied it, and the rx counter advanced
+        # because it spans the whole outage that filled the log in the first
+        # place -- so both halves of the "independent witnesses" test are
+        # satisfied by one event we caused. Measured 2026-08-18: the first cycle
+        # after a 33-min CLI wedge latched logger_dead deterministically (+86
+        # rx, guard-truncated drain) while the logger was fine, which is a page
+        # ops would take on every wedge recovery. A genuinely dead logger still
+        # latches on the NEXT empty drain -- at most one OLT burst later.
+        if [ "$OMCI_RX_TOT" -gt "$PREV_RX" ] && [ -z "$_omci_body" ] \
+           && [ "${_omci_guard_drop:-0}" -eq 0 ]; then
             : > "$OMCI_DEAD_STATE"
             # Rate-limited so a stick that refuses to arm cannot turn this into
             # a per-minute extra CLI session -- that would manufacture the wedge
