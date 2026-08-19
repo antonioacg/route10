@@ -147,6 +147,26 @@ telnet probes — they orphan the lock too.
       stick's `nc` past the timeout and orphan the session. Truncate is gated on
       `received >= reported` — now genuinely comparable, since nc moves the whole
       file (it was not comparable while we filtered stick-side).
+      ⛔ **And the pull is CAPPED at 1 MB (2026-08-18 collapse).** nc made the
+      hole cheap to *move*, not to *read*: `/var` is ramfs on a **23 MB-total /
+      ~2.2 MB-free** box, and reading a hole ALLOCATES a page per 4 KB,
+      unreclaimable until the truncate. At 10 MB of apparent size the whole-file
+      `cat` OOM'd the stick's userspace top-down (daemons → TCP → ICMP; ARP
+      last; `omci_app` survived resident, so the WAN stayed up) — recovery was
+      a physical reseat. Now the size is read FIRST and the pull runs in its
+      own session only when `0 < size ≤ 4 MB` (cap sized from both measured
+      ends: 2.5× under the ~10 MB observed kill point, ~5 min of the worst
+      measured incident firehose); above it the file is truncated **unread**
+      (data loss over box loss). ⭐ **And the hole no
+      longer forms: `omcicli set logfile <mode> <mask> <fileName>` — the
+      fileName arg — makes `omci_app` close+reopen its log fds at pos 0**
+      (measured via `/proc/<pid>/fdinfo` + an mv marker; without the fileName
+      the command never touches the fds, which is why every earlier re-arm
+      left the offset growing). pon-collect issues it after every drain, so
+      apparent size stays ~one burst (~26 KB) instead of +1.4 MB/day. Log
+      size + stick MemFree export every cycle (`route10_pon_omci_log_bytes`,
+      `route10_pon_stick_mem_free_bytes`) so the squeeze is a trend, not a
+      surprise. See `docs/postmortems/2026-08-18-odi-stick-userspace-collapse.md`.
     - **Raw OMCI lines → syslog tag `route10.omci`** (`daemon.info`, separate
       from `route10.pon-collect` so a firehose never rides the alert stream).
       Gated to non-O5 by default (~164 lines/min while faulting). busybox

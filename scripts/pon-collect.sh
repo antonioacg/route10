@@ -98,6 +98,20 @@ DIAG='printf "gpon get onu-state\ngpon get alarm-status\ngpon get rogue-sd-cnt\n
 # body -- otherwise the drain would capture its own command.
 OMCI_LOGMODE=6
 OMCI_LOGMASK=0x3FFFFFFF
+# ⭐ THE OFFSET-RESET LEVER (measured 2026-08-19, and it ends the hole class).
+# `omcicli set logfile <mode> <mask> <fileName>` -- the fileName argument the
+# usage string hides in `[actMask 0:Default | value[, fileName]]` -- makes
+# omci_app CLOSE and REOPEN its log fds at the given path: proven by an mv
+# marker (fds tracked the renamed inode, then snapped to a fresh file with
+# pos:0 after the set), fd numbers 9/10 reused so nothing leaks. WITHOUT the
+# fileName the same command is a no-op on the fds (also measured -- pos kept
+# its value through a bare re-arm AND a full 0/6 mode toggle). The write
+# offset is otherwise immortal short of an omci_app restart: omci_app writes
+# with plain write() on a held non-append fd, so our truncate resets the SIZE
+# but the next burst lands at the old offset and re-creates the hole. Passing
+# the fileName after every drain resets pos to 0, so the apparent size stays
+# one burst (~26 KB) instead of growing ~1.4 MB/day forever.
+OMCI_LOGPATH=/var/tmp/omcilog
 # ⛔ ROOT CAUSE 2026-08-11, and it was OURS. The previous drain was one shell
 # line: `cat file1 file2; : > file1; : > file2` -- an UNCONDITIONAL truncate.
 # Measured by holding the collector lock across one OLT poll: the log is not a
@@ -161,6 +175,25 @@ OMCI_LOGMASK=0x3FFFFFFF
 # an ~80 s WAN outage on a single fibre. Moving the bytes cheaply is what
 # actually scales; cutting the action mask (slower growth) is the complement.
 #
+# ⛔ AND THE ABOVE CONCLUSION OUTLIVED ITS EVIDENCE (2026-08-18 collapse, see
+# docs/postmortems/2026-08-18-odi-stick-userspace-collapse.md). nc made the hole
+# cheap to MOVE; it did nothing about what reading it COSTS THE STICK. /var is
+# ramfs on a box whose MemTotal is 23 MB with ~2.2 MB free (measured fresh-boot
+# 2026-08-19 -- our old "23 MB ramfs / 2.8 MB free" note was really total system
+# RAM, not a filesystem quota). Reading a ramfs hole is not free: simple_readpage
+# ALLOCATES a page per 4 KB read and ramfs pages are never reclaimed until the
+# truncate drops them -- so every whole-file cat transiently materialises the
+# entire apparent size as unreclaimable RAM. At 10,014,726 B (7.4 days of stick
+# uptime) that read OOM'd the stick's userspace top-down: daemons, then TCP
+# accept, then ICMP, ARP last -- while omci_app (already resident) kept the PON
+# up. Recovery needed a physical reseat. Hence the gate below: the size is
+# always read first (session A), and the pull session runs ONLY when
+# 0 < size <= OMCI_PULL_CAP. Above the cap nothing reads the file at all --
+# unread hole pages are never instantiated, so a runaway log can cost DATA but
+# can no longer cost the BOX. And the OMCI_LOGPATH fileName re-set after every
+# drain resets the write offset to 0, so in the steady state the size never
+# exceeds one burst and the cap is a belt that should never trip.
+#
 # ⛔ DIRECTION IS A SAFETY DECISION, not a preference. route10 LISTENS and the
 # stick CONNECTS OUT. The inverse was measured and is dangerous: an `nc -l` on
 # the stick that nobody connects to OUTLIVES its stick-exec session (observed --
@@ -219,6 +252,26 @@ omci_listen_finish() {
 # The stick now only REPORTS the size over telnet and PIPES the bytes over nc.
 OMCISIZE="echo __OMCI''LOG_S__; ls -l /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null; echo __OMCI''LOG_E__"
 OMCIPULL="cat /var/tmp/omcilog.par /var/tmp/omcilog 2>/dev/null | nc $OMCI_NC_BIND $OMCI_NC_PORT"
+# Hard bound on what one pull may make the stick read, freed again at the
+# truncate that follows a good pull. Sized from BOTH measured ends, not from
+# MemFree: the box tolerated ~9.9 MB whole-file reads once a minute for days
+# and died at 10.01 MB (page-cache reclaim absorbs far more than the ~2.2 MB
+# MemFree floor suggests), so 4 MB keeps 2.5x margin under the observed kill
+# point -- while covering ~5 min of the WORST measured log growth, the
+# 1,733,379 B/150 s re-provisioning firehose of 2026-08-11. That firehose is
+# the reason the cap is not tighter: it happens during a faulting PON, which
+# is precisely the window this capture exists for, and a cap that discards it
+# unread would throttle the forensics at the exact moment they matter
+# (feedback_informative_over_restrictive). Healthy steady state is ~26 KB, so
+# hitting this at all means the offset reset has been failing for days. The
+# stick-side reader stays plain `cat` because its busybox has NO tail/head/dd
+# (measured at the applet level) -- nothing on the stick can seek, so the only
+# safe read above the cap is no read.
+OMCI_PULL_CAP=$(( 4 * 1024 * 1024 ))
+# Stick memory headroom, recorded every cycle -- the curve that would have shown
+# the 2026-08-18 collapse coming for days. Rides the existing session; parsed on
+# route10, exported as route10_pon_stick_mem_free_bytes.
+MEMQ="grep MemFree /proc/meminfo"
 # ── MIB state poll — the durable half of the management-plane record ────────
 # The OMCI log is EPHEMERAL by construction: /tmp on the stick is tmpfs, the
 # logger is runtime-only, and an `ActivateSw` REBOOTS the stick -- so the one
@@ -259,14 +312,15 @@ MIBPOLL="echo __MIB''_S__; omcicli mib get 7; omcicli mib get 340; omcicli mib g
 # drain overran it, stick-exec closed the socket abruptly, and that ORPHANED a
 # /bin/login+/bin/sh holding the single CLI. i.e. the timeout was manufacturing the
 # very wedge it was blamed on. 4x45 s worst case is bounded by the collector lock.
-# The listener is armed around EVERY poll, because poll_stick is also called a
-# second time by the unwedge path -- a retry with no listener would leave the
-# stick dialling a closed port and lose that cycle's log.
+#
+# ⭐ The PULL is no longer in this batch (2026-08-19). The batch reads the SIZE;
+# the pull runs in its own later session, gated on 0 < size <= OMCI_PULL_CAP --
+# see the collapse note above OMCI_PULL_CAP. Between bursts (14 of every 15
+# cycles) the size is 0 and no pull session runs at all, so the steady state is
+# now ONE stick session per minute plus one short pull+truncate pair per OLT
+# burst. The listener is likewise armed only around the pull.
 poll_stick() {
-    omci_fw_ensure 2>/dev/null
-    omci_listen_start 2>/dev/null
-    python3 "$STICK_EXEC" --timeout 45 "cat /proc/uptime" "$DIAG" "$OMCISIZE" "$MIBPOLL" "$OMCIPULL" 2>&1
-    omci_listen_finish 2>/dev/null
+    python3 "$STICK_EXEC" --timeout 45 "cat /proc/uptime" "$DIAG" "$OMCISIZE" "$MIBPOLL" "$MEMQ" 2>&1
 }
 # ⚠ FAIL CLOSED, and this is the whole point of the function.
 # It used to ENUMERATE the failures we had seen -- `WEDGED:`, `ERR:`, empty --
@@ -335,6 +389,22 @@ fi
 _omci_hdr=$(printf '%s\n' "$RAW" | sed -n '/__OMCILOG_S__/,/__OMCILOG_E__/p' | sed '1d;$d')
 # busybox `ls -l` size is field 5. Sum both files; absent/unparsable -> 0.
 _omci_ondisk=$(printf '%s\n' "$_omci_hdr" | awk '/omcilog/ {s += $5} END {print s+0}')
+
+# ── the pull, in its own session, gated on the size we just read ────────────
+# This ordering IS the 2026-08-18 fix: size first, then decide whether reading
+# is safe. 0 between bursts -> no pull session at all (14 of 15 cycles). Above
+# OMCI_PULL_CAP -> the file is never read, by anything; the truncate ladder
+# below disposes of it unread. Only the sane middle pulls. The file can grow
+# between the size read and the cat (an in-flight burst), but by at most one
+# burst (~26 KB) -- noise against the cap's margin.
+if [ "${_omci_ondisk:-0}" -gt 0 ] 2>/dev/null \
+   && [ "${_omci_ondisk:-0}" -le "$OMCI_PULL_CAP" ] 2>/dev/null; then
+    omci_fw_ensure 2>/dev/null
+    if omci_listen_start 2>/dev/null; then
+        python3 "$STICK_EXEC" --timeout 45 "$OMCIPULL" >/dev/null 2>&1
+        omci_listen_finish 2>/dev/null
+    fi
+fi
 _omci_xfer=$(wc -c < "$OMCI_RAW" 2>/dev/null || echo 0)
 case "$_omci_xfer" in ''|*[!0-9]*) _omci_xfer=0 ;; esac
 # The filter runs HERE, where it costs ~1 ms instead of ~9 s on the stick.
@@ -343,34 +413,43 @@ _omci_got=${#_omci_body}
 OMCILOG=$(printf '%s' "$_omci_body" | head -c 64000 | sed "s/'/''/g")
 
 # Never lose data silently. Two DISTINCT losses, reported separately because
-# they have different fixes: the transfer bound (raise OMCI_DRAIN_KB, or reduce
-# the logger's action mask so it stops emitting 1.7 MB per burst) and the row
-# storage bound (a /a/obs budget decision).
+# they have different fixes: the pull bound (OMCI_PULL_CAP, or reduce the
+# logger's action mask so the offset grows slower) and the row storage bound
+# (a /a/obs budget decision).
 # ── truncate ONLY on proof we have the bytes ────────────────────────────────
 # Separate round trip, deliberately. If the read failed or came back short we
 # leave the file alone and try again next cycle; nothing is destroyed unread.
 #
-# The one exception is a RAM guard, and it is a real risk not a theoretical one:
-# /var on the stick is ramfs (23 MB TOTAL, ~2.8 MB free) so an undrained log
-# competes with omci_app itself -- and omci_app IS the GPON MAC. Losing text is
-# survivable; OOM-ing the process that terminates our only fibre is not. Above
-# the guard we truncate anyway and say so at err.
-OMCI_RAMGUARD=$(( 4 * 1024 * 1024 ))
+# The one exception is the over-cap branch, and it is the 2026-08-18 lesson:
+# the box has 23 MB of RAM total with ~2.2 MB free, /var is ramfs, and reading
+# a file there COSTS a page per 4 KB of apparent size -- so a log whose write
+# offset has grown past the cap must be disposed of WITHOUT ever being read.
+# The truncate frees whatever real pages it holds and resets the apparent size;
+# losing text is survivable, OOM-ing the box that terminates our only fibre is
+# not (it did, 2026-08-18 -- recovery was a physical reseat).
 if [ "${_omci_ondisk:-0}" -le 0 ] 2>/dev/null; then
     # Nothing on the stick. Normal between bursts: after a good drain the file
     # is genuinely 0 until omci_app's next write re-creates the hole.
     :
-elif [ "${_omci_xfer:-0}" -ge "${_omci_ondisk:-0}" ] 2>/dev/null; then
-    # Proof we hold every byte the stick reported. `-ge` not `-eq` on purpose:
-    # the file can only GROW between the `ls` and the pull, never shrink.
-    python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
-elif [ "${_omci_ondisk:-0}" -gt "$OMCI_RAMGUARD" ] 2>/dev/null; then
-    python3 "$STICK_EXEC" ": > /var/tmp/omcilog.par; : > /var/tmp/omcilog" >/dev/null 2>&1
-    err "OMCI log ${_omci_ondisk} B UNPULLABLE (nc delivered ${_omci_xfer} B) and past the ${OMCI_RAMGUARD} B ram guard — truncated UNREAD to protect omci_app (ramfs is 23 MB total and omci_app is the GPON MAC). This is data loss, chosen deliberately over risking the fibre."
+elif [ "${_omci_ondisk:-0}" -gt "$OMCI_PULL_CAP" ] 2>/dev/null; then
+    # Truncate frees any real pages, and the fileName re-set resets the write
+    # offset -- so this is one burst of loss and a self-heal, not a permanent
+    # dark channel. Reaching here at all means the offset reset has been
+    # failing (it should keep the size at ~one burst), which is worth the err.
+    python3 "$STICK_EXEC" ": > $OMCI_LOGPATH.par; : > $OMCI_LOGPATH; omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK $OMCI_LOGPATH" >/dev/null 2>&1
+    err "OMCI log ${_omci_ondisk} B is past the ${OMCI_PULL_CAP} B pull cap — NEVER READ (reading it would materialise that many bytes of unreclaimable ramfs on a 23 MB box, the 2026-08-18 collapse), truncated UNREAD and the write offset reset. This is one burst of data loss, chosen deliberately over risking the fibre — but the offset should never have grown this far: check that the fileName reopen still works on this firmware."
     # We discarded these bytes ourselves. The logger_dead latch below must not
     # then read the empty drain as "the recorder is dead" — see its note.
     _omci_guard_drop=1
-elif [ "${_omci_ondisk:-0}" -gt 0 ] 2>/dev/null; then
+elif [ "${_omci_xfer:-0}" -ge "${_omci_ondisk:-0}" ] 2>/dev/null; then
+    # Proof we hold every byte the stick reported. `-ge` not `-eq` on purpose:
+    # the file can only GROW between the `ls` and the pull, never shrink.
+    # Truncate first (frees the drained pages), then the fileName re-set
+    # reopens both fds at pos 0 so the next burst starts the file over instead
+    # of re-creating the hole at the old offset. A line written in the
+    # instant between the two is lost -- the same window today's truncate has.
+    python3 "$STICK_EXEC" ": > $OMCI_LOGPATH.par; : > $OMCI_LOGPATH; omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK $OMCI_LOGPATH" >/dev/null 2>&1
+else
     warn "OMCI pull SHORT: stick held ${_omci_ondisk} B, nc delivered ${_omci_xfer} B — NOT truncating; will retry next cycle."
 fi
 [ "${_omci_got:-0}" -gt 64000 ] && warn "OMCI row truncated: ${_omci_got} B drained, 64000 B stored"
@@ -548,6 +627,10 @@ alarm() {
 nz() { case "$1" in ''|*[!0-9]*) echo null ;; *) echo "$1" ;; esac; }
 
 UPTIME=$(printf '%s\n' "$RAW" | sed -n 's/^\([0-9][0-9]*\)\.[0-9].*/\1/p' | head -1)
+# Stick RAM headroom (kB, from MEMQ). The curve the 2026-08-18 postmortem asked
+# for: log apparent size + MemFree every cycle, so the next slow squeeze is a
+# visible trend instead of a surprise. Parse failure -> null -> raw kept.
+STICK_MEMFREE=$(printf '%s\n' "$RAW" | sed -n 's/^MemFree:[[:space:]]*\([0-9][0-9]*\) kB.*/\1/p' | head -1)
 # Match the state number generically, NOT just "Operation State(O5)". Each
 # state has its own label — "Standby State(O2)", "Serial Number State(O3)",
 # "Ranging State(O4)", "Emergency Stop State(O7)" — so an O5-only regex left
@@ -863,7 +946,7 @@ case "$OMCI_RX_TOT" in ''|*[!0-9]*) : ;; *)
                 # drain actually returns lines. Reporting a heal we have not
                 # observed would make our own telemetry lie exactly the way the
                 # stick's does, and that is the failure mode of the whole day.
-                python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK" >/dev/null 2>&1
+                python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK $OMCI_LOGPATH" >/dev/null 2>&1
                 _tries=$(cat /var/run/.omci-rearm-n 2>/dev/null || echo 0)
                 case "$_tries" in ''|*[!0-9]*) _tries=0 ;; esac
                 _tries=$(( _tries + 1 )); echo "$_tries" > /var/run/.omci-rearm-n
@@ -950,7 +1033,7 @@ printf '%s\n' "$_omci_mgmt" | grep -q 'AdminState' && propose adminlock \
     "OLT set ONU AdminState (admin lock)" \
     "traffic stops while PLOAM stays O5 -- do NOT chase a fibre fault or accept a modem swap; this is an ISP-side administrative action"
 
-JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s},"omcilog":{"dead":%s,"lines":%s,"writes":%s},"sw":{"s0_ver":"%s","s0_act":"%s","s0_com":"%s","s1_ver":"%s","s1_act":"%s","s1_com":"%s"},"tr069":{"admin":"%s","acs":"%s","tag":"%s"}}' \
+JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s},"omcilog":{"dead":%s,"lines":%s,"writes":%s,"bytes":%s},"mem_free_kb":%s,"sw":{"s0_ver":"%s","s0_act":"%s","s0_com":"%s","s1_ver":"%s","s1_act":"%s","s1_com":"%s"},"tr069":{"admin":"%s","acs":"%s","tag":"%s"}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
     "$(alarm 'TX Too Long')" "$(alarm 'TX Mismatch')" \
@@ -975,6 +1058,7 @@ JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"
     "$(nz "$USG_BLOCKS")" "$(nz "$USG_BYTES")" \
     "$(nz "$ETH_UNI")" "$(nz "$ETH_MCAST")" "$(nz "$ETH_FWD_MC")" "$(nz "$ETH_LEAK_MC")" \
     "$OMCI_LOG_DEAD" "${_omci_lines:-0}" "${_omci_writes:-0}" \
+    "$(nz "${_omci_ondisk:-0}")" "$(nz "$STICK_MEMFREE")" \
     "$SW0_VER" "$SW0_ACT" "$SW0_COM" "$SW1_VER" "$SW1_ACT" "$SW1_COM" \
     "$TR69_ADM" "$TR69_ACS" "$TR69_TAG")
 
@@ -1054,8 +1138,8 @@ case "$UPTIME" in ''|*[!0-9]*) : ;; *)
             # `-f off 0`, so every reboot silently disarms it and the drain
             # above would quietly return nothing forever. Re-assert it here --
             # on reboot only, so the steady state stays one session per minute.
-            python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK" >/dev/null 2>&1 \
-                && event "OMCI logfile re-armed after stick reboot (mode $OMCI_LOGMODE mask $OMCI_LOGMASK)"
+            python3 "$STICK_EXEC" "omcicli set logfile $OMCI_LOGMODE $OMCI_LOGMASK $OMCI_LOGPATH" >/dev/null 2>&1 \
+                && event "OMCI logfile re-armed after stick reboot (mode $OMCI_LOGMODE mask $OMCI_LOGMASK path $OMCI_LOGPATH)"
         fi ;;
     esac ;;
 esac

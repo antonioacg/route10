@@ -1,10 +1,10 @@
 # Post-mortem — 2026-08-18/19 ODI stick management-plane collapse (data plane never moved)
 
-**Status:** trigger **established with a clean correlation**; mechanism **narrowed to two
-variants of one cause**, with the discriminating measurement identified but **not yet taken** —
-it needs a live stick. Recovery required physically power-cycling the module. Three separate
-telemetry defects were found *during* the incident, two of which made our own instruments
-report health that did not exist.
+**Status:** **CLOSED 2026-08-19 — mechanism measured, fix deployed.** Recovery required
+physically power-cycling the module. Three separate telemetry defects were found *during* the
+incident, two of which made our own instruments report health that did not exist. The
+post-recovery instrumented session (§4a) measured the write mechanism directly and found the
+offset-reset lever the fix is built on.
 
 **One-line:** The stick's userspace collapsed top-down — daemons stopped serving, then TCP
 accept, then ICMP, leaving only ARP — while GPON forwarding, PPP and the WAN ran normally
@@ -67,26 +67,53 @@ established relationship).
    ≈1.2 MB/day, matching the 12,231 B captured per 15-minute OLT burst. It is read **in full**
    every cycle by `cat /var/tmp/omcilog.par | nc`.
 
-## 4. Mechanism — one cause, two variants
+## 4. Mechanism — measured, variant (b)
 
 `/var` on the stick is **ramfs**, whose pages have no backing store and are **never reclaimed**.
-The drain reads the whole apparent size of a file that grows daily. Either:
+The drain reads the whole apparent size of a file that grows daily — and the bytes are a
+**hole** (variant b): reading a hole in ramfs does not return a shared zero page —
+`simple_readpage` allocates one, fills it and leaves it in the page cache — so the drain
+*materialises* the full apparent size as unreclaimable RAM at read time, into a box that has
+**23 MB of RAM total** (`MemTotal: 23296 kB`, `MemFree: ~2.2 MB` on a fresh boot — our prior
+"23 MB ramfs / 2.8 MB free" note was really total system RAM, not a filesystem quota). The
+prior record (2026-08-12) cleared `nc` for this job by measuring the hole as a **transfer
+cost** — 2.5 MB in 1.8 s — and that conclusion outlived its evidence: it never measured
+memory, and the file had since grown 4×.
 
-- **(a) The bytes are real.** `omci_app` writes NUL padding, so the file genuinely occupies
-  ~10 MB of unreclaimable RAM continuously, and our truncate is the only thing that ever frees
-  it; or
-- **(b) The bytes are a hole.** Reading a hole in ramfs does not return a shared zero page —
-  `simple_readpage` allocates one, fills it and leaves it in the page cache — so the drain
-  *materialises* the full apparent size as permanent RAM at read time.
+### 4a. The instrumented session (2026-08-19, post-recovery)
 
-Both make the drain the trigger, both scale with stick uptime, and **both are fixed by never
-reading the whole file.** The prior record (2026-08-12) cleared `nc` for this job by measuring
-the hole as a **transfer cost** — 2.5 MB in 1.8 s — and that conclusion outlived its evidence:
-it never measured memory, and the file has since grown 4×.
+Held the collector lock across one OLT burst, sampling every 30 s. Kernel is 2.6.30.9, so
+`/proc/<pid>/fdinfo` exposes the write offset directly:
 
-**Discriminating measurement, not yet taken (needs a live stick):** `ls -ls` on the log — allocated
-blocks versus apparent size — plus `df /var` and `/proc/meminfo` sampled immediately before and
-after one drain. That separates (a) from (b) and confirms or refutes the whole model.
+- **`omci_app` writes with plain `write()` on a held O_RDWR fd** (flags 02, no O_APPEND):
+  `fdinfo` pos advanced 0 → 12,060 in the minute the burst landed, exactly matching the file's
+  apparent size. A fresh burst is **real bytes** (12 blocks allocated for 12,060 B) — the hole
+  is *created by our truncate*: `: > file` resets the size but the fd offset survives, so the
+  next burst lands at the old offset and everything below it becomes hole. Hole depth ≡ every
+  byte written since the offset was last 0. That is why apparent size tracked stick uptime.
+- **A bare re-arm (`omcicli set logfile 6 0x3FFFFFFF`) never touches the fds** — pos kept its
+  value. A full mode toggle (0 then 6) *truncates the files* but still does not reopen — pos
+  kept its value. Every re-arm we had ever issued left the offset growing.
+- ⭐ **The fileName argument is the lever.** `omcicli set logfile <mode> <mask> <fileName>`
+  makes omci_app **close and reopen** both log fds at the given path, pos 0 — proven with an
+  mv marker (fds tracked the renamed inode, then snapped to a fresh file after the set), fd
+  numbers reused so nothing leaks, and it works with the *same* name, so no ping-pong state.
+- No seeking reader exists on the stick: busybox 1.12.4 applet list has no tail/head/dd/od
+  (checked at the applet level, not just $PATH), so "read a bounded tail" was never
+  implementable stick-side. The fix has to prevent the hole, not skip it.
+
+### 4b. The fix (deployed 2026-08-19)
+
+1. **Size first, pull gated**: the pull left the main batch; it runs in its own session only
+   when `0 < apparent size ≤ 4 MB`. Above the cap the file is truncated and reset **unread**
+   — a runaway log can cost data, never the box. Between bursts (14 of 15 cycles) no pull
+   session runs at all.
+2. **Offset reset after every drain**: truncate + `set logfile 6 0x3FFFFFFF /var/tmp/omcilog`
+   in one stick command. Steady-state apparent size is now ~one burst (~26 KB), not
+   +1.4 MB/day.
+3. **The curve is recorded**: apparent log size + stick MemFree every cycle
+   (`route10_pon_omci_log_bytes`, `route10_pon_stick_mem_free_bytes`) — the trend that would
+   have shown this coming for days.
 
 ## 5. The instruments lied, in three different ways
 
@@ -134,19 +161,22 @@ Found *during* the incident, all fixed:
 - [x] Wedge gate fails closed on proof, not on a failure list (`e9fdd6a`)
 - [x] Change-detectors require both sides present (`128f926`)
 - [x] Ram-guard truncate no longer manufactures a dead-logger latch (`db6660e`)
-- [ ] **Stop reading the hole** — replace the whole-file `cat` with a tail-bounded read sized
-      from the delta in apparent size since the previous cycle (both numbers are already read
-      every minute and discarded). `tail -c` seeks, so cost becomes proportional to *new* log
-      text — ~12 KB per burst — instead of stick uptime. This is the fix that stops recurrence
-- [ ] **Take the discriminating measurement** (§4) on the next live stick, before assuming the
-      model is right
-- [ ] **Record what we already read and throw away**: the OMCI log size every cycle, plus a
-      cheap `/proc/meminfo` and `df /var` in the *existing* session — no extra CLI session, so
-      no added wedge risk. This is the curve that would have shown this coming
+- [x] **Stop reading the hole** — done differently than first planned: "tail-bounded read" was
+      impossible (no seeking applet in the stick's busybox — checked at the applet level), so
+      the fix *prevents* the hole instead: size-gated pull (4 MB cap, never read above it) +
+      per-drain offset reset via the `set logfile` fileName argument (§4a/§4b)
+- [x] **Take the discriminating measurement** (§4a) — variant (b); write mechanism, offset
+      behaviour and the reopen lever all measured via `/proc/<pid>/fdinfo`
+- [x] **Record what we already read and throw away** — apparent log size + stick MemFree every
+      cycle, in the existing session (`route10_pon_omci_log_bytes`,
+      `route10_pon_stick_mem_free_bytes`)
 
 ## 8. Open questions
 
-- Which variant, (a) or (b) — §4 has the measurement.
 - Why the *first* wedge left recoverable orphans while the second went all the way to a dark IP
-  stack. Same trigger, different depth, and we have no stick-side resource data for either.
+  stack. Same trigger, different depth, and we have no stick-side resource data for either —
+  the new MemFree curve is the instrument for the next occurrence.
 - Whether the module's watchdog is armed at all: ~1 h of dead userspace produced no reset.
+- Why the box tolerated ~9 MB transient reads for days before dying at 10 MB: reclaimable page
+  cache presumably absorbed most of it, so the true kill threshold sits well above MemFree.
+  The 4 MB cap keeps 2.5× margin below the observed kill point while covering ~5 min of the worst measured incident firehose (1.7 MB/150 s, 2026-08-11).
