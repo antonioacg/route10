@@ -1033,6 +1033,31 @@ printf '%s\n' "$_omci_mgmt" | grep -q 'AdminState' && propose adminlock \
     "OLT set ONU AdminState (admin lock)" \
     "traffic stops while PLOAM stays O5 -- do NOT chase a fibre fault or accept a modem swap; this is an ISP-side administrative action"
 
+# ── shadow: drain-until-small loop (2026-08-19, never executed) ─────────────
+# The idea (operator, post-collapse): during a firehose, pay CPU for memory --
+# re-read the size and pull again inside the SAME cron tick until a pull comes
+# back small, so per-read materialisation is bounded by the threshold instead
+# of by a whole minute of accumulation (~700 KB at the worst measured rate).
+# Current data says a single 1-min drain is already 6x under the cap, so the
+# loop is unjustified -- which is exactly what shadow mode is for: record every
+# episode where it WOULD have fired, then judge against the omci_log_bytes /
+# mem_free_kb curve of the surrounding cycles whether it would have mattered.
+# TRANSITION-gated (state in tmpfs, like the wedge warn): a 52-min firehose is
+# one episode row, not 52 warns in the alert stream. The episode's quantitative
+# record is already in the per-cycle pon rows; the proposal just marks it.
+OMCI_LOOP_SHADOW_THRESH=$(( 512 * 1024 ))
+_hf_state=/var/run/.omci-heavyflow
+if [ "${_omci_xfer:-0}" -ge "$OMCI_LOOP_SHADOW_THRESH" ] 2>/dev/null; then
+    if [ ! -f "$_hf_state" ]; then
+        : > "$_hf_state"
+        propose drainloop \
+            "heavy OMCI flow: one pull moved ${_omci_xfer} B (>= ${OMCI_LOOP_SHADOW_THRESH} B threshold; steady state is ~26 KB)" \
+            "drain-until-small: keep re-reading size and pulling inside this same cron tick (bounded, <=4 extra rounds, all under the collector lock) until a pull returns under the threshold. Judge later against omci_log_bytes/mem_free_kb of the surrounding cycles: did a full minute's accumulation between 1-min drains ever actually threaten the 4 MB cap?"
+    fi
+else
+    rm -f "$_hf_state"
+fi
+
 JSON=$(printf '{"uptime":%s,"onu_state":%s,"alarm":{"los":%s,"lof":%s,"lom":%s,"sf":%s,"sd":%s,"tx_too_long":%s,"tx_mismatch":%s},"ds":{"bip_bits":%s,"bip_blocks":%s,"fec_cor_cw":%s,"fec_uncor_cw":%s,"sf_los":%s,"ploam_rx":%s,"ploam_crc":%s},"rogue":{"sd_too_long":%s,"sd_mismatch":%s},"act":{"sn_req":%s,"ranging_req":%s},"us":{"tx_sn_ploam":%s,"tx_boh":%s},"omci":{"processed":%s,"dropped":%s},"bw":{"crc_err":%s,"invalid0":%s,"invalid1":%s},"omci_tx":{"req":%s,"retx":%s},"ds2":{"plen_fail":%s,"ploam_proc":%s,"ploam_ovf":%s,"ploam_unk":%s,"bw_total":%s,"bw_ovf":%s},"gem":{"los":%s,"hec":%s,"mislen":%s,"over_il":%s},"eth":{"fcs_err":%s},"us2":{"dbru":%s},"omci2":{"crc_err":%s,"rx_total":%s,"tx_total":%s,"rx_bytes":%s,"tx_bytes":%s,"us_proc":%s},"ds3":{"fec_cor_bits":%s,"fec_cor_bytes":%s,"plen_ok":%s},"usp":{"total":%s,"proc":%s,"urg":%s,"proc_urg":%s,"normal":%s,"proc_nrm":%s,"nomsg":%s},"gem2":{"idle":%s,"nonidle":%s,"multiflow":%s,"us_blocks":%s,"us_bytes":%s},"eth2":{"unicast":%s,"multicast":%s,"fwd_mcast":%s,"leak_mcast":%s},"omcilog":{"dead":%s,"lines":%s,"writes":%s,"bytes":%s},"mem_free_kb":%s,"sw":{"s0_ver":"%s","s0_act":"%s","s0_com":"%s","s1_ver":"%s","s1_act":"%s","s1_com":"%s"},"tr069":{"admin":"%s","acs":"%s","tag":"%s"}}' \
     "$(nz "$UPTIME")" "$(nz "$ONU")" \
     "$(alarm LOS)" "$(alarm LOF)" "$(alarm LOM)" "$(alarm SF)" "$(alarm SD)" \
