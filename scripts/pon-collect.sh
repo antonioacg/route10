@@ -268,7 +268,26 @@ poll_stick() {
     python3 "$STICK_EXEC" --timeout 45 "cat /proc/uptime" "$DIAG" "$OMCISIZE" "$MIBPOLL" "$OMCIPULL" 2>&1
     omci_listen_finish 2>/dev/null
 }
-is_wedged() { case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; *) return 1 ;; esac; }
+# ⚠ FAIL CLOSED, and this is the whole point of the function.
+# It used to ENUMERATE the failures we had seen -- `WEDGED:`, `ERR:`, empty --
+# and 2026-08-19 produced the one that was not on the list. When the stick
+# stopped answering TCP altogether (not just refusing to spawn a shell),
+# stick-exec started returning `FATAL: timeout: timed out`, which matches none
+# of those. The collector then parsed a dead stick's empty output into a full
+# row of NULLs, once a minute, so route10_pon_sample_timestamp_seconds kept
+# advancing while every value read NaN -- ops's staleness alert CLEARED ITSELF
+# on a stick that was dark, and pon-collect logged a false "CLI recovered".
+# The sicker the stick got, the healthier the telemetry looked.
+#
+# So do not decide liveness by listing the ways it can fail; that list is only
+# ever as complete as the outages you have already had. Demand PROOF of a live
+# session: /proc/uptime is the first command in the batch and only a running
+# kernel answers it with two floats. No proof => wedged, whatever the text says.
+is_wedged() {
+    case "$1" in *WEDGED*|*"ERR:"*|'') return 0 ;; esac
+    printf '%s\n' "$1" | grep -qE '^[0-9]+\.[0-9]+[[:space:]]+[0-9]+\.[0-9]+' && return 1
+    return 0
+}
 
 RAW=$(poll_stick)
 
