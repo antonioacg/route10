@@ -269,7 +269,22 @@ CTOUT=$(awk -v lan6="$LAN6" -v topn=10 '
         # which is literally the reported symptom (the tail of a burst of image
         # or video requests failing to load).
         # State is $6 for tcp lines only; on udp rows $6 is already src=.
-        if ($3=="tcp") { t4[s]++; if ($6=="SYN_SENT") y4[s]++ }
+        # DESTINATION SNAPSHOT (2026-08-19): the counter alone proved a shared-path
+        # event that morning (six hosts unanswered simultaneously) but could not
+        # name WHAT was unreachable — SYN_SENT entries lapse in 120 s, so by the
+        # time anyone asks, the destinations are gone. Capture the (src,dst,dport)
+        # tuple for every LAN-to-public SYN_SENT here, in the same pass; the shell
+        # below persists them ONLY when a host crosses the spike threshold.
+        if ($3=="tcp") {
+            t4[s]++
+            if ($6=="SYN_SENT") {
+                y4[s]++
+                dp = ""
+                for (j = i; j <= NF; j++)
+                    if (substr($j,1,6)=="dport=") { dp = substr($j,7); break }
+                snapc[s "|" d "|" dp]++
+            }
+        }
       }
     }
     next
@@ -292,6 +307,14 @@ CTOUT=$(awk -v lan6="$LAN6" -v topn=10 '
     printf "TOP4 %s\n", emit(c4, topn)
     printf "TOP6 %s\n", emit(c6, topn)
     printf "STALL4 %s\n", emit_stall(topn)
+    maxy = 0
+    for (k in y4) if (y4[k]+0 > maxy) maxy = y4[k]+0
+    printf "SNAPMAX %d\n", maxy
+    for (k in snapc) {
+      split(k, a, "|")
+      printf "SNAP %s %s %s %d %s\n", a[1], a[2], a[3], snapc[k], \
+             (a[1] in nm) ? nm[a[1]] : "unknown"
+    }
   }
 ' "$IDMAP" /proc/net/nf_conntrack 2>/dev/null)
 
@@ -304,6 +327,45 @@ TOP6=$(printf '%s\n' "$CTOUT" | sed -n 's/^TOP6 //p')
 [ -n "$TOP6" ] || TOP6="[]"
 STALL4=$(printf '%s\n' "$CTOUT" | sed -n 's/^STALL4 //p')
 [ -n "$STALL4" ] || STALL4="[]"
+
+# ── destination snapshot: persist WHAT was unreachable, not just that it was ──
+# 2026-08-19 07:46Z: six hosts went unanswered-positive simultaneously and the
+# best anyone could say afterwards was "partial upstream, destinations unknown"
+# — the tuples had lapsed out of conntrack within 120 s. So when any host's
+# unanswered count crosses the threshold, write this minute's (host,src,dst,
+# dport,count) tuples into the synsnap table. Not a metric (destination labels
+# would churn cardinality); a forensic table queried after the fact.
+#   threshold 3: prior-6h fleet max was 1 (ops-measured), the event peaked 13.
+#   top-20 tuples/cycle + 1-per-10-min warn: a single IoT device retrying a
+#   dead vendor cloud can sit >=3 for days — it must not own the log stream,
+#   and rows stay bounded while the WARN still names the pattern once.
+SNAPMAX=$(printf '%s\n' "$CTOUT" | sed -n 's/^SNAPMAX //p')
+case "$SNAPMAX" in ''|*[!0-9]*) SNAPMAX=0 ;; esac
+SNAP_SQL=""
+SNAP_THRESH=3
+if [ "$SNAPMAX" -ge "$SNAP_THRESH" ]; then
+    # Field-validated and name-sanitised before touching SQL: ips must be
+    # dotted-quad, port/count numeric, name stripped to [A-Za-z0-9._-] (DHCP
+    # hostnames are attacker-suppliable text; they reach a quoted literal).
+    SNAP_SQL=$(printf '%s\n' "$CTOUT" | grep '^SNAP ' | sort -k5,5rn | head -20 \
+        | awk -v ts="$TS" '{
+            src=$2; dst=$3; dp=$4; cnt=$5; nm=$6
+            if (src !~ /^[0-9.]+$/ || dst !~ /^[0-9.]+$/) next
+            if (dp  !~ /^[0-9]+$/) dp = 0
+            if (cnt !~ /^[0-9]+$/) cnt = 0
+            gsub(/[^A-Za-z0-9._-]/, "", nm)
+            printf "INSERT INTO synsnap VALUES(%s,%c%s%c,%c%s%c,%c%s%c,%d,%d);", \
+                   ts, 39, nm, 39, 39, src, 39, 39, dst, 39, dp, cnt
+        }')
+    _snap_top=$(printf '%s\n' "$CTOUT" | grep '^SNAP ' | sort -k5,5rn | head -3 \
+        | awk '{printf "%s%s:%s x%s (%s)", (NR>1 ? ", " : ""), $3, $4, $5, $6}')
+    _snap_last=$(cat /var/run/.obs-synsnap.t 2>/dev/null)
+    case "$_snap_last" in ''|*[!0-9]*) _snap_last=0 ;; esac
+    if [ $(( TS - _snap_last )) -ge 600 ]; then
+        echo "$TS" > /var/run/.obs-synsnap.t
+        warn "unanswered-SYN spike (max ${SNAPMAX}/host, threshold ${SNAP_THRESH}) — destination snapshot written to synsnap. Top: ${_snap_top}"
+    fi
+fi
 
 # Per-interface {rx_bytes,rx_pkts,tx_bytes,tx_pkts} as a JSON object keyed by name
 IFJSON=$(awk 'NR>2{
@@ -436,8 +498,11 @@ JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":
 OUT=$(sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS samples (ts INTEGER PRIMARY KEY, json TEXT);
+CREATE TABLE IF NOT EXISTS synsnap (ts INTEGER, host TEXT, src TEXT, dst TEXT, dport INTEGER, cnt INTEGER);
 INSERT OR IGNORE INTO samples VALUES ($TS, '$JSON');
+$SNAP_SQL
 DELETE FROM samples WHERE ts < $TS - 30*86400;
+DELETE FROM synsnap WHERE ts < $TS - 30*86400;
 " 2>&1) || err "sample insert FAILED: $(echo "$OUT" | head -1)"
 
 # ── wedge tripwire ──────────────────────────────────────────────────────────
