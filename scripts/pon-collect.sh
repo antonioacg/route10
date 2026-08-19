@@ -908,25 +908,36 @@ propose() {   # propose <tier> <observed> <action we would take>
 
 # MIB state change detection. One query, pipe-joined, so a nine-field compare
 # costs one read. Empty PREV (first run after deploy) must NOT read as a change.
+#
+# ⚠ And neither must empty CUR -- the guard was one-sided until 2026-08-19, when
+# a dark stick's NULL row diffed against real state and raised firmware-bank and
+# TR-069 advisories about changes nobody made ("PROPOSED (NOT APPLIED) firmware
+# already changed under us"). Same class ops hit from the other end the same
+# night: their `onu_state != 5` rule paged critical on NaN, because NaN compares
+# UNEQUAL to everything. Absence is not inequality. `chg` therefore demands BOTH
+# sides be present: a field going to empty means we failed to read it, and a
+# field arriving from empty is a first observation -- neither is a change.
+chg() { [ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]; }
 PREV_MIB=$(sqlite3 -readonly "$DB" "SELECT COALESCE(json_extract(json,'\$.sw.s0_ver'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s1_ver'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s0_act'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s1_act'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s0_com'),'')||'|'||COALESCE(json_extract(json,'\$.sw.s1_com'),'')||'|'||COALESCE(json_extract(json,'\$.tr069.admin'),'')||'|'||COALESCE(json_extract(json,'\$.tr069.acs'),'')||'|'||COALESCE(json_extract(json,'\$.tr069.tag'),'') FROM pon WHERE ts < $TS ORDER BY ts DESC LIMIT 1;" 2>/dev/null)
 CUR_MIB="$SW0_VER|$SW1_VER|$SW0_ACT|$SW1_ACT|$SW0_COM|$SW1_COM|$TR69_ADM|$TR69_ACS|$TR69_TAG"
-if [ -n "$PREV_MIB" ] && [ "$PREV_MIB" != "||||||||" ] && [ "$PREV_MIB" != "$CUR_MIB" ]; then
+if [ -n "$PREV_MIB" ] && [ "$PREV_MIB" != "||||||||" ] && [ "$CUR_MIB" != "||||||||" ] \
+   && [ "$PREV_MIB" != "$CUR_MIB" ]; then
     err "MIB STATE CHANGED: [$PREV_MIB] -> [$CUR_MIB] (sw0_ver|sw1_ver|sw0_act|sw1_act|sw0_com|sw1_com|tr069_admin|tr069_acs|tr069_tag)"
     _pv0=$(echo "$PREV_MIB" | cut -d'|' -f1); _pv1=$(echo "$PREV_MIB" | cut -d'|' -f2)
     _pa=$(echo "$PREV_MIB" | cut -d'|' -f7);  _pc=$(echo "$PREV_MIB" | cut -d'|' -f8)
-    [ "$_pv0" != "$SW0_VER" ] && propose firmware \
+    chg "$_pv0" "$SW0_VER" && propose firmware \
         "inactive bank version $_pv0 -> $SW0_VER (an OMCI push lands here first)" \
         "capture flash vars NOW (GPON_SN, MAC_KEY, LAN_SDS_MODE) before any Activate; a stock image re-pins them from libmib defaults and that is what kills PPPoE, not the flash region itself"
-    [ "$_pv1" != "$SW1_VER" ] && propose firmware \
+    chg "$_pv1" "$SW1_VER" && propose firmware \
         "RUNNING bank version $_pv1 -> $SW1_VER" \
         "firmware already changed under us; verify GPON_SN + MAC_KEY survived and re-apply from project_odi_mac_key_fix if not"
-    { [ "$(echo "$PREV_MIB" | cut -d'|' -f3)" != "$SW0_ACT" ] || [ "$(echo "$PREV_MIB" | cut -d'|' -f5)" != "$SW0_COM" ]; } && propose firmware \
+    { chg "$(echo "$PREV_MIB" | cut -d'|' -f3)" "$SW0_ACT" || chg "$(echo "$PREV_MIB" | cut -d'|' -f5)" "$SW0_COM"; } && propose firmware \
         "bank 0 active/committed flags moved" \
         "Activate reboots onto the other image and Commit makes it survive a power cycle; if Commit has NOT happened a power cycle reverts us -- decide before touching power"
-    [ "$_pa" != "$TR69_ADM" ] && propose tr069 \
+    chg "$_pa" "$TR69_ADM" && propose tr069 \
         "ME 340 AdminState $_pa -> $TR69_ADM (0=unlocked, 1=locked)" \
         "ISP is enabling remote management; no route10 action -- there is no CWMP client on this stick to consume it (measured), so record the ACS chain from ME 137/148/157 and treat it as intel, not an outage"
-    [ "$_pc" != "$TR69_ACS" ] && propose tr069 \
+    chg "$_pc" "$TR69_ACS" && propose tr069 \
         "ME 340 AcsAddress $_pc -> $TR69_ACS (0xffff = null)" \
         "read ME 157 for the ACS URL and ME 148 for the credentials the ISP intends for this line; still no route10 action"
 fi

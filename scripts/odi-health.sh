@@ -148,10 +148,14 @@ except: print('-')" 2>/dev/null)
 
     # Switch Rx-error counters (eth4/W2 path) + growth alert.
     CRC=$(read_switch_crc)
-    if [ -n "$PREV_CRC" ] && [ "$CRC" != "$PREV_CRC" ]; then
+    # Both sides must be present. A failed read is not a counter change: with an
+    # empty CRC the old form warned "fibre/SFP degradation?" on the way down AND
+    # again on the way back up (empty -> real), i.e. one unreadable ssdk call
+    # invented two fibre alarms. Absence is not inequality (2026-08-19).
+    if [ -n "$PREV_CRC" ] && [ -n "$CRC" ] && [ "$CRC" != "$PREV_CRC" ]; then
         warn "switch Rx error counters changed (fibre/SFP degradation?): $PREV_CRC -> $CRC"
     fi
-    PREV_CRC="$CRC"
+    [ -n "$CRC" ] && PREV_CRC="$CRC"
 
     # --- WAN / stick alerting (added after the 2026-08-08 outage) ------------
     # Both signals below were already being emitted, correctly, every cycle for

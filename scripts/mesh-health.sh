@@ -134,24 +134,37 @@ if ula:
     except Exception: pass
 print('\n'.join(sorted(routes)))
 " 2>/dev/null)
-if [ -n "$PID" ] && [ -x "$TS" ] && [ -n "$INTENT" ]; then
-    LIVE=$($TS debug prefs 2>/dev/null | python3 -c '
+# ⚠ Here an EMPTY live set is a real reading, not missing data — "no routes
+# advertised" IS the firmware-init reset this assertion exists to catch — so the
+# usual "treat empty as unknown" guard would blind it to its own primary case.
+# What must be separated is the READER failing from the reader saying none: the
+# old form printed nothing for both (json parse error exited 0), so a prefs read
+# that failed while tailscaled was settling looked identical to a wiped route
+# set, and answered with a warn plus an unnecessary daemon-level heal. Exit 3 on
+# unreadable, and assert only when we actually got an answer (2026-08-19, the
+# absence-is-not-inequality sweep).
+read_live_routes() {
+    $TS debug prefs 2>/dev/null | python3 -c '
 import sys, json
 try: d = json.load(sys.stdin)
-except Exception: sys.exit(0)
+except Exception: sys.exit(3)
 print("\n".join(sorted(d.get("AdvertiseRoutes") or [])))
-' 2>/dev/null)
-    if [ "$LIVE" != "$INTENT" ]; then
+' 2>/dev/null
+}
+if [ -n "$PID" ] && [ -x "$TS" ] && [ -n "$INTENT" ]; then
+    LIVE=$(read_live_routes); LIVE_RC=$?
+    if [ "$LIVE_RC" -ne 0 ]; then
+        log "AdvertiseRoutes unreadable this cycle (tailscale debug prefs gave no JSON) — NOT asserting drift"
+    elif [ "$LIVE" != "$INTENT" ]; then
         warn "AdvertiseRoutes drifted — live [$(echo $LIVE)] != intended [$(echo $INTENT)] (firmware-init reset class, 2026-07-22); healing via reconcile"
         heal
-        LIVE=$($TS debug prefs 2>/dev/null | python3 -c '
-import sys, json
-try: d = json.load(sys.stdin)
-except Exception: sys.exit(0)
-print("\n".join(sorted(d.get("AdvertiseRoutes") or [])))
-' 2>/dev/null)
-        [ "$LIVE" = "$INTENT" ] && event "healed: AdvertiseRoutes restored [$(echo $LIVE)]" \
-                                || err "heal FAILED: AdvertiseRoutes still [$(echo $LIVE)]"
+        LIVE=$(read_live_routes); LIVE_RC=$?
+        if [ "$LIVE_RC" -ne 0 ]; then
+            err "heal ran but AdvertiseRoutes is UNREADABLE — heal is unverified, not confirmed"
+        else
+            [ "$LIVE" = "$INTENT" ] && event "healed: AdvertiseRoutes restored [$(echo $LIVE)]" \
+                                    || err "heal FAILED: AdvertiseRoutes still [$(echo $LIVE)]"
+        fi
     fi
 fi
 
