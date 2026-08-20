@@ -822,6 +822,60 @@ install_connlimit_guard() {
 install_connlimit_guard iptables  32  icmp-port-unreachable  "$CONNLIMIT_V4_WARN" "$CONNLIMIT_V4_BLOCK" cl4
 install_connlimit_guard ip6tables 128 icmp6-port-unreachable "$CONNLIMIT_V6_WARN" "$CONNLIMIT_V6_BLOCK" cl6
 
+# ── DNS capture: clients that hardcode a public resolver ─────────────────────
+# The NET_HD_Decoder set-top (Claro / TeleIDEA middleware) sends its DNS straight
+# to 8.8.8.8. Consequences, both measured: nothing it resolves can be filtered —
+# so its audience-measurement callbacks to am.teleideacloud.com are unblockable —
+# and it contributes nothing to the per-client DNS picture the rest of the LAN
+# feeds. Redirect its port-53 traffic back to us, which puts it on the same
+# routedns ladder (AdGuard primary → DoH fallback) as every other client.
+#
+# Keyed on MAC, not IP, deliberately: the box holds a DHCP lease, and an IP-keyed
+# rule would go on matching cleanly while protecting nothing the moment the lease
+# moved — the silent-hole shape. The MAC is the identity.
+#
+# REDIRECT rather than DNAT so the target is whatever address br-lan currently
+# holds; no second copy of the LAN address to drift out of sync. A query already
+# aimed at us is rewritten to the same address, i.e. a no-op, so no exclusion
+# rule is needed.
+#
+# Both families, even though this box has no IPv6 today (no neighbour entry, no
+# lease, never once in the v6 conntrack top list). The v4-only rule would be a
+# bypass the day it gained an address, and it would fail silently — the same
+# asymmetry that bit the p2p6 pinhole.
+#
+# ⚠ Cleartext DNS only. A client that falls back to DoT (853) or DoH (443)
+# escapes this. Verified not to apply here: every query this box emitted in a
+# 70 s capture was plain UDP/53. If that changes, the tell is AdGuard going quiet
+# for the client while its traffic continues.
+DNSCAP_MACS="98:39:10:70:7c:5c"    # NET_HD_Decoder — hardcodes 8.8.8.8
+install_dnscap() {
+    # -w for the same xtables-lock reason as the connlimit guard above.
+    ipt="$1 -w 10"
+    # The marker hashes the MAC list, so editing DNSCAP_MACS forces the rebuild.
+    # A fixed marker would leave an edited list applied-but-not-really — the
+    # failure this whole block exists to avoid.
+    mark="route10-dnscap-$(printf '%s' "$DNSCAP_MACS" | md5sum | cut -c1-8)"
+    $ipt -t nat -N RT10_DNSCAP 2>/dev/null || true
+    if ! $ipt -t nat -S RT10_DNSCAP 2>/dev/null | grep -q -- "$mark"; then
+        $ipt -t nat -F RT10_DNSCAP 2>/dev/null || true
+        for _mac in $DNSCAP_MACS; do
+            # TCP as well as UDP: catching only UDP leaves the box a working
+            # bypass via DNS-over-TCP on the first truncated answer.
+            for _proto in udp tcp; do
+                $ipt -t nat -A RT10_DNSCAP -m mac --mac-source "$_mac" \
+                    -p "$_proto" --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
+            done
+        done
+        $ipt -t nat -A RT10_DNSCAP -m comment --comment "$mark" -j RETURN 2>/dev/null || true
+    fi
+    if ! $ipt -t nat -C PREROUTING -i br-lan -j RT10_DNSCAP 2>/dev/null; then
+        $ipt -t nat -I PREROUTING 1 -i br-lan -j RT10_DNSCAP 2>/dev/null || true
+    fi
+}
+install_dnscap iptables
+install_dnscap ip6tables
+
 # ── WAN default-route hook (netifd proto_set_keep reconnect bug) ─────────────
 # netifd drops the WAN default route on PPP reconnect: its cache still believes
 # the route is installed, so it never reprograms the kernel (confirmed in netifd

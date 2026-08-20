@@ -340,6 +340,18 @@ telnet probes — they orphan the lock too.
      call (the backgrounded tailscale hook also edits iptables); a per-family marker rule
      gates the rebuild so a re-run doesn't reset the cap mid-flood. See
      `project_route10_cgnat_torrent_exhaustion.md`.
+     ⛔ **It is structurally blind to churn-shaped hosts** (measured 2026-08-20 on
+     the NET_HD_Decoder, `.20`): `connlimit` counts *live* connections, and that box
+     peaks at **528 flows — 80% of all WAN-bound v4 conntrack** — while its
+     ESTABLISHED count never leaves 6-7. The rest are `LAST_ACK`/`TIME_WAIT`
+     teardowns from batches of ~40 short CloudFront requests opened and closed
+     within seconds. connlimit discounts those; **the ISP CGNAT does not** — a NAT
+     binding is held through teardown regardless of state. Result: `.20` appears in
+     **zero** of 491 connlimit log lines over 12 days while being the single largest
+     momentary consumer of the CGNAT budget. A host can be invisible to this guard
+     and fully visible to the ISP's table. Bounding that shape needs a NEW-connection
+     *rate* limit (`xt_recent`), not a concurrency cap — `libxt_hashlimit.so` is
+     absent on this build. Not built; measure before capping.
   8. **LAN DNS — route10 as the sole resolver** (`dhcp.@dnsmasq[0]`): forwards
      `strict-order` (allservers off) **AdGuard `.241`/`::241` first → encrypted DoH
      (`127.0.0.1#505x`, Cloudflare/Google/OpenDNS) fallback**. ⚠ **That ordering lives
@@ -372,6 +384,24 @@ telnet probes — they orphan the lock too.
      No DHCP option 42 — consumers point at `.1` explicitly. Route10 has **no RTC**
      (`/dev/rtc*` absent), so it serves time only once its own client has synced over
      the WAN. Requested via the seam (contract §LAN time source).
+  10. **DNS capture for resolver-bypassing clients** (`RT10_DNSCAP` chain, nat
+     PREROUTING on `br-lan`, both families) — REDIRECTs port 53 (**UDP and TCP**)
+     back to route10 for the MACs in `DNSCAP_MACS`. Today that is one entry: the
+     **NET_HD_Decoder** set-top (Claro / TeleIDEA middleware, `98:39:10:70:7c:5c`),
+     which hardcodes `8.8.8.8` — so nothing it resolved could be filtered and it
+     contributed nothing to the per-client DNS picture. Now it rides the same
+     routedns ladder as every other client, which is what makes an AdGuard rule on
+     its audience-measurement endpoint (`am.teleideacloud.com`) enforceable at all.
+     **Keyed on MAC, not IP** — the box holds a DHCP lease, and an IP-keyed rule
+     would keep matching cleanly while protecting nothing the moment the lease
+     moved. **REDIRECT, not DNAT**, so the target is whatever br-lan currently
+     holds (no second copy of the LAN address to drift). Marker rule hashes the MAC
+     list, so editing `DNSCAP_MACS` forces the rebuild instead of leaving it
+     applied-but-not-really. ⚠ **Cleartext DNS only** — a client falling back to
+     DoT (853) or DoH (443) escapes it; this box does neither today. The tell if
+     that changes: AdGuard goes quiet for the client while its traffic continues.
+     ⛔ **This does NOT bound the box's CGNAT footprint** — the burst goes to
+     CloudFront, not to the AM endpoint. See the connlimit note below.
 
 ## Observability standard
 
