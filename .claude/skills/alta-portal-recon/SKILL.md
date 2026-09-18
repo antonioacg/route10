@@ -73,6 +73,31 @@ dynamically, so a `/api/` regex returns zero and that is a false negative. Grep 
 **vocabulary** instead (`firewall`, `redirect`, `portForward`, `dnat`, route
 definitions like `path:"firewall"`), then pull ±300 chars of context around hits.
 
+## ⭐ Technique: react-bootstrap menus are INVISIBLE to the accessibility tree
+
+This is what defeated the 2026-08-12 run ("the Type dropdown detaches on re-render
+and resisted inspection"). It is not flakiness — those menus carry **no**
+`role="listbox"` / `role="option"`, so `snapshot()` cannot see their items and
+`page.locator('[role="option"]').count()` returns **0 on an open menu**. The button
+does set `aria-expanded=true`, which is how you know the click worked.
+
+Read them out of the DOM instead:
+
+```js
+await dlg.locator('button[aria-expanded]').first().click();      // aria-expanded -> true
+const h = await getCleanHTML({ locator: dlg, showDiffSinceLastCall: false });
+console.log(h.split('\n').filter(l => /dropdown-item/.test(l)).join('\n'));
+// -> <a aria-selected="false" data-rr-ui-dropdown-item role="button">IPv6 Network</a>
+```
+
+The items are `<a data-rr-ui-dropdown-item>` with `aria-selected` marking the current
+value. Click one with
+`dlg.locator('a[data-rr-ui-dropdown-item]:has-text("IPv6 Network")')`.
+
+⚠ **And when the menu is short, ask whether it is short because the COLLECTION is
+empty.** Source/Destination listed only `Any|Custom` purely because the site had no
+firewall groups — the options are derived from data, not static.
+
 ## Step 4 — walk the UI to ground-truth the schema
 
 ⚠ **A hard `goto()` to a settings URL renders the dashboard** — client-side routing.
@@ -109,6 +134,7 @@ Auth is an **AWS Cognito JWT passed in the POST body** (not a header).
 | `/api/wifi/ssid/list` | GET | |
 | `/api/sites/stats` | POST | read-only despite POST; token in body |
 | `/api/profile/list` | POST | read-only despite POST; token in body |
+| `/api/site/asn?id=&ip=` | GET | **new since 2026-08-12**; ASN lookup for the site's public IP |
 
 Static, unauthenticated: `dl.alta.inc/do-not-distribute/fw/{router,ap,switch,public}.json`
 (firmware manifests), `dl.alta.inc/static/ouis.json`.
@@ -163,21 +189,35 @@ means "never configured", NOT "unsupported."**
 
 ### Open questions — the reason to re-run this
 
-1. ⛔ **Can `Destination` be prefix-relative?** As of 2026-08-12: **NO** — free-text
-   literal CIDR only (`e.g. 1.2.3.4/24`); no variable, prefix token, or client
-   reference. **This is the only reason the router-side v6 pinhole exists**: our ISP
+1. ⛔ **Can `Destination` be prefix-relative?** Re-verified **2026-09-18: still NO**
+   for the *Custom* path — selecting `Custom` yields a plain text input,
+   placeholder `e.g. 1.2.3.4/24`, and the menu itself holds exactly two entries
+   (`Any`, `Custom`; read from the DOM, see the technique note below).
+   ⭐ **BUT see Q2 — a group reference is a third path and it changes the answer.** **This is the only reason the router-side v6 pinhole exists**: our ISP
    /64 rotates (3× in 2 days), so a literal rule goes stale within hours and repairing
    it costs a WAN flap. **If this gains a variable/host reference, RETIRE the router
    script to the portal.** A community request for exactly this was filed 2024-11-16
    and has **never been answered** — this is the highest-value thing to endorse.
-2. ⭐ **Firewall Groups may already be the answer — VERIFY BEFORE BUILDING ANYTHING.**
-   The tab exists (`Add` → `Name`, `Type` [default *IPv4 Network*], `Contents`
-   textarea "one entry per line"). Published sources say a group of type **IPv6
-   Network** can hold an **exact hostname**, resolved backend-side and refreshed on
-   DNS TTL — which would convert "track a rotating prefix" into "keep an AAAA
-   current", something our prefix-tracker could feed. **NOT independently verified**:
-   the Type dropdown detaches on re-render and resisted inspection. Confirm the IPv6
-   type exists AND that Contents accepts a hostname before treating this as real.
+2. ✅ **RESOLVED 2026-09-18 — Firewall Groups ARE the path, client-side verified.**
+   Three separate facts, each read out of the served bundle or DOM, no write:
+   - **The `ipv6-net` type exists.** Type menu is exactly
+     `[{ipv4-net, "IPv4 Network"}, {ipv6-net, "IPv6 Network"}, {port, "Port"}]`.
+   - **Contents accepts a HOSTNAME or WILDCARD DOMAIN, not just a CIDR** — the
+     portal's own help text: *"One IPv6 address, IPv6 CIDR network, hostname, or
+     wildcard domain per-line."* and its validator accepts
+     `ip6NetRegex(t) || isValidDnsHostname(t)`, plus `*.` via
+     `isValidQualifiedDnsHostname(t.slice(2))`.
+   - ⭐ **A rule's Source/Destination CAN reference a group.** The rule dialog builds
+     its menu as `groups.filter(type === (ipVersion==="ipv6" ? "ipv6-net" : "ipv4-net"))`.
+     **The menu showed only `Any|Custom` because this site has ZERO groups defined** —
+     that absence was never evidence of absent capability. (Same absent-signal family
+     as the 2026-08-12 `rules`-key error. Check whether the collection is merely
+     empty before concluding the feature is missing.)
+   ⇒ **A v6 WAN→LAN accept whose destination is a NAME is expressible in the portal.**
+   ⚠ **Still unverified and it is the load-bearing half:** that the *backend* resolves
+   the hostname and refreshes it (all evidence above is client-side), and how fast it
+   tracks a rotation. Confirming needs a Save = a write = a WAN flap. Do not "just try
+   it" — decide deliberately, and see the retirement note in the workaround table.
 3. ✅ **Port-forward/NAT** — v4-shaped, no IP-version selector, no IPv6. Closed as a
    path for v6 work; v6 needs a Filter rule, not DNAT.
 4. **Is there an API write path that avoids a full reapply?** UNKNOWN, and no public
@@ -232,7 +272,7 @@ Mark each as `portal-native now` / `still a gap (field X missing)` / `not checke
 | **LAN ULA** as a static br-lan address | Does `Networks` expose a ULA / secondary IPv6 prefix field? |
 | **pppd LCP keepalive** loosened | Any WAN tuning fields? |
 | **mwan3 `flush_conntrack`** minimised | Exposed at all? |
-| **Per-host connlimit** guard | Anything under `Firewall → Filter`'s `Limit` field, or IPS? |
+| **Per-host connlimit** guard | ⛔ **ANSWERED 2026-09-18 — still a gap.** `Limit` is a packet **RATE** limit, not a concurrency cap: portal help text is *'How many packets to allow. e.g. "1000/sec", "500/min", etc.'* It cannot express `connlimit --connlimit-above N` per host. Keep `RT10_CONNLIMIT`. |
 | **LAN DNS** forwarding order / split domain | Portal DNS fields are known-partial — where exactly does it stop? |
 | **LAN NTP server** | Any time-service toggle under `System`? |
 
