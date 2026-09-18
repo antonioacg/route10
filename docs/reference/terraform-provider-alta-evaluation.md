@@ -95,13 +95,48 @@ things:
    replacing the `scp`-then-diff-by-hand loop.
 3. Portal writes become safe on a single fibre — the reason we batch and warn today.
 
-## Open concern before adoption
+## The hook question — no ownership conflict, but one real hazard
 
-`alta_device_hook` wants a managed loader block **inside** `post-cfg.sh`, giving a
-load-bearing file mixed ownership: a Terraform-managed region beside a hand-written
-one. That is a drift and ordering hazard in the single file that must never fail
-silently. Prefer `alta_device_file` for whole files we already own end-to-end, and
-resolve the hook question deliberately rather than discovering the failure mode.
+⛔ **An earlier draft of this note claimed `alta_device_hook` wants a managed block
+inside `post-cfg.sh`. That was wrong.** Ownership splits cleanly at the file
+boundary:
+
+- The provider owns **`/cfg/tf.d/`** — its hooks and its own loader,
+  `/cfg/tf.d/loader.sh`. A missing loader is drift and shows up in the plan.
+- **`post-cfg.sh` is never written by the provider.** The code is explicit
+  (`device_hook.go`): *"post-cfg.sh is not the provider's to write, so this is as
+  far as it can go."* If our source line goes missing it raises a **warning** naming
+  the line to add, and stops.
+- Our side of the contract is exactly one line:
+  `[ -x /cfg/tf.d/loader.sh ] && /cfg/tf.d/loader.sh`
+
+⚠ The misreading has a source worth knowing: the resource's own
+`MarkdownDescription` still says hooks are *"reinstalled by a managed block in
+`post-cfg.sh`"*, which contradicts both `DESIGN.md` §7 and the implementation. A
+stale doc string — worth reporting upstream.
+
+### ⛔ The hazard that IS real, measured on busybox ash on our router
+
+`post-cfg.sh` runs under `set -e`. The provider's suggested source line has no
+failure guard, and on the target shell:
+
+| loader state | result |
+|---|---|
+| absent | `[ -x … ]` is false ⇒ **post-cfg.sh continues** (safe) |
+| present, exits non-zero | **post-cfg.sh ABORTS at that line** (measured rc=3) |
+
+A failing provider-managed loader would therefore kill `post-cfg.sh` partway —
+and `post-cfg.sh` is what installs the daemons, the connlimit and DNS-capture
+chains, the DNS resolver config and the route hooks. That is a serious outage
+mode from a third-party file.
+
+⭐ **Mitigation is ours and is trivial, because the line is ours to write:** add the
+guard, `[ -x /cfg/tf.d/loader.sh ] && /cfg/tf.d/loader.sh || true`, or wrap it in
+`if`. Do not paste `SourceLine()` verbatim. Also worth proposing upstream.
+
+⚠ Measured on the router with busybox ash, not on the Mac — the first run of this
+check used macOS `sh` and would have missed nothing here, but the two shells are not
+interchangeable for `set -e` semantics and the target is the only one that counts.
 
 ## What is not done
 
