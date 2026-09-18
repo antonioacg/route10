@@ -14,8 +14,9 @@ actually share — the mesh seam. Research note, 2026-07-14; no implementation y
 > Terraform applied*, and every apply is one gated, commit-confirmed transaction
 > with router-side rollback. It also carries `alta_device_file` /
 > `alta_device_hook`, which manage `/cfg/post-cfg.sh` and hotplug hooks without
-> touching the cloud (so no config push, no WAN bounce). See the 2026-09-18
-> evaluation note for the assessment and its two blockers.
+> touching the cloud (so no config push, no WAN bounce). Assessment, live
+> verification and the remaining concerns:
+> [terraform-provider-alta-evaluation.md](./terraform-provider-alta-evaluation.md).
 >
 > **2. Option 6, "Request Alta's NDA API."** — **Retracted by decision.** The NDA
 > was offered and DECLINED; its terms would block open work and upstream
