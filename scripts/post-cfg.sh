@@ -268,6 +268,14 @@ if [ "$(echo "$CUR_ETH4_MAC" | tr 'A-Z' 'a-z')" != "$(echo "$WANT_ETH4_MAC" | tr
     fi
     uci set "network.$ETH4_DEV_SECTION.macaddr=$WANT_ETH4_MAC"
     uci commit network
+    # Loud on purpose: this firing means the cloud apply REGENERATED
+    # /etc/config/network and wiped our override. That is the signal that a
+    # cloud write's blast radius reached the interface layer — and the
+    # `network reload` below is what bounces eth4. Until 2026-09-18 this
+    # re-applied silently, so a past apply could not be told apart from a
+    # no-op afterwards; that ambiguity is exactly what blocked sizing the
+    # cost of a portal write.
+    event "eth4 MAC override RE-APPLIED (was '${CUR_ETH4_MAC:-unset}') — cloud regenerated /etc/config/network; issuing network reload (expect a brief WAN bounce)"
     # Reload network so the device-level MAC override is consumed and pppd
     # is restarted with the new source MAC. `ifup wan3` alone won't reset
     # eth4's hardware MAC.
@@ -330,6 +338,7 @@ keepalive_pppoe wan3
 if [ -n "$(uci -q get network.lan.ip6class 2>/dev/null || true)" ]; then
     uci -q delete network.lan.ip6class 2>/dev/null || true
     uci commit network
+    event "network.lan.ip6class re-appeared and was deleted — cloud regenerated /etc/config/network; issuing network reload"
     # Re-trigger LAN prefix selection from the active PD. We use `network reload`,
     # NOT `ifup lan`: a full `ifup lan` restarts the bridge interface and MUTES
     # dnsmasq's DHCP until a manual restart (confirmed 5/5 — the 2026-06-24 surge
@@ -354,6 +363,7 @@ fi
 if [ -n "$LAN_ULA" ] && ! uci -q get network.lan.ip6addr 2>/dev/null | grep -q "$LAN_ULA"; then
     uci add_list "network.lan.ip6addr=$LAN_ULA"
     uci commit network
+    event "LAN ULA re-added to br-lan — cloud regenerated /etc/config/network; issuing network reload"
     # `network reload` (not `ifup lan`) — re-applies without muting dnsmasq or
     # bouncing wan3/PPP, same rationale as the ip6class block above.
     /etc/init.d/network reload >/dev/null 2>&1 || true
