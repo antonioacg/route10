@@ -5,6 +5,28 @@ tweaks), how that goal interacts with getting off Alta's cloud, and how this
 agent and the homelab (`ops`) agent should coordinate on the one thing they
 actually share — the mesh seam. Research note, 2026-07-14; no implementation yet.*
 
+> ## ⛔ Two claims below are RETRACTED (2026-09-18)
+>
+> **1. "Terraform / Ansible / Pulumi — Does not exist. No provider, official or
+> community."** — **False now.** `TwilightCoders/terraform-provider-alta` exists,
+> is actively maintained (commits within days), and is built on exactly our
+> constraints: it writes *through the Alta cloud so the portal always shows what
+> Terraform applied*, and every apply is one gated, commit-confirmed transaction
+> with router-side rollback. It also carries `alta_device_file` /
+> `alta_device_hook`, which manage `/cfg/post-cfg.sh` and hotplug hooks without
+> touching the cloud (so no config push, no WAN bounce). See the 2026-09-18
+> evaluation note for the assessment and its two blockers.
+>
+> **2. Option 6, "Request Alta's NDA API."** — **Retracted by decision.** The NDA
+> was offered and DECLINED; its terms would block open work and upstream
+> contribution. Never suggest requesting it. Everything stays clean-room: the
+> portal bundle, observable traffic, and public repos only. See
+> `feedback_alta_nda_declined_clean_room`.
+>
+> The rest of the note — the two-track A/B framing, the cloud-mastered constraint,
+> the portal-first rule, and the seam section — still holds and was the right
+> frame; the ranked options table is what aged.
+
 ## Two goals that look like one
 
 "Apply firewall rules declaratively from our side" contains **two independent
