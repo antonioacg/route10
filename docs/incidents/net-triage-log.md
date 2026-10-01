@@ -100,3 +100,16 @@ looked until the third round of questioning.
 - **Verdict:** WAN/link not the problem (CONFIRMED, same minute). 2.4 GHz radio heavily degraded (CONFIRMED from AP counters); cause = interference/overlap SUSPECTED — channel 3 overlaps 1 and 6, neighbour scan not available.
 - **Evidence gap:** no complaint time, device, or band from the user yet; AP counters are lifetime totals, not a rate — two scrapes a few minutes apart are needed to say "now" vs "average".
 - **New rule:** for a WiFi complaint read the AX73 cache first (`/tmp/ax73-metrics.prom` on route10, joined to names via `route10_client_info`) — per-station band/RSSI/retries answers "which band is the device on" without asking. Diff two scrapes before calling a counter current.
+
+## 2026-10-01 01:05–01:09Z and 01:49–01:53Z — vacuum screamed twice, iPhone "no connection" (follow-up, same session)
+- **Reported:** "The vacuum canary has complained 2 times already. My iPhone looked like it had no connection while that happened."
+- **Vantage:** vacuum (`3c3bad1fa850`, .148, 2.4 GHz, −43 dBm) + iPhone-Antonio (.146, 2.4 GHz). Times pinned from data, not from the user.
+- **Measured (per-minute, UTC):**
+  - lanq: router→vacuum ICMP **100 % loss 01:05–01:09 and 01:49–01:53**, ARP present. Notebook-Ana-Clara (2.4 GHz) also lost — ARP gone 01:49–01:52, 100 % loss 01:53. AX73 itself 0 % / 0.6 ms throughout. Wired Mac 0 % loss.
+  - rcstats: vacuum tx up (~14 KB/min retries), rx ~1 KB/min in both windows; ~100 KB re-registration burst at 01:09 and 01:53. Same shape as the 2026-08-08 canary event.
+  - AX73 (ops Prometheus, 2-min scrape): vacuum stayed associated (in_network continuous), RSSI −43, AP kept RECEIVING its frames (~470 ucast/5 min, normal). wl1.1 (2.4 GHz) tx fell to ~600–2500 frames/5 min around 01:52–01:54 (vs ~16k before); wl0.1 (5 GHz) tx normal/up in both windows. A pair of far 2.4 GHz IoT clients (`70:89:76:22:*`, −75 dBm) re-joined + re-DHCP'd at 01:04 and 01:48, ~1 min before each window.
+  - WAN: odi-health clean, PON O5, DNS ladder all up, total v4 flows 200–530 (no CGNAT pressure).
+  - iPhone, window 2 only: Tailscale DERP fan-out — 20+ unanswered SYNs to :443 at 01:49–01:52 — hit `connlimit warn` 01:49:00 and **`block` 01:49:50**, so our guard refused its new v4 connections on top of the outage. Window 1: iPhone traffic continued.
+- **Verdict:** CONFIRMED LAN-side, 2.4 GHz only: router→client delivery to ≥2 independent 2.4 GHz clients failed for ~4–5 min while associated, wired + 5 GHz + WAN clean. Cause SUSPECTED: burst interference near the AP (4–5 min evening windows fit a microwave oven) or a 2.4 GHz radio TX stall on the AX73. Not distinguished yet.
+- **Evidence gap:** AX73 per-radio counters are scraped every 2 min and read through 5 min windows, too coarse to order the events; no channel-busy/CCA metric is exported. The user's microwave/appliance timing would settle the interference theory.
+- **New rule:** **vacuum screams + lanq shows ICMP loss to it while the AX73 answers ⇒ LAN/WiFi, not WAN** — check a second 2.4 GHz lanq target and the 5 GHz radio as controls before going near the WAN. A connlimit `block` on an iPhone during an outage is an EFFECT (Tailscale retry fan-out), not the cause.
