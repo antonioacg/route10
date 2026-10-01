@@ -72,6 +72,7 @@ without timestamps.
 | latency inflates under load | bufferbloat — check qdisc/shaping on `pppoe-wan3` |
 | one host with hundreds of flows + connlimit warns | torrent/p2p pressure (`.200` is the usual one) |
 | per-client rx/tx low for the complaining device while WAN total is high | the device is being starved *locally* — AP or LAN, not WAN |
+| vacuum screams / 2.4 GHz clients lose downstream ~5 min, WAN + wired + 5 GHz clean | **a Tuya device just (re)joined 2.4 GHz** — 14/16 long vacuum outages (Sep–Oct 2026) started 0–46 s after a Tuya DHCP DISCOVER/REQUEST (OUIs `70:89:76`, `84:e3:42`, `50:8b:b9`; hostnames `wlan0`/`TY_WR`/`lwip0`). Mechanism SUSPECTED, not known |
 
 ## ⭐ STEP 4 — retrospective, when it already recovered
 
@@ -96,6 +97,8 @@ The router keeps first-person evidence you can still mine:
 - **`/a/obs/rt.sql`** — `pon` (PON/optical/alarms), `samples` (CPU, ifaces, DNS
   ladder), `lanq` (per-client probe RTT/loss).
 - **`/var/log/messages`** — `route10.connlimit` warns name the offending host.
+- **Loki (ops Grafana, `{job="route10"}`)** — 30 d of route10 syslog, incl. every dnsmasq DHCP line. ⚠ the stored line has NO program name: `|= "dnsmasq-dhcp"` matches nothing, filter `|= "DHCP"`. Always run a control (an event you know exists) — an empty result was silently read as "no match" twice on 2026-10-01.
+- **AX73 association log** (`ssh ax73 cat /tmp/ce0.log /tmp/ce0.log.bak`, read-only) — ms-epoch join/leave/deauth events with reason codes, ~3–4 h deep. The only timestamped record of which station joined/left when; AX73 `dmesg` has no timestamps.
 
 Ask the user for the **wall-clock time** of the complaint, and convert carefully:
 syslog is **UTC**, `date`/`ls -l` are **local (UTC-3)**.
