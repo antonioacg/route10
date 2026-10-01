@@ -89,3 +89,14 @@ looked until the third round of questioning.
 - **Evidence gap:** <what would have settled it, and why it was missing>
 - **New rule:** <what changes next time — or "none">
 ```
+
+## 2026-10-01 01:52Z — "what's up with my wifi?" (complaint time unknown; reported at ask time)
+- **Reported:** "What's up with my wifi? Check diagnostics"
+- **Vantage:** not yet given — device / band / app unknown. Snap ran from the wired Mac (en10).
+- **Measured:**
+  - 01:52–01:53Z net-snap: gateway RTT 1.8 ms; 8.8.8.8 0% loss 11 ms; idle 11.1 vs loaded 11.0 ms (no bufferbloat); PON O5, FEC unc 0; eth4/eth5 no flaps; v4 375 / v6 510 Mbit/s to host 1.
+  - 01:52Z AX73 cache (counters since AP boot, 3.3 d): **2.4 GHz (ch 3, 20 MHz, 8 clients)** txretrans/txframe = 60%, unicast PER 42.3%, rxbadfcs 9.2M vs rxframe 5.1M, crsglitch 460M. **5 GHz (ch 36, 1 client)** PER 20.9%, MBP −33 dBm, 780/867 Mbit/s, ~0% retries.
+  - iPhone-Antonio on **2.4 GHz** at −64 dBm: tx retries 81% of ucast packets, 1933 tx failures in 5.1 h. Four other 2.4 clients at −68…−75 dBm.
+- **Verdict:** WAN/link not the problem (CONFIRMED, same minute). 2.4 GHz radio heavily degraded (CONFIRMED from AP counters); cause = interference/overlap SUSPECTED — channel 3 overlaps 1 and 6, neighbour scan not available.
+- **Evidence gap:** no complaint time, device, or band from the user yet; AP counters are lifetime totals, not a rate — two scrapes a few minutes apart are needed to say "now" vs "average".
+- **New rule:** for a WiFi complaint read the AX73 cache first (`/tmp/ax73-metrics.prom` on route10, joined to names via `route10_client_info`) — per-station band/RSSI/retries answers "which band is the device on" without asking. Diff two scrapes before calling a counter current.
