@@ -123,3 +123,9 @@ looked until the third round of questioning.
 - **Verdict:** CONFIRMED trigger — a Tuya station (re)joining 2.4 GHz precedes the long outages. Mechanism inside the AP UNKNOWN; outage length tonight matched the AP's ~5 min inactivity hold on the silent station (2/2 cases only).
 - **Evidence gap:** no capture during an event of who answers ARP for the victim's IP, or the AP's per-station TX state. A deliberate power-cycle of the bulb fixture would reproduce on demand.
 - **New rule:** on a vacuum scream, first look for a Tuya DHCP line in the minute before it. Loki `|= "dnsmasq-dhcp"` matches nothing — use `|= "DHCP"` and always include a known-present control.
+
+## 2026-10-01 02:23Z — deliberate bulb power-on (smart switch) — NOT reproduced
+- **Done:** user switched on the fixture holding the `wlan0` pair; both joined at 02:23:22Z (40 ms apart), `TY_WR` dropped and rejoined 2 s later — same join signature as the outages.
+- **Measured:** route10 1 s pings 02:24:07–02:33:06Z: vacuum **450/450 answered**; both bulbs and the AP 0 loss; iPhone short gaps only (iOS doze). Bulbs: −77…−83 dBm, legacy rates (no HT caps), last TX 11/18 Mbps; AP protection modes stayed off.
+- **Verdict:** not reproduced. A clean power-on join does not trigger it by itself; in both real outages the pair joined and then went SILENT until the AP removed them for inactivity — here they stayed responsive. Next suspect: a bulb that joins and then drops off the air (flaky/brown-out), not the join itself.
+- **New rule:** none yet — the 14/16 correlation stands, but "join" is necessary-looking, not sufficient.
