@@ -129,3 +129,11 @@ looked until the third round of questioning.
 - **Measured:** route10 1 s pings 02:24:07–02:33:06Z: vacuum **450/450 answered**; both bulbs and the AP 0 loss; iPhone short gaps only (iOS doze). Bulbs: −77…−83 dBm, legacy rates (no HT caps), last TX 11/18 Mbps; AP protection modes stayed off.
 - **Verdict:** not reproduced. A clean power-on join does not trigger it by itself; in both real outages the pair joined and then went SILENT until the AP removed them for inactivity — here they stayed responsive. Next suspect: a bulb that joins and then drops off the air (flaky/brown-out), not the join itself.
 - **New rule:** none yet — the 14/16 correlation stands, but "join" is necessary-looking, not sufficient.
+
+## 2026-10-02 ~21:50Z — "WiFi unusable" after Alta firmware 1.5i
+- **Reported:** "What's going on with my WiFi now, it's unusable. Last night Alta pushed a new firmware, it seems it's out of the mesh."
+- **Vantage:** tailnet clients on the LAN (operator's Mac / iPhone); exact device not given.
+- **Measured (21:54–21:56Z):** net-snap from the wired Mac: 613/494 Mbit/s, gateway 1.3 ms, PON O5, no bufferbloat. DNS ladder all up, 5–20 ms. AX73 up 5.2 d, MBP 5 GHz −33 dBm 780/867. route10 rebooted into **1.5i** at 06:44Z, and `tailscale` was absent from the filesystem.
+- **Verdict:** CONFIRMED, not WiFi. 1.5i dropped built-in Tailscale, so route10 left the mesh. Tailnet clients send `*.net.aac.gd` to route10's tailnet IPs (Headscale split DNS); those names timed out while the network itself was fine (ops-measured on the operator's Mac). A client using route10 as exit node loses everything. Restored 22:16Z via the portal Tailscale card.
+- **Evidence gap:** the detectors were silent for 15 h — mesh-health exited 0 on "binary absent", and ops' tag check stays green on a logged-out node. Both are fixed router-side.
+- **New rule:** on a "WiFi unusable" report after a firmware update, check `tailscale status` on route10 first. A tailnet client loses internal names (or all internet, with an exit node) while every LAN/WAN probe reads healthy.
