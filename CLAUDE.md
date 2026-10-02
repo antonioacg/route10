@@ -262,10 +262,12 @@ telnet probes — they orphan the lock too.
   `alta-route10-tailscale`) is RETIRED. Log: `/cfg/scripts/ts-reconcile.log`.
   Source: `scripts/tailscale-reconcile.sh`. See `project_route10_native_tailscale.md`
   and `docs/reference/portal-tailscale-migration.md` (ownership table).
-  ⛔ **Open: the init likely logs the node out on EVERY BOOT** — the package's postinst
-  starts tailscaled with the SaaS default *before* the agent writes `login_url`
-  (measured order 2026-10-02; reboot not yet tested). Recovery = ops registers the
-  pending auth request + re-tags. mesh-health alarms on `BackendState != Running`.
+  ⚠ **Install-time logout:** the package's postinst starts tailscaled with the SaaS
+  default *before* the agent writes `login_url`, and the init logs out on mismatch once
+  the backend is ready. At **boot** the WAN isn't up, so the init's 10 s ready-wait
+  times out before the check — **reboot verified safe 2026-10-02** (by timing). An
+  online (re)install is not safe → ops registers + re-tags. mesh-health alarms on
+  `BackendState != Running`.
 - `/cfg/scripts/heartbeat.sh` — `*/2` cron, no daemon. **External dead-man → healthchecks.io**
   (LIVE 2026-08-09, verified green both ends). Sends **two** checks: *Router + internet*
   (unconditional) and *Router's home network* (`lan_ok`). Counterpart to ops's *Home server

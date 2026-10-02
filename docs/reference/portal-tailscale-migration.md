@@ -30,26 +30,21 @@ advertiseSubnets:[…], advertiseExitNode:true, loginURL:"…"}]}}`. This is a *
 edit, not the site blob. Empty fields are omitted from the entry. The save re-applied
 config and bounced eth4 (6 link changes).
 
-## ⛔ Open: the init logs the node out on every BOOT (inferred, not yet rebooted)
+## ⚠ The install-time logout — boot is safe by TIMING, an online reinstall is not
 
-Measured order on 2026-10-02:
+**Mechanism (2026-10-02, measured):**
+1. `apkg install tailscale` drops the package uci default (`login_url = SaaS`).
+2. The postinst starts tailscaled at once.
+3. The init's `apply_runtime_config` waits up to 10 s for `backend_ready`, then compares the live ControlURL with uci and **logs the node out on a mismatch**.
+4. The cloud agent writes the portal values only *after* the install.
 
-1. 22:10:47 `apkg install tailscale` (package uci default `login_url = SaaS`).
-2. The package's postinst starts tailscaled with that default.
-3. 22:10:52 the init's control-URL check logs the node out: live = Headscale, uci = SaaS.
-4. Only **then** does the agent write the portal values and reload. That is a second mismatch, so a second logout.
-
-Because `/` is tmpfs, the package and `/etc/config/tailscale` are reinstalled on every
-boot, so the race should recur on every boot. A portal save **without** a reboot should
-not trigger it, since nothing is reinstalled. Neither case has been tested yet.
-
-- There is no hook early enough to pre-seed uci. `/cfg/post-cfg.sh` runs after the apply.
-- **Detection:** mesh-health raises `daemon.err` when `BackendState != Running`. The tag
-  check cannot see a logout, because the control DB keeps the tag.
-- **Recovery today:** ops registers the pending auth request and re-tags. An automatic
-  re-login (reusable tagged pre-auth key in `seam.env`) is ops' call and is pending.
-- **Alta-side fix to request:** write uci before install/start, or don't log out while
-  uci only holds the package default.
+- **First install, 22:10Z, WAN up.** The backend was ready in ~2 s, the check ran, and the node was logged out twice (SaaS, then ours). Ops registered the pending request and re-tagged it as node 2.
+- **Reboot test, 22:25Z (operator-approved).** The same sequence ran, but the WAN wasn't up yet. Both `backend_ready` waits timed out ("backend did not become ready within 10s"), and the init returned *before* the check. The daemon then logged in on the state file's ControlURL. **No logout**, node 2 with its tag.
+- **Residual risk:** an install or reinstall of the package **while online** with the default uci — e.g. a tailscale package update, or a firmware change that reinstalls outside boot.
+  - **Detection:** mesh-health `daemon.err` on `BackendState != Running`, which feeds ops' `Route10MeshRouterDown`.
+  - **Recovery:** ops registers + re-tags.
+  - Per the operator's condition, no reusable key is minted: the reboot did not log out.
+- **Alta-side fix worth requesting:** write uci before install/start, or don't log out while uci holds only the package default.
 
 ## Evaluation history (pre-1.5i)
 
