@@ -88,6 +88,27 @@ post_cfg_exit() {
 }
 trap post_cfg_exit EXIT
 
+# ── WAN DHCPv6 early-allow (LAN gets its v6 prefix in seconds, not a minute) ──
+# FIRST job on purpose: at boot this script finishes about when PPP comes up.
+# odhcp6c was blocked (EPERM) until fw3's wan3 ifup reload (+31 s) and then
+# backed off. It does NOT keep the same PD — see the script header. Rules +
+# rationale: scripts/wan6-dhcp-early.sh. Hooked into
+# /etc/firewall.user too (fw3 runs it on start; a restart empties the custom
+# chains, a reload does not). If odhcp6c is still soliciting with no PD, SIGUSR1
+# restarts its transaction now instead of waiting out the exponential backoff.
+W6E=/cfg/scripts/wan6-dhcp-early.sh
+if [ -x "$W6E" ]; then
+    [ "$("$W6E" 2>/dev/null)" = added ] && event "WAN DHCPv6 early-allow rules (re)added"
+    grep -qF "$W6E" /etc/firewall.user 2>/dev/null \
+        || echo "$W6E >/dev/null 2>&1 || true" >> /etc/firewall.user 2>/dev/null || true
+    if pidof odhcp6c >/dev/null 2>&1 \
+       && [ -z "$(ubus call network.interface.wan36 status 2>/dev/null \
+                  | jsonfilter -e '@["ipv6-prefix"][0].address' 2>/dev/null)" ]; then
+        kill -USR1 $(pidof odhcp6c) 2>/dev/null || true
+        event "odhcp6c had no PD yet — nudged (SIGUSR1) to solicit now"
+    fi
+fi
+
 # ── crond log level: stop per-job spam at cron.err ───────────────────────────
 # busybox crond at OpenWrt's default level (5) logs EVERY cron execution as
 # "USER root pid N cmd ..." at cron.err severity — our `* * * * *` self-heal
