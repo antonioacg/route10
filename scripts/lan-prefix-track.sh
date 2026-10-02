@@ -109,9 +109,24 @@ fi
 #         prefix route — without it the de-NATed reply is routed back OUT to the ISP.
 # Verified live 2026-10-02 23:20-23:23Z: ops' v6 probes recovered within a minute,
 # 65 min before the dead address would have expired on its own.
-# The current prefix is never bridged. Expiry = rotation + 2 h + 15 min margin.
+# The current prefix is never bridged.
+# Window = the longest a host can still hold the old address: one that MISSED every
+# deprecation keeps it for the lifetime dnsmasq advertised it with, and a DHCPv6-
+# assigned address (which no RA can retire) until its lease ends — both are the LAN
+# lease time (measured on a Mac 2026-10-02: vltime = pltime = 86400) — so the
+# bridge and the per-minute re-announcement below last that long, + 15 min. A host
+# that DID hear it keeps it ≤ 2 h (RFC 4862), well inside. Cost of the long tail:
+# should the ISP hand that /64 to another subscriber meanwhile, our return route
+# hides their hosts in it from the LAN until expiry.
 STALE=/cfg/scripts/.lan-prefix-stale     # "<prefix/64> <expiry epoch>" per line
-STALE_TTL=8100
+lt=$(uci -q get dhcp.lan.leasetime)
+case "$lt" in
+    *s) lt=${lt%s} ;; *m) lt=$(( ${lt%m} * 60 )) ;;
+    *h) lt=$(( ${lt%h} * 3600 )) ;; *d) lt=$(( ${lt%d} * 86400 )) ;;
+esac
+case "$lt" in ''|*[!0-9]*) lt=86400 ;; esac
+[ "$lt" -ge 7200 ] || lt=7200
+STALE_TTL=$(( lt + 900 ))
 STALE_METRIC=4242                        # tags OUR br-lan routes for the sweep
 now=$(date +%s)
 {
@@ -151,6 +166,20 @@ ip -6 route show dev "$IFACE" 2>/dev/null | awk -v m="metric $STALE_METRIC" 'ind
         case " $desired " in *" $_r "*) continue ;; esac
         ip -6 route del "$_r" dev "$IFACE" metric "$STALE_METRIC" 2>/dev/null || true
     done
+
+# Re-announce: the 3-RA burst at rotation reaches only hosts awake to hear it. Once
+# a minute, re-deprecate every /64 in the table to everyone, and name (once) any
+# device still opening new connections from one — it gets the RA unicast too.
+# Self-gated to one round a minute; details in ra-deprecate.py reannounce().
+if [ -x "$DEP" ]; then
+    python3 "$DEP" --reannounce "$STALE" "$IFACE" 2>&1 | while read -r _lvl _msg; do
+        case "$_lvl" in
+            warn)  warn "$_msg" ;;
+            event) event "$_msg" ;;
+            *)     err "ra-deprecate --reannounce: $_lvl $_msg" ;;
+        esac
+    done
+fi
 
 # NOTE (2026-07-22): the "Tailscale v6 exit-node egress SNAT" job that lived here
 # is REMOVED. Its premise no longer holds — pppoe-wan3 now carries its own global
