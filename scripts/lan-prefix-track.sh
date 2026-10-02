@@ -63,21 +63,21 @@ IFACE=br-lan
 # reduce it to its /64 network (first four hextets, host part zeroed).
 # Skip DEPRECATED addresses: after a rotation the dying /64 stays on br-lan for up to
 # 2 h (preferred_lft 0). Picking it by list order would make us "rotate" back to the
-# dead prefix and deprecate the LIVE one to every LAN host. A deprecated address is
-# used only when no live one exists.
+# dead prefix and deprecate the LIVE one to every LAN host. No live address (the
+# ~2 min reconnect window, before the new PD lands) => keep the current state: a
+# fallback to "some deprecated one" can pick an OLDER prefix and jump backwards.
 pick_gua() {
     ip -6 addr show dev "$IFACE" scope global 2>/dev/null \
       | awk -v want="$1" '/inet6/ { dep = ($0 ~ / deprecated/); if (dep == want) print $2 }' \
       | grep -iv '^f[cd]' | head -1
 }
 cur_addr=$(pick_gua 0)
-[ -n "$cur_addr" ] || cur_addr=$(pick_gua 1)
 net=""
 if [ -n "$cur_addr" ]; then
     net=$(echo "${cur_addr%/*}" | awk -F: '{printf "%s:%s:%s:%s::/64",$1,$2,$3,$4}')
 fi
 
-# PD not up yet (no GUA on br-lan) → keep prior state, nothing to deprecate.
+# PD not up yet, or only deprecated GUAs (reconnect window) → keep prior state.
 [ -n "$net" ] || exit 0
 
 prev=""
