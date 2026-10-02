@@ -1,8 +1,60 @@
-# Portal-owned Tailscale — migration evaluation (OPEN, no Go)
+# Portal-owned Tailscale — MIGRATED 2026-10-02 (forced by firmware 1.5i)
 
-**Status:** evaluation only. Nothing saved in the Alta portal. `tailscale-reconcile.sh`
-remains the single owner. This document tracks what the portal can and cannot express,
-what is still unknown, and the conditions under which a migration would be attempted.
+**Status:** the portal owns Tailscale. Firmware **1.5i** (booted 2026-10-02 06:44Z)
+removed the built-in tailscale; it is now an on-demand package that the cloud agent
+installs (`apkg install tailscale`, cached at `/a/apkg/cache`) only when the
+**Route10 → VPN → Tailscale** card is enabled. The node was off the mesh for ~15.5 h
+until the card was saved at 22:10:37Z. `tailscale-reconcile.sh` now fills only the gaps
+the card cannot express. Everything below the "Evaluation history" rule is the pre-1.5i
+evaluation, kept for its reasoning.
+
+## Current split of ownership
+
+| Concern | Owner | How |
+|---|---|---|
+| Install + start the daemon | **Portal** (card `Enable`) | Agent runs `apkg install tailscale` on every apply/boot; `/` is tmpfs |
+| `login_url` (control plane) | **Portal** (Advanced → Login URL) | Reconcile **checks** it against `TS_LOGIN_URL`, `err` on mismatch, never writes |
+| Exit node | **Portal** (toggle) | Reconcile warns if off |
+| LAN /24 route | **Portal** (subnet picker) | — |
+| LAN ULA /64 route | **Reconcile** | The picker rejects every IPv6 CIDR form ("Invalid subnet(s)"). Added with `add_list`, never a rewrite |
+| `state_file` under `/cfg` | Package default (`/cfg/tailscaled.state`) | Reconcile asserts it |
+| Quiet daemon logs | **Reconcile** | Package default is `log_stdout/stderr=1` (verbose into syslog) |
+| tailscale0 firewall + NAT | Daemon (`NetfilterMode=2`, ts-* chains) + **reconcile backstop** | An Alta reapply flushes non-fw3 rules |
+| br-lan GRO/TSO off | **Reconcile** | Not portal-expressible |
+| dnsmasq tailnet listener | **Reconcile** | Cloud DHCP regen drops it |
+| Router does not take tailnet DNS/routes | Prefs (`CorpDNS=false`, `RouteAll=false`) | Preserved in the state file |
+
+**Save path (read from the bundle, then observed):** `POST /api/device/edit`
+`{token, id: <device mac>, services: {…, vpn: [{type:"tailscale", enabled:true,
+advertiseSubnets:[…], advertiseExitNode:true, loginURL:"…"}]}}`. This is a *device*
+edit, not the site blob. Empty fields are omitted from the entry. The save re-applied
+config and bounced eth4 (6 link changes).
+
+## ⛔ Open: the init logs the node out on every BOOT (inferred, not yet rebooted)
+
+Measured order on 2026-10-02:
+
+1. 22:10:47 `apkg install tailscale` (package uci default `login_url = SaaS`).
+2. The package's postinst starts tailscaled with that default.
+3. 22:10:52 the init's control-URL check logs the node out: live = Headscale, uci = SaaS.
+4. Only **then** does the agent write the portal values and reload. That is a second mismatch, so a second logout.
+
+Because `/` is tmpfs, the package and `/etc/config/tailscale` are reinstalled on every
+boot, so the race should recur on every boot. A portal save **without** a reboot should
+not trigger it, since nothing is reinstalled. Neither case has been tested yet.
+
+- There is no hook early enough to pre-seed uci. `/cfg/post-cfg.sh` runs after the apply.
+- **Detection:** mesh-health raises `daemon.err` when `BackendState != Running`. The tag
+  check cannot see a logout, because the control DB keeps the tag.
+- **Recovery today:** ops registers the pending auth request and re-tags. An automatic
+  re-login (reusable tagged pre-auth key in `seam.env`) is ops' call and is pending.
+- **Alta-side fix to request:** write uci before install/start, or don't log out while
+  uci only holds the package default.
+
+## Evaluation history (pre-1.5i)
+
+**Pre-1.5i status:** evaluation only. Nothing was saved in the Alta portal and
+`tailscale-reconcile.sh` was the single owner.
 
 **Why now:** the 2026-08-07 firmware added `tailscale.settings.login_url` (defaulting to
 Tailscale SaaS) and its init logs the node out on a control-URL mismatch — see the

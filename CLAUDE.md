@@ -237,20 +237,21 @@ telnet probes — they orphan the lock too.
     masked offender list is worth less than an honest one). They reach ops's
     Prometheus labels and phone notifications. Query on `host`, not `ip`: v6
     label values churn as SLAAC privacy addresses rotate.
-- `/cfg/scripts/tailscale-reconcile.sh` — single owner of the **firmware-native
-  Tailscale** integration (Alta's 2026-07-22 firmware auto-update ships
-  `/usr/sbin/tailscaled` 1.98.4-1 + uci `/etc/config/tailscale`; NOT cloud-modeled,
-  NOT rc.d-enabled — nothing runs it unless we do). Converges: uci (state under
-  `/cfg/tailscaled.state`, **`login_url` from seam.env `TS_LOGIN_URL`** — the
-  2026-08-07 firmware added that option defaulting to Tailscale SaaS and the init
-  LOGS THE NODE OUT whenever live `.ControlURL` != uci value, so we must set it in
-  the uci-intent pass *before* the daemon is started; absent ⇒ warn, don't guess,
-  exit-node + routes = LAN /24 derived from br-lan + ULA
-  /64 from seam.env, daemon logs silenced — the Alta build dumps its full verbose
-  stream to stderr), daemon via the FIRMWARE init (stop/settle/start for
-  daemon-level changes; `reload` for routes), tailscale0 firewall accepts + NAT
-  both families (fw3 reloads flush them; our inserted v6 MASQUERADE shadows the
-  pinned-GUA SNAT Alta's daemon appends), br-lan GRO off, **and the dnsmasq
+- `/cfg/scripts/tailscale-reconcile.sh` — **gap-filler** for the **PORTAL-OWNED**
+  Tailscale integration. ⭐ **Since firmware 1.5i (2026-10-02) the portal owns it**:
+  1.5i ships NO tailscale; enabling **Route10 → VPN → Tailscale** makes the cloud
+  agent `apkg install tailscale` (1.102.4, cached `/a/apkg/cache`, reinstalled every
+  boot — `/` is tmpfs) and write uci `login_url` / exit node / LAN /24 route on
+  every apply. Until the card was saved the node was off the mesh ~15.5 h, silently.
+  Reconcile now CHECKS the portal keys (`err` if `login_url` != seam.env
+  `TS_LOGIN_URL` — a disagreeing uci value makes the init LOG THE NODE OUT; two
+  writers = a logout per apply) and fills what the card can't express: the ULA /64
+  route **added** (`add_list`, never rewrite — the card's subnet picker rejects all
+  IPv6 CIDRs), state under `/cfg`, daemon logs silenced (package default is verbose),
+  daemon via the FIRMWARE init (stop/settle/start for daemon-level changes; `reload`
+  for routes), tailscale0 firewall accepts + NAT both families as a BACKSTOP (the
+  1.102 daemon also runs its own ts-* chains, NetfilterMode=2, but an Alta reapply
+  flushes non-fw3 rules), br-lan GRO/TSO off, **and the dnsmasq
   tailscale0 listener** (`dhcp.@dnsmasq[0].interface` — off-LAN split-DNS; the
   entry is ours, so an Alta apply that regenerates `/etc/config/dhcp` drops it
   and restarts dnsmasq AFTER post-cfg completed, which killed off-LAN split-DNS
@@ -259,7 +260,12 @@ telnet probes — they orphan the lock too.
   revert caused the 2026-07-22 outage). Called by post-cfg (every boot/reapply)
   and mesh-health (heal). The old sideload (`/a/tailscale` + fork
   `alta-route10-tailscale`) is RETIRED. Log: `/cfg/scripts/ts-reconcile.log`.
-  Source: `scripts/tailscale-reconcile.sh`. See `project_route10_native_tailscale.md`.
+  Source: `scripts/tailscale-reconcile.sh`. See `project_route10_native_tailscale.md`
+  and `docs/reference/portal-tailscale-migration.md` (ownership table).
+  ⛔ **Open: the init likely logs the node out on EVERY BOOT** — the package's postinst
+  starts tailscaled with the SaaS default *before* the agent writes `login_url`
+  (measured order 2026-10-02; reboot not yet tested). Recovery = ops registers the
+  pending auth request + re-tags. mesh-health alarms on `BackendState != Running`.
 - `/cfg/scripts/heartbeat.sh` — `*/2` cron, no daemon. **External dead-man → healthchecks.io**
   (LIVE 2026-08-09, verified green both ends). Sends **two** checks: *Router + internet*
   (unconditional) and *Router's home network* (`lan_ok`). Counterpart to ops's *Home server
@@ -285,7 +291,11 @@ telnet probes — they orphan the lock too.
   rendered it into every notification.
 - `/cfg/scripts/mesh-health.sh` — `*/5` cron, no daemon. Tailscale mesh DRIFT smoke
   tests + SELF-HEAL (quiet when healthy; WARN + heal via tailscale-reconcile.sh
-  where route10-local): (1) tailscaled running, not a stale/DELETED binary,
+  where route10-local): (0) tailscale INSTALLED when seam.env says this is a mesh
+  node (1.5i dropped it and the old early-exit read that as intent — 15 h silent,
+  2026-10-02); (1) tailscaled running, not a stale/DELETED binary, and **logged in**
+  (`BackendState=Running` — a logged-out node keeps its tag in the control DB, so
+  only this sees it),
   running-version == on-disk; (2) live `AdvertiseRoutes` == intended set, derived
   INDEPENDENTLY of prefs (br-lan + seam.env) — catches the firmware-init
   boot-time route reset (2026-07-22 class); (3) compiled ACL filter admits every
