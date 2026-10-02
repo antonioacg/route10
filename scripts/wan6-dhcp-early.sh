@@ -6,8 +6,9 @@
 # `-o/-i pppoe-wan3` zone jumps when it reloads on the wan3 ifup event (+31 s
 # after PPP up at boot; a portal apply also rebuilds the firewall while the link
 # is down). Until then odhcp6c's SOLICIT and RS fail with EPERM and its
-# exponential backoff leaves the LAN without a GUA for 40-75 s per reconnect.
-# With these rules the PD lands in ~7 s (verified on a plain reconnect).
+# exponential backoff left the LAN without a GUA for ~40 s at boot (measured
+# 22:26Z). With these rules the PD landed ~7 s into a plain reconnect (22:59Z);
+# a plain reconnect WITHOUT them was never measured.
 #
 # ⚠ It does NOT keep the same PD. The original goal was a stable prefix:
 # IA_PD-only probes ~5 s after a reconnect were OFFERED the previous /60, yet
