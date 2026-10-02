@@ -51,6 +51,27 @@ telnet probes — they orphan the lock too.
   *preferred* address for up to 24 h. Quiet when healthy. Log:
   `/cfg/scripts/prefix-track.log`. Sources: `scripts/lan-prefix-track.sh` +
   `scripts/ra-deprecate.py`. See `project_route10_stale_ipv6_prefix.md`.
+  ⭐ **Stale-prefix bridge + re-announce (2026-10-02).** The ISP hands out a new PD every
+  PPP session, and nothing on our side keeps it (DUID, hint, early and IA_PD-only
+  SOLICITs were all tested). So for each rotated-away /64, for **the LAN lease time
+  + 15 min** (derived from `dhcp.lan.leasetime`, 24 h today; table
+  `/cfg/scripts/.lan-prefix-stale`), the tracker keeps it WORKING and keeps RETIRING it:
+  - **NAT66 bridge:** MASQUERADE out `pppoe-wan3` (`RT10_STALE6`, first in nat POSTROUTING),
+    plus an on-link br-lan return route (`metric 4242`). netifd drops the old prefix route;
+    without ours, de-NATed replies go back OUT to the ISP.
+  - **Re-announce, once a minute:** one multicast RA retiring every listed /64
+    (`ra-deprecate.py --reannounce`). Then **per device**, the only proof the router has: a
+    host that opened a NEW (bridge-NAT'd) connection from a retired /64 since the last round
+    is logged once (`route10.prefix-track` warn `still using retired …`, named from leases
+    or its v4) and sent the RA unicast. It is logged again (`no longer using retired …`)
+    after 10 quiet minutes.
+  - **Why 24 h, not 2 h:** a host that missed the retirement keeps the old /64 for
+    dnsmasq's advertised lifetime (86400 s), and ⚠ **an RA cannot retire a DHCPv6-ASSIGNED
+    address** (`::1000-::ffff`), which lives until its lease ends.
+  - Seen the first night: ops' node (UP-12), Claude Code on the operator's Mac, and a
+    Samsung on `…f860::1006` 17 h after f860 rotated.
+  Never applied to the current prefix. Verified live: ops' v6 probes recovered within a minute.
+  The tracker also skips `deprecated` GUAs, and with no live GUA it keeps its current state.
   **Also owns the ONLY WAN→LAN v6 accept we have** (2026-08-12): a *prefix-relative*
   inbound pinhole for the ops p2p listener, `<current /64>:<IID>` on one port,
   TCP+UDP, stateful — approved against `ops/NETWORK-CONTRACT.md` §"IPv6 inbound
