@@ -1,21 +1,23 @@
 #!/bin/sh
-# tailscale-reconcile.sh — single owner of the Alta-native Tailscale integration.
+# tailscale-reconcile.sh — gap-filler for the PORTAL-OWNED Tailscale integration.
 #
-# Alta firmware (≥ the 2026-07-22 auto-update) ships tailscale natively:
-# /usr/sbin/tailscaled + /etc/init.d/tailscale (procd, respawn), configured via
-# uci /etc/config/tailscale. It is NOT cloud-modeled (no tailscale keys in
-# /cfg/config.json) and NOT rc.d-enabled, so nothing starts or configures it
-# unless we do. This script converges the box to the desired mesh state:
+# Since Alta 1.5i (2026-10-02) tailscale is an on-demand package: enabling the
+# Route10 → VPN → Tailscale card makes the cloud agent `apkg install tailscale`
+# (cached on /a, reinstalled every boot since / is tmpfs) and write uci
+# login_url, advertise_exit_node and advertise_routes (LAN /24) on every apply.
+# The portal owns those. This script only does what the card cannot express:
 #
-#   1. uci /etc/config/tailscale — state under persistent /cfg (node identity
-#      survives reboots), advertise_exit_node=1, advertise_routes = LAN /24
-#      (derived from br-lan) + LAN ULA /64 (derived from seam.env LAN_ULA).
+#   1. uci /etc/config/tailscale — state under persistent /cfg, quiet logs,
+#      and the LAN ULA /64 ADDED to advertise_routes (the card's subnet picker
+#      rejects IPv6 CIDRs). Portal-owned keys are checked, never written —
+#      a disagreeing login_url makes the init log the node out.
 #   2. Daemon running via the FIRMWARE init script (never a sideload), with
-#      prefs matching the uci intent (heals the firmware init's boot-time
-#      `tailscale set --advertise-routes=""` reset — the 2026-07-22 outage).
-#   3. tailscale0 firewall accepts + NAT, both families (NetfilterMode=0: the
-#      daemon does not manage netfilter; an Alta config reapply flushes fw3
-#      chains, so these must be re-assertable at any time).
+#      live prefs carrying every intended route (heals an init/agent reload
+#      that dropped the ULA).
+#   3. tailscale0 firewall accepts + NAT, both families — a BACKSTOP: the
+#      1.102 daemon also manages its own ts-* chains (NetfilterMode=2), but an
+#      Alta config reapply flushes non-fw3 rules, so ours must be
+#      re-assertable at any time.
 #   4. br-lan GRO off (mesh->LAN bulk-transfer blackhole fix, see
 #      project_route10_mesh_offload_blackhole.md).
 #   5. dnsmasq mesh listener — tailscale0 in dhcp.@dnsmasq[0].interface, so
@@ -36,8 +38,8 @@
   || { OBS_LOG=/cfg/scripts/ts-reconcile.log; log(){ echo "$(date '+%F %T') $*" >>"$OBS_LOG"; }; \
        event(){ log "$@"; }; warn(){ log "$@"; }; err(){ log "$@"; }; obs_syslog(){ :; }; }
 
-# Firmware without the native package -> nothing to own here. mesh-health's
-# "tailscaled NOT running" assertion is the alarm for that regression.
+# Package not installed (portal card disabled, or the agent has not installed it
+# yet) -> nothing to fill in. mesh-health's "NOT INSTALLED" assertion alarms.
 [ -x /usr/sbin/tailscaled ] || exit 0
 [ -x /etc/init.d/tailscale ] || exit 0
 
@@ -62,22 +64,18 @@ DAEMON_DIRTY=0; ROUTES_DIRTY=0
 uci -q get tailscale.settings >/dev/null 2>&1 || { uci set tailscale.settings=settings; DAEMON_DIRTY=1; }
 [ "$(uci -q get tailscale.settings.state_file)" = "/cfg/tailscaled.state" ] \
   || { uci set tailscale.settings.state_file='/cfg/tailscaled.state'; DAEMON_DIRTY=1; }
-# Control plane. The firmware init defaults login_url to Tailscale SaaS
-# (DEFAULT_LOGIN_URL=https://controlplane.tailscale.com) and, on every start,
-# compares it against the live .ControlURL — on a mismatch it LOGS THE NODE OUT
-# ("control URL changed ...; logging out first") and re-registers against the
-# uci value. The 2026-08-07 firmware update introduced that option, so the next
-# daemon start logged us out of Headscale and wiped the node key. Setting this
-# here in section 1 — BEFORE section 2 ever starts the daemon — is what makes
-# the boot path safe: the init never sees a mismatch, so it never logs out.
-# Value is ops-owned (contract §mesh control plane); absent ⇒ leave the firmware
-# default untouched rather than guess a control plane.
+# Control plane + exit node are PORTAL-OWNED since 1.5i (Route10 → VPN →
+# Tailscale card; the cloud agent writes login_url / advertise_exit_node /
+# advertise_routes on every apply). We CHECK them, never write them: the init
+# logs the node out whenever the live .ControlURL differs from uci login_url, so
+# two writers disagreeing turns every apply into a logout. A mismatch here means
+# the portal card drifted from the contract value — fix it in the portal.
 if [ -n "$TS_LOGIN_URL" ]; then
     [ "$(uci -q get tailscale.settings.login_url)" = "$TS_LOGIN_URL" ] \
-      || { uci set tailscale.settings.login_url="$TS_LOGIN_URL"; DAEMON_DIRTY=1; }
-else
-    warn "TS_LOGIN_URL unset in /cfg/seam.env — leaving firmware login_url as-is (it defaults to Tailscale SaaS, which logs this node out of Headscale)"
+      || err "portal Tailscale Login URL is '$(uci -q get tailscale.settings.login_url)', contract wants '$TS_LOGIN_URL' — the init will log this node out; fix the Route10 VPN → Tailscale card"
 fi
+[ "$(uci -q get tailscale.settings.advertise_exit_node)" = "1" ] \
+  || warn "portal Tailscale 'Run as exit node' is OFF — exit node not advertised; fix the Route10 VPN → Tailscale card"
 [ "$(uci -q get tailscale.settings.port)" = "41641" ] \
   || { uci set tailscale.settings.port='41641'; DAEMON_DIRTY=1; }
 # Silence the daemon's stdout/stderr: with logtail disabled (--no-logs-no-support)
@@ -89,13 +87,14 @@ fi
   || { uci set tailscale.settings.log_stdout='0'; DAEMON_DIRTY=1; }
 [ "$(uci -q get tailscale.settings.log_stderr)" = "0" ] \
   || { uci set tailscale.settings.log_stderr='0'; DAEMON_DIRTY=1; }
-[ "$(uci -q get tailscale.settings.advertise_exit_node)" = "1" ] \
-  || { uci set tailscale.settings.advertise_exit_node='1'; ROUTES_DIRTY=1; }
-if [ "$(uci -q get tailscale.settings.advertise_routes)" != "$ROUTES" ]; then
-    uci -q delete tailscale.settings.advertise_routes
-    for r in $ROUTES; do uci add_list tailscale.settings.advertise_routes="$r"; done
-    ROUTES_DIRTY=1
-fi
+# Routes: the portal owns the list but its subnet picker rejects IPv6 CIDRs, so
+# the contract ULA /64 can only come from here. ADD what is missing, never
+# rewrite — a wholesale rewrite would delete anything added in the portal. The
+# agent's next apply drops the ULA again; post-cfg re-runs us right after it.
+for r in $ROUTES; do
+    uci -q get tailscale.settings.advertise_routes | tr ' ' '\n' | grep -qxF "$r" \
+      || { uci add_list tailscale.settings.advertise_routes="$r"; ROUTES_DIRTY=1; }
+done
 if [ "$DAEMON_DIRTY" = 1 ] || [ "$ROUTES_DIRTY" = 1 ]; then
     uci commit tailscale
     event "uci tailscale config converged (routes: $ROUTES + exit-node)"
@@ -119,14 +118,16 @@ elif [ "$ROUTES_DIRTY" = 1 ]; then
 else
     # Daemon up and uci already correct — but did something (e.g. the firmware
     # init at boot, before our uci landed) reset the live AdvertiseRoutes?
-    WANT=$(printf '%s\n' 0.0.0.0/0 ::/0 $ROUTES | sort)
+    # Subset check: the portal may legitimately advertise more than we want.
     HAVE=$(tailscale debug prefs 2>/dev/null | python3 -c '
 import sys, json
 try: d = json.load(sys.stdin)
 except Exception: sys.exit(0)
 print("\n".join(sorted(d.get("AdvertiseRoutes") or [])))
 ' 2>/dev/null)
-    [ "$WANT" != "$HAVE" ] && NEED_APPLY=1
+    for r in 0.0.0.0/0 ::/0 $ROUTES; do
+        echo "$HAVE" | grep -qxF "$r" || NEED_APPLY=1
+    done
 fi
 if [ "$NEED_APPLY" = 1 ]; then
     event "live prefs drifted from uci intent — reloading (re-applies advertised routes)"
