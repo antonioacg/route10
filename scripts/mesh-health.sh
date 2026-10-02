@@ -105,8 +105,16 @@ DISK_BIN=${DAEMON_EXE% (deleted)}                    # strip a "(deleted)" suffi
 TS="$(dirname "$DISK_BIN")/tailscale"
 [ -x "$TS" ] || TS=$(command -v tailscale 2>/dev/null)
 
-# Not a mesh node at all (stick-only router) -> nothing to assert.
-[ -z "$PID" ] && [ ! -x "$TS" ] && exit 0
+# No daemon and no CLI. Intent decides what that means: seam.env naming a control
+# plane or tag says this IS a mesh node, so a missing binary is an outage (Alta 1.5i,
+# 2026-10-02, shipped without tailscale and this line used to exit 0 for 15 h).
+# Neither set ⇒ genuinely not a mesh node ⇒ nothing to assert.
+if [ -z "$PID" ] && [ ! -x "$TS" ]; then
+    [ -f /cfg/seam.env ] && . /cfg/seam.env
+    [ -n "$TS_LOGIN_URL$TS_NODE_TAG" ] && \
+        err "tailscale NOT INSTALLED (no tailscaled, no CLI) — mesh subnet-router + exit-node are OFFLINE; reconcile cannot heal a missing binary (firmware dropped it? enable Tailscale in the Alta portal)"
+    exit 0
+fi
 
 # ===== Assertion 1: node liveness (the stale/deleted-binary footgun) =============
 if [ -z "$PID" ]; then
