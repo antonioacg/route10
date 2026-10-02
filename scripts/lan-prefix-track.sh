@@ -97,6 +97,61 @@ if [ "$prev" != "$net" ]; then
     printf "LAN_PREFIX='%s'\n" "$net" > "$STATE"
 fi
 
+# ── stale-prefix bridge: keep a rotated-away /64 WORKING for its RFC 4862 tail ──
+# A rotation hands us a new PD every PPP session (measured 2026-10-02: no DUID,
+# hint or early-SOLICIT lever keeps it). The deprecation RA above cannot remove
+# the old address from hosts: RFC 4862's two-hour rule keeps it valid up to 2 h,
+# and a host that still sources from it (ops' Cilium pods do, UP-12) sends
+# traffic whose replies never come back — the ISP no longer routes that /64 to us.
+# Two pieces make it work instead of black-holing, for each stale /64 in its tail:
+#   out:  NAT66 MASQUERADE to our WAN address (only for traffic leaving pppoe-wan3);
+#   back: an on-link route for the /64 on br-lan, because netifd drops the old
+#         prefix route — without it the de-NATed reply is routed back OUT to the ISP.
+# Verified live 2026-10-02 23:20-23:23Z: ops' v6 probes recovered within a minute,
+# 65 min before the dead address would have expired on its own.
+# The current prefix is never bridged. Expiry = rotation + 2 h + 15 min margin.
+STALE=/cfg/scripts/.lan-prefix-stale     # "<prefix/64> <expiry epoch>" per line
+STALE_TTL=8100
+STALE_METRIC=4242                        # tags OUR br-lan routes for the sweep
+now=$(date +%s)
+{
+    [ -f "$STALE" ] && cat "$STALE"
+    [ -n "$prev" ] && [ "$prev" != "$net" ] && echo "$prev $((now + STALE_TTL))"
+} | awk -v now="$now" -v cur="$net" \
+      '$2 > now && $1 != cur { if (!($1 in e) || $2 > e[$1]) e[$1] = $2 }
+       END { for (p in e) print p, e[p] }' | sort > "$STALE.new"
+if cmp -s "$STALE.new" "$STALE" 2>/dev/null; then rm -f "$STALE.new"; else mv "$STALE.new" "$STALE"; fi
+desired=$(awk '{print $1}' "$STALE" 2>/dev/null | tr '\n' ' ')
+
+# NAT66 chain: rebuild only when the set changes (marker hashes it).
+smark="rt10-stale6 $(printf '%s' "$desired" | md5sum | cut -c1-8)"
+ip6tables -w -t nat -N RT10_STALE6 2>/dev/null || true
+if ! ip6tables -w -t nat -S RT10_STALE6 2>/dev/null | grep -qF -- "$smark"; then
+    ip6tables -w -t nat -F RT10_STALE6 2>/dev/null || true
+    for _p in $desired; do
+        ip6tables -w -t nat -A RT10_STALE6 -s "$_p" -j MASQUERADE 2>/dev/null || true
+    done
+    ip6tables -w -t nat -A RT10_STALE6 -m comment --comment "$smark" -j RETURN 2>/dev/null || true
+    if [ -n "$desired" ]; then
+        event "stale-prefix bridge now covers: ${desired% } (NAT66 out + br-lan route back)"
+    else
+        event "stale-prefix bridge idle (no /64 in its tail)"
+    fi
+fi
+# The jump is re-asserted every tick: an fw3 reload flushes our direct rules.
+ip6tables -w -t nat -C POSTROUTING -o pppoe-wan3 -j RT10_STALE6 2>/dev/null \
+  || ip6tables -w -t nat -I POSTROUTING 1 -o pppoe-wan3 -j RT10_STALE6 2>/dev/null || true
+
+# Return routes: add ours for every stale /64, sweep any of ours no longer wanted.
+for _p in $desired; do
+    ip -6 route replace "$_p" dev "$IFACE" metric "$STALE_METRIC" proto static 2>/dev/null || true
+done
+ip -6 route show dev "$IFACE" 2>/dev/null | awk -v m="metric $STALE_METRIC" 'index($0, m) {print $1}' \
+  | while read -r _r; do
+        case " $desired " in *" $_r "*) continue ;; esac
+        ip -6 route del "$_r" dev "$IFACE" metric "$STALE_METRIC" 2>/dev/null || true
+    done
+
 # NOTE (2026-07-22): the "Tailscale v6 exit-node egress SNAT" job that lived here
 # is REMOVED. Its premise no longer holds — pppoe-wan3 now carries its own global
 # SLAAC address, so tailscale-reconcile.sh's plain MASQUERADE handles v6 exit
