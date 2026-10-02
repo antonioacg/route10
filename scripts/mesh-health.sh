@@ -135,6 +135,17 @@ if [ -n "$PID" ]; then
             warn "tailscaled version skew: running $RUN_VER but on-disk is $DISK_VER — restart to load the on-disk binary (a stale daemon can mis-enforce the current policy)"
         fi
     fi
+    # Running process != logged-in node. The firmware init logs the node out when the
+    # live control URL differs from uci (2026-10-02: package install started it with
+    # the SaaS default before the cloud agent wrote login_url). A logged-out node keeps
+    # its tag in the control DB, so the tag check cannot see this; only this can.
+    STATE=$($TS status --json 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin).get("BackendState",""))' 2>/dev/null)
+    case "$STATE" in
+        Running|Starting|"") : ;;
+        NeedsLogin|NeedsMachineAuth|Stopped)
+            err "tailscale node is $STATE — daemon up but NOT in the mesh (subnet routes + exit node OFFLINE); needs re-registration on the control server, reconcile cannot fix this" ;;
+        *) warn "tailscale BackendState=$STATE (expected Running)" ;;
+    esac
 fi
 
 # ===== Assertion 2: live AdvertiseRoutes == intended route set ===================
