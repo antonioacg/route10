@@ -10,10 +10,12 @@
 # 22:26Z). With these rules the PD landed ~7 s into a plain reconnect (22:59Z);
 # a plain reconnect WITHOUT them was never measured.
 #
-# ⚠ It does NOT keep the same PD. The original goal was a stable prefix:
-# IA_PD-only probes ~5 s after a reconnect were OFFERED the previous /60, yet
-# odhcp6c's own immediate SOLICIT (IA_NA + IA_PD) still got a new one
-# (22:59Z: a7b0 -> 2e0). Unexplained; IA_NA presence is the leading suspect.
+# ⚠ It does NOT keep the same PD (the original goal). Measured 2026-10-02 over
+# 3 reconnects: the BNG hands out a new /60 per PPP session. The DUID is already
+# stable, a prefix hint changes nothing, and an immediate SOLICIT (IA_PD only or
+# IA_NA+IA_PD) still gets a new prefix. The one exception (22:47Z: four
+# early probes offered the old /60) did not reproduce. Treat rotation as ISP
+# behaviour.
 #
 # WHAT: four narrow rules in fw3's custom chains (output_rule / input_rule).
 # Those chains are jumped to BEFORE the per-device zone dispatch and survive a
