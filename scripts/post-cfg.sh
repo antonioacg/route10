@@ -530,9 +530,13 @@ fi
 #     only PER-QUERY visibility in AdGuard's query log (confirmed on-wire, real
 #     client /32), NOT dashboard attribution. Kept because it's near-free and
 #     future-proofs #8408; do NOT claim it restores per-client identity.
-# WAN-safe: `dnsmasq reload` only (re-reads uci + conf-dir) — no fw3/network reload,
-# no eth4 flap. The cloud resets the upstream each boot, so this re-asserts on every
-# post-cfg run (idempotent; reloads only on a real diff).
+# WAN-safe: `dnsmasq reload`/`restart` only — no fw3/network reload, no eth4 flap.
+# ⚠ reload re-reads conf-dir ONLY if the uci fingerprint also changed; otherwise it
+# just SIGHUPs, which does not re-read conf-dir options (measured 2026-10-02: a new
+# /tmp/dnsmasq.d file had no effect after reload). So a conf-dir change restarts
+# dnsmasq (~1 s of LAN DNS/DHCP); uci-only changes still reload. The cloud resets
+# the upstream each boot, so this re-asserts on every post-cfg run (idempotent;
+# acts only on a real diff).
 #
 # Contract values ($LAN_DNS4/$LAN_DNS6 = AdGuard resolver VIPs, $SPLIT_DOMAIN = the
 # split-horizon zone) come from /cfg/seam.env — NEVER hardcoded here (no second
@@ -562,7 +566,7 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
             "$LAN_DNS4" "$LAN_DNS6" \
             "127.0.0.1#5054" "127.0.0.1#5053" "127.0.0.1#5055"
     fi
-    DNS_DIRTY=0
+    DNS_DIRTY=0; DNS_RESTART=0
     # server list — rewrite only if it differs (cloud resets it to DoH-only each boot).
     want=$(printf '%s\n' "$@")
     have=$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | tr ' ' '\n' || true)
@@ -604,7 +608,24 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
     # tmpfs → recreate each run, same boot-reinstall idiom as the hooks below.
     ECS_CONF=/tmp/dnsmasq.d/10-route10-ecs.conf
     if ! grep -qs '^add-subnet=32,128$' "$ECS_CONF"; then
-        mkdir -p /tmp/dnsmasq.d && printf 'add-subnet=32,128\n' > "$ECS_CONF"; DNS_DIRTY=1
+        mkdir -p /tmp/dnsmasq.d && printf 'add-subnet=32,128\n' > "$ECS_CONF"; DNS_RESTART=1
+    fi
+    # DHCPv6 DNS server = the LAN ULA ONLY. Left to its default, dnsmasq hands out
+    # its ULA AND the current public GUA ::1 (measured 2026-10-02 with a Solicit).
+    # The GUA dies at the next ISP prefix rotation, and a DHCPv6 client keeps it
+    # until its next renewal (up to 12 h): the LG TV sent ~1.7k unanswered queries to
+    # the old …:1cf0::1, each lookup waiting out a timeout. The ULA never rotates.
+    # RA's RDNSS (link-local) is unaffected; DHCPv4 keeps .1.
+    # Tag = the INTERFACE name, which dnsmasq sets on every DHCPv6 request. The
+    # range tag `lan` covers only address requests; stateless Information-Requests
+    # (Apple) still got the GUA with it. Both paths verified with probes. Scoping to
+    # br-lan keeps the LAN ULA away from the guest net (br-lan_99).
+    if [ -n "$LAN_ULA" ]; then
+        D6DNS_CONF=/tmp/dnsmasq.d/11-route10-dhcpv6-dns.conf
+        d6dns="dhcp-option=tag:br-lan,option6:dns-server,[${LAN_ULA%/*}]"
+        if ! grep -qsxF "$d6dns" "$D6DNS_CONF"; then
+            mkdir -p /tmp/dnsmasq.d && printf '%s\n' "$d6dns" > "$D6DNS_CONF"; DNS_RESTART=1
+        fi
     fi
     # Mesh split-DNS (seam point 3) — tailscale0 in dhcp.@dnsmasq[0].interface —
     # MOVED to tailscale-reconcile.sh step 5 (2026-08-15). A one-shot re-add here
@@ -613,9 +634,10 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
     # dead off-LAN split-DNS). Reconcile is called earlier in this script and by
     # mesh-health's heal; mesh-health assertion 6 detects a missing bind within
     # 5 min. The bind-dynamic rationale lives with the code in reconcile.
-    if [ "$DNS_DIRTY" = "1" ]; then
-        uci commit dhcp
-        # reload, NOT restart — re-reads uci + conf-dir without an interface bounce.
+    [ "$DNS_DIRTY" = "1" ] && uci commit dhcp
+    if [ "$DNS_RESTART" = "1" ]; then
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true   # conf-dir changed (see top)
+    elif [ "$DNS_DIRTY" = "1" ]; then
         /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
     fi
 fi
