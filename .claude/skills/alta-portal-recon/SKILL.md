@@ -73,6 +73,13 @@ dynamically, so a `/api/` regex returns zero and that is a false negative. Grep 
 **vocabulary** instead (`firewall`, `redirect`, `portForward`, `dnat`, route
 definitions like `path:"firewall"`), then pull ±300 chars of context around hits.
 
+⭐ **No browser needed for this step (2026-10-17).** The bundle is public and
+unauthenticated: `curl https://manage.alta.inc/` names one `static/js/main.<hash>.js`
+(~8.6 MB), and its lazy chunks are listed in `__webpack_require__.u`
+(`{1:"<hash>",787:"<hash>"}` → `static/js/<id>.<hash>.chunk.js`). Fetch all three and
+`rg` them — that is the whole client. Use it when the playwriter extension is not
+attached (`context.pages()` returns `[]`).
+
 ## ⭐ Technique: react-bootstrap menus are INVISIBLE to the accessibility tree
 
 This is what defeated the 2026-08-12 run ("the Type dropdown detaches on re-render
@@ -273,7 +280,8 @@ Mark each as `portal-native now` / `still a gap (field X missing)` / `not checke
 | **pppd LCP keepalive** loosened | Any WAN tuning fields? |
 | **mwan3 `flush_conntrack`** minimised | Exposed at all? |
 | **Per-host connlimit** guard | ⛔ **ANSWERED 2026-09-18 — still a gap.** `Limit` is a packet **RATE** limit, not a concurrency cap: portal help text is *'How many packets to allow. e.g. "1000/sec", "500/min", etc.'* It cannot express `connlimit --connlimit-above N` per host. Keep `RT10_CONNLIMIT`. |
-| **LAN DNS** forwarding order / split domain | Portal DNS fields are known-partial — where exactly does it stop? |
+| **LAN DNS** forwarding order / split domain | Portal DNS fields are known-partial — where exactly does it stop? **Partly answered 2026-10-17 (served bundle):** Settings → DNS holds `useDoH`, `forceDoH`, `dohServers`, `dohBootstrapServers`, `allServers` ("Parallel Queries"; off = query in order), `logQueries`, a `TTL`, and local records (seen: A, PTR, TXT). No ECS vocabulary anywhere. Per-domain forwarding not checked (a `dnsForwarder` label key exists, empty). |
+| **DNS rebind protection** (not enabled today) | ⛔ **ANSWERED 2026-10-17: not in the portal.** Zero `rebind`/`dnssec` hits anywhere in the served bundle. The firmware renderer `/usr/sbin/black` writes the literal `dhcp.@dnsmasq[0].rebind_protection=0` on every apply (not a `%d` template; `rebind_domain=/%s/` is). Turning it on is post-cfg-only. dnsmasq is also built `no-DNSSEC`. |
 | **LAN NTP server** | Any time-service toggle under `System`? |
 
 ⚠ Do not answer these from `/cfg/config.json` or from memory of the portal. **Open the
