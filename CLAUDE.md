@@ -289,6 +289,22 @@ telnet probes — they orphan the lock too.
   times out before the check — **reboot verified safe 2026-10-02** (by timing). An
   online (re)install is not safe → ops registers + re-tags. mesh-health alarms on
   `BackendState != Running`.
+  ⛔ **The agent can loop every minute and turn the ULA route into churn (fw 1.5l,
+  2026-10-23 → 10-26).** `rc` re-runs `cfg --reload dl` every 60 s until an apply
+  ends with `touch /var/run/cfg-dl.ready`. 1.5l's `/etc/opkg/alta-pkg.conf` names a
+  NetBird feed (`netbird/0.80.0-1`) that Alta never published (403; `0.78.1-1` is
+  200), so `apkg update` failed on every pass and the apply never finished. Each pass
+  dropped the ULA, mesh-health re-added it ⇒ **2 full tunnel rebuilds per 5 min on
+  every mesh peer** (iOS VPN icon, Chrome "network changed"). **Workaround (ours, by
+  hand, 2026-10-26 18:07Z):** `/a/apkg/lists/.stamp` set to the current
+  `sha256(build.version + "\n" + alta-pkg.conf)`, the same value `apkg` writes after a
+  good update; the old one is at `.stamp.bak-20261026`. ⚠ Deliberately NOT automated:
+  the stamp changes on every firmware update, and stamping blindly would hide a real
+  list refresh (e.g. a new tailscale feed ⇒ failed install ⇒ no mesh). Tell: `rc:
+  Re-running dl cfg` once a minute in syslog, or mesh-health healing the same drift
+  every tick. The portal card still can't hold the ULA (`ipWithNetRegex` is v4-only,
+  re-read 2026-10-26), so every agent apply drops it and reconcile re-adds it — fine
+  when applies are rare, churn when they loop.
 - `/cfg/scripts/heartbeat.sh` — `*/2` cron, no daemon. **External dead-man → healthchecks.io**
   (LIVE 2026-08-09, verified green both ends). Sends **two** checks: *Router + internet*
   (unconditional) and *Router's home network* (`lan_ok`). Counterpart to ops's *Home server

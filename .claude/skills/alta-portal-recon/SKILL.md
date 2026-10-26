@@ -277,6 +277,7 @@ Mark each as `portal-native now` / `still a gap (field X missing)` / `not checke
 | ONU/ONT **management path** (MACVLAN on the WAN port + its own firewall zone) | Can `Networks` create a second L3 address / management interface on a WAN port? Can `Firewall → Firewall Groups`/zones scope it? |
 | **v6 inbound pinhole** for the p2p listener | See open question 1 — needs a non-literal destination |
 | **LAN ULA** as a static br-lan address | Does `Networks` expose a ULA / secondary IPv6 prefix field? |
+| **ULA /64 in Tailscale AdvertiseRoutes** (`tailscale-reconcile.sh` `add_list`) | ⛔ **ANSWERED 2026-10-26 (served bundle `main.fe70e2e6.js`): still a gap.** The Route10 → VPN → Tailscale card flags the subnet list invalid if any entry fails `ipWithNetRegex` = `^(?:<IPv4>/<0-32>\|0.0.0.0/<1-32>)$`, IPv4 only. Keep the reconcile add. Cost: every agent apply drops it (see CLAUDE.md, tailscale-reconcile ⛔ note). |
 | **pppd LCP keepalive** loosened | Any WAN tuning fields? |
 | **mwan3 `flush_conntrack`** minimised | Exposed at all? |
 | **Per-host connlimit** guard | ⛔ **ANSWERED 2026-09-18 — still a gap.** `Limit` is a packet **RATE** limit, not a concurrency cap: portal help text is *'How many packets to allow. e.g. "1000/sec", "500/min", etc.'* It cannot express `connlimit --connlimit-above N` per host. Keep `RT10_CONNLIMIT`. |
