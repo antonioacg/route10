@@ -432,15 +432,14 @@ telnet probes — they orphan the lock too.
      BLANK** ⇒ router advertises v4 `.1` + v6 **link-local** (`fe80::…`, MAC-derived,
      rotation-proof — NOT the GUA). Tailscale `accept-dns` devices bypass this (MagicDNS:
      split `net.aac.gd`→AdGuard, global→Cloudflare). See `project_route10_dns_resolver.md`.
-     ⚠ **The DoH fallback is Alta's, and the portal can move it (checked 2026-10-26, fw
-     1.5l).** routedns falls back through the firmware's https-dns-proxy instances for its
-     *default* DoH list, in order 5054 Cloudflare → 5053 Google → 5055 OpenDNS, 1 s each
-     (chained 2026-10-26; before that, 5054 only at routedns's 2 s default).
-     Settings → Network → DNS: **Use DoH** off stops the proxies; a custom **DoH Servers**
-     list re-maps the ports; **Force DoH** ("no unencrypted fallback") would treat AdGuard as
-     plaintext. Keep all three at defaults. The `doh` ladder rung (and ops'
-     `Route10DnsDohFallbackDown`) is what catches it. 1.5k's HTTP/2 is live: the proxy reuses
-     its connection, so a lookup costs one RTT to Cloudflare (~10–20 ms).
+     ⚠ **The DoH fallback is Alta's (fw 1.5l, 2026-10-26).** routedns's fallbacks are the
+     firmware's https-dns-proxy instances, **rendered from uci each run** (Cloudflare,
+     Quad9 first, then portal order; 1 s each), so the portal's **DoH Servers** list can
+     change freely and is re-mapped on the next apply. The whole DoH branch **deletes the
+     ECS device tag** (AdGuard still gets it). **Use DoH** off ⇒ AdGuard-only. Don't turn on
+     **Force DoH** ("no unencrypted fallback" would treat AdGuard as plaintext). The `doh`
+     ladder rung probes routedns's first fallback (ops: `Route10DnsDohFallbackDown`).
+     1.5k's HTTP/2 is live: one RTT per lookup over a reused connection (~10–20 ms).
   9. **LAN NTP server** (`system.ntp.enable_server=1` + `interface='lan'`) — serves
      udp/123 on `192.168.10.1` / the LAN ULA for clients with no battery-backed RTC.
      **LAN-only via two guards**: busybox ntpd binds the server socket to br-lan
