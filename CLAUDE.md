@@ -289,10 +289,10 @@ telnet probes — they orphan the lock too.
   times out before the check — **reboot verified safe 2026-10-02** (by timing). An
   online (re)install is not safe → ops registers + re-tags. mesh-health alarms on
   `BackendState != Running`.
-  ⛔ **The agent can loop every minute and turn the ULA route into churn (fw 1.5l,
-  2026-10-23 → 10-26).** `rc` re-runs `cfg --reload dl` every 60 s until an apply
-  ends with `touch /var/run/cfg-dl.ready`. 1.5l's `/etc/opkg/alta-pkg.conf` names a
-  NetBird feed (`netbird/0.80.0-1`) that Alta never published (403; `0.78.1-1` is
+  ⛔ **The agent can loop every minute and turn the ULA route into churn (fw 1.5k, kept
+  by 1.5l; 2026-10-23 → 10-26).** `rc` re-runs `cfg --reload dl` every 60 s until an apply
+  ends with `touch /var/run/cfg-dl.ready`. 1.5k's NetBird 0.80.0 bump left `/etc/opkg/alta-pkg.conf`
+  naming a feed (`netbird/0.80.0-1`) that Alta never published (403; `0.78.1-1` is
   200), so `apkg update` failed on every pass and the apply never finished. Each pass
   dropped the ULA, mesh-health re-added it ⇒ **2 full tunnel rebuilds per 5 min on
   every mesh peer** (iOS VPN icon, Chrome "network changed"). **Workaround (ours, by
