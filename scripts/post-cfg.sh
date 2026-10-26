@@ -434,7 +434,7 @@ if [ -x "$RDNS_BIN" ] && [ -n "$LAN_DNS4" ]; then
     # public resolvers never do. Verified on a throwaway instance 2026-10-26 (AdGuard
     # path tagged; fallback and second fallback stripped). No DoH configured ⇒
     # AdGuard-only, never a resolver pointed at a dead port.
-    DOH_PREFER="cloudflare-dns.com dns.quad9.net"
+    DOH_PREFER="1.1.1.1 cloudflare-dns.com 9.9.9.9 dns.quad9.net"
     doh_all=""; i=0
     while [ "$i" -lt 16 ] && doh_url=$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].resolver_url"); do
         doh_port=$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].listen_port" || true)
