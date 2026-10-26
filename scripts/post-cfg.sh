@@ -440,7 +440,9 @@ if [ -x "$RDNS_BIN" ] && [ -n "$LAN_DNS4" ]; then
     # chain in cert.pem), presented as dns.<ddns name>. Queries are tagged with the
     # device's address (ECS) and handed to dnsmasq, so local names, the split zone and
     # AdGuard's per-device log work exactly as on :53 (dnsmasq keeps an incoming tag —
-    # verified 2026-10-26). LAN sources only. The cert's fingerprint rides in the render
+    # verified 2026-10-26). LAN and tailnet sources only: an iPhone running Tailscale
+    # reaches 192.168.10.1 THROUGH its tunnel (accept-routes), so its DDR upgrade arrives
+    # from its 100.64.x address — seen 2026-10-26. The cert's fingerprint rides in the render
     # as a comment, so a renewal changes the config and restarts routedns (which does not
     # reload certs); a daily cron covers renewals between applies. No cert ⇒ no listener.
     DOT_CRT=/cfg/certs/cert.pem; DOT_KEY=/cfg/certs/key.pem; DOT_NAME=""; rdns_lan_dot=""
@@ -468,7 +470,7 @@ protocol = \"dot\"
 resolver = \"lan-tag\"
 server-crt = \"$DOT_CRT\"
 server-key = \"$DOT_KEY\"
-allowed-net = [\"192.168.0.0/16\", \"fd00::/8\", \"fe80::/10\", \"127.0.0.0/8\", \"::1/128\"]
+allowed-net = [\"192.168.0.0/16\", \"fd00::/8\", \"fe80::/10\", \"100.64.0.0/10\", \"fd7a:115c:a1e0::/48\", \"127.0.0.0/8\", \"::1/128\"]
 # cert sha256 prefix $dot_fp ($DOT_NAME)
 "
         fi
