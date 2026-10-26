@@ -253,6 +253,12 @@ telnet probes — they orphan the lock too.
     Same class as the app names above. **Extend, never rename in place**: the
     family was appended AFTER the colon precisely so `route10.connlimit warn: `
     stayed an intact substring and ops could migrate with no coverage gap.
+  - **`route10.mesh-health` at `severity=warning` means "an assertion found drift"
+    — FROZEN (2026-10-26).** Ops's `Route10MeshHealFlapping` fires on >3/h (app +
+    severity, never text; the tag-loss warning is excluded). Routine output stays at
+    notice/info; tell ops before changing. ⚠ It also fires on a persistent
+    un-healable drift (deleted binary, version skew, ACL filter, tags unreadable),
+    because each of those repeats every tick (12/h).
   - `route10_host_flows{family,host,ip}` on `/metrics` carries **verbatim,
     uncurated DHCP hostnames** (operator decision 2026-08-10 — private LAN, and a
     masked offender list is worth less than an honest one). They reach ops's

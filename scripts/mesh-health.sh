@@ -1,5 +1,8 @@
 #!/bin/sh
 # mesh-health.sh — Tailscale mesh DRIFT smoke tests + SELF-HEAL (route10-side).
+# ⛔ SEVERITY IS AN OPS INTERFACE (2026-10-26): `warn` = an assertion found drift,
+# nothing else. Ops's Route10MeshHealFlapping fires on >3 warnings/h (app + severity,
+# never text). Routine/info output stays at `event`/`log`; tell ops before changing.
 # Cron-driven (*/5), no daemon. QUIET when healthy; WARN/ERR on drift; where the
 # fix is route10-local it HEALS by re-running tailscale-reconcile.sh (the single
 # owner of the native-tailscale integration) and re-checks. Assertions:
