@@ -397,7 +397,7 @@ fi
 # AdGuard gets bypassed entirely (blocks never apply); and any co-equal DoH sibling
 # leaks blocks regardless. routedns (folbricht/routedns — a single static aarch64 Go
 # binary sideloaded to /a like tailscaled) fixes it: a `fail-back` group forwards to
-# AdGuard (primary) and fails over to the route10-local DoH proxy ONLY on
+# AdGuard (primary) and fails over to the route10-local DoH proxies ONLY on
 # no-response/SERVFAIL. A block (0.0.0.0 / NXDOMAIN) is a valid answer, never a
 # failure (empty-error/servfail-error default false), so it is NEVER undone; it fails
 # back to AdGuard ~60 s after recovery (reset-after default). dnsmasq's GENERAL
@@ -441,10 +441,29 @@ query-timeout = 1
 [resolvers.doh-fallback]
 address = "127.0.0.1:5054"
 protocol = "udp"
+# The firmware's https-dns-proxy for its DEFAULT DoH list: 5054 Cloudflare, 5053
+# Google, 5055 OpenDNS. All three are chained, so one provider or one stopped proxy
+# no longer takes the safety net with it. 1 s each, measured 2026-10-26 on a
+# throwaway instance: the routedns default is 2 s; AdGuard 1 s plus three DoH at 1 s
+# keeps the worst case (everything but the last one dead and silent) near 3 s, inside
+# the client stub's ~5 s budget. A stopped proxy refuses instantly and costs nothing;
+# a healthy one answers in 10 to 20 ms. Keep the portal DoH list at Alta defaults or
+# these ports point elsewhere (CLAUDE.md, post-cfg job 8).
+query-timeout = 1
+
+[resolvers.doh-fallback-2]
+address = "127.0.0.1:5053"
+protocol = "udp"
+query-timeout = 1
+
+[resolvers.doh-fallback-3]
+address = "127.0.0.1:5055"
+protocol = "udp"
+query-timeout = 1
 
 [groups.failback]
 type = "fail-back"
-resolvers = ["adguard", "doh-fallback"]
+resolvers = ["adguard", "doh-fallback", "doh-fallback-2", "doh-fallback-3"]
 # Default reset-after is 60s: ONE AdGuard timeout blackholes ALL DNS to DoH
 # (ad-block OFF) for a full minute. 10s bounds a residual transient blip's
 # ad-block bypass to seconds while still not hammering a genuinely-down AdGuard.
@@ -467,6 +486,9 @@ RDNSCFG
     if [ "$rdns_want" != "$(cat "$RDNS_CFG" 2>/dev/null || true)" ]; then
         printf '%s\n' "$rdns_want" > "$RDNS_CFG"
         kill "$(pidof routedns)" 2>/dev/null || true
+        # Wait for it to exit: the launch below skips while pidof still sees the dying
+        # process, and nothing else relaunches routedns, so LAN DNS would stay dead.
+        n=0; while pidof routedns >/dev/null 2>&1 && [ "$n" -lt 5 ]; do sleep 1; n=$((n+1)); done
     fi
     # Launch if not running; only point dnsmasq at it once it's actually up.
     # routedns logs a structured stream (level=INFO|WARN|ERROR) to stderr; map

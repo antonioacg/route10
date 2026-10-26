@@ -427,8 +427,9 @@ telnet probes — they orphan the lock too.
      rotation-proof — NOT the GUA). Tailscale `accept-dns` devices bypass this (MagicDNS:
      split `net.aac.gd`→AdGuard, global→Cloudflare). See `project_route10_dns_resolver.md`.
      ⚠ **The DoH fallback is Alta's, and the portal can move it (checked 2026-10-26, fw
-     1.5l).** routedns falls back to ONE resolver, `127.0.0.1:5054` = the firmware's
-     https-dns-proxy for its *default* DoH list (5053 Google, 5054 Cloudflare, 5055 OpenDNS).
+     1.5l).** routedns falls back through the firmware's https-dns-proxy instances for its
+     *default* DoH list, in order 5054 Cloudflare → 5053 Google → 5055 OpenDNS, 1 s each
+     (chained 2026-10-26; before that, 5054 only at routedns's 2 s default).
      Settings → Network → DNS: **Use DoH** off stops the proxies; a custom **DoH Servers**
      list re-maps the ports; **Force DoH** ("no unencrypted fallback") would treat AdGuard as
      plaintext. Keep all three at defaults. The `doh` ladder rung (and ops'
