@@ -440,6 +440,16 @@ telnet probes — they orphan the lock too.
      **Force DoH** ("no unencrypted fallback" would treat AdGuard as plaintext). The `doh`
      ladder rung probes routedns's first fallback (ops: `Route10DnsDohFallbackDown`).
      1.5k's HTTP/2 is live: one RTT per lookup over a reused connection (~10–20 ms).
+     ⭐ **Encrypted DNS for LAN devices (2026-10-26):** routedns also listens for **DoT on :853**
+     (LAN/ULA sources only) with Alta's own uacme Let's Encrypt wildcard for the router's ddns
+     name (`/cfg/certs/{cert,key}.pem`, full chain), presented as `dns.<ddns zone>`. It tags the
+     device address (ECS) and hands the query to dnsmasq, so local names, the split zone and
+     AdGuard's per-device log behave exactly as on :53. dnsmasq publishes **DDR**
+     (`_dns.resolver.arpa` SVCB → that name, alpn dot, port 853, LAN v4 + ULA hints; drop-in
+     `12-route10-ddr.conf`) only while routedns is up. Apple (iOS 16+/macOS 13+) upgrades via
+     DDR; Android "Private DNS: Automatic" tries :853 itself; TVs/IoT stay on :53. routedns
+     doesn't reload certs: the cert fingerprint rides in the render and a daily cron
+     (`23 5 * * *`) re-runs post-cfg only when it changed.
   9. **LAN NTP server** (`system.ntp.enable_server=1` + `interface='lan'`) — serves
      udp/123 on `192.168.10.1` / the LAN ULA for clients with no battery-backed RTC.
      **LAN-only via two guards**: busybox ntpd binds the server socket to br-lan

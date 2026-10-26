@@ -434,6 +434,45 @@ if [ -x "$RDNS_BIN" ] && [ -n "$LAN_DNS4" ]; then
     # public resolvers never do. Verified on a throwaway instance 2026-10-26 (AdGuard
     # path tagged; fallback and second fallback stripped). No DoH configured ⇒
     # AdGuard-only, never a resolver pointed at a dead port.
+    # LAN DoT listener (2026-10-26): encrypts device → router for clients that can use it
+    # (Android Private DNS "Automatic"; Apple via the DDR record in the DNS job). It reuses
+    # Alta's own Let's Encrypt wildcard for the router's ddns name (uacme-renewed, full
+    # chain in cert.pem), presented as dns.<ddns name>. Queries are tagged with the
+    # device's address (ECS) and handed to dnsmasq, so local names, the split zone and
+    # AdGuard's per-device log work exactly as on :53 (dnsmasq keeps an incoming tag —
+    # verified 2026-10-26). LAN sources only. The cert's fingerprint rides in the render
+    # as a comment, so a renewal changes the config and restarts routedns (which does not
+    # reload certs); a daily cron covers renewals between applies. No cert ⇒ no listener.
+    DOT_CRT=/cfg/certs/cert.pem; DOT_KEY=/cfg/certs/key.pem; DOT_NAME=""; rdns_lan_dot=""
+    if [ -s "$DOT_CRT" ] && [ -s "$DOT_KEY" ]; then
+        dot_zone=$(openssl x509 -in "$DOT_CRT" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *\*\.\(.*\)$/\1/p' || true)
+        if [ -n "$dot_zone" ]; then
+            DOT_NAME="dns.$dot_zone"
+            dot_fp=$(sha256sum "$DOT_CRT" | cut -c1-16)
+            rdns_lan_dot="
+[resolvers.dnsmasq-local]
+address = \"127.0.0.1:53\"
+protocol = \"udp\"
+query-timeout = 4
+
+[groups.lan-tag]
+type = \"ecs-modifier\"
+resolvers = [\"dnsmasq-local\"]
+ecs-op = \"add\"
+ecs-prefix4 = 32
+ecs-prefix6 = 128
+
+[listeners.lan-dot]
+address = \":853\"
+protocol = \"dot\"
+resolver = \"lan-tag\"
+server-crt = \"$DOT_CRT\"
+server-key = \"$DOT_KEY\"
+allowed-net = [\"192.168.0.0/16\", \"fd00::/8\", \"fe80::/10\", \"127.0.0.0/8\", \"::1/128\"]
+# cert sha256 prefix $dot_fp ($DOT_NAME)
+"
+        fi
+    fi
     DOH_PREFER="1.1.1.1 cloudflare-dns.com 9.9.9.9 dns.quad9.net"
     doh_all=""; i=0
     while [ "$i" -lt 16 ] && doh_url=$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].resolver_url"); do
@@ -528,6 +567,7 @@ resolver = "failback"
 address = "127.0.0.1:5300"
 protocol = "tcp"
 resolver = "failback"
+$rdns_lan_dot
 RDNSCFG
 )
     # Re-render from the seam AdGuard VIP; restart routedns only on a real diff.
@@ -696,6 +736,33 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
         if ! grep -qsxF "$d6dns" "$D6DNS_CONF"; then
             mkdir -p /tmp/dnsmasq.d && printf '%s\n' "$d6dns" > "$D6DNS_CONF"; DNS_RESTART=1
         fi
+    fi
+    # DDR (RFC 9462): answer _dns.resolver.arpa with an SVCB record pointing at the LAN
+    # DoT listener, and resolve its name to the router's LAN addresses. Apple devices
+    # (iOS 16+/macOS 13+) use it to upgrade to encrypted DNS on their own; anything that
+    # ignores it keeps using :53. Published only while routedns (and so the listener) is
+    # up; otherwise the drop-in is removed.
+    DDR_CONF=/tmp/dnsmasq.d/12-route10-ddr.conf
+    LAN_V4=$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d/ -f1 || true)
+    if [ -n "$DOT_NAME" ] && [ -n "$RDNS_GENERAL" ] && [ -n "$LAN_V4" ] && [ -n "$LAN_ULA" ]; then
+        ddr_hex=$(python3 -c '
+import socket, sys
+name, v4, v6 = sys.argv[1:4]
+target = b"".join(bytes([len(l)]) + l.encode() for l in name.split(".")) + b"\0"
+params = (b"\x00\x01\x00\x04\x03dot" + b"\x00\x03\x00\x02" + (853).to_bytes(2, "big")
+          + b"\x00\x04\x00\x04" + socket.inet_pton(socket.AF_INET, v4)
+          + b"\x00\x06\x00\x10" + socket.inet_pton(socket.AF_INET6, v6))
+print(":".join("%02x" % b for b in b"\x00\x01" + target + params))
+' "$DOT_NAME" "$LAN_V4" "${LAN_ULA%/*}" 2>/dev/null || true)
+        if [ -n "$ddr_hex" ]; then
+            ddr_want="host-record=$DOT_NAME,$LAN_V4,${LAN_ULA%/*}
+dns-rr=_dns.resolver.arpa,64,$ddr_hex"
+            if [ "$ddr_want" != "$(cat "$DDR_CONF" 2>/dev/null || true)" ]; then
+                mkdir -p /tmp/dnsmasq.d && printf '%s\n' "$ddr_want" > "$DDR_CONF"; DNS_RESTART=1
+            fi
+        fi
+    elif [ -f "$DDR_CONF" ]; then
+        rm -f "$DDR_CONF"; DNS_RESTART=1
     fi
     # Mesh split-DNS (seam point 3) — tailscale0 in dhcp.@dnsmasq[0].interface —
     # MOVED to tailscale-reconcile.sh step 5 (2026-08-15). A one-shot re-add here
@@ -1077,6 +1144,15 @@ fi
 # tailscale0 counters, carriers, br-lan address presence, conntrack, DDM —
 # plus the persistent kernel-ring drain and the pstore crash-record harvest
 # (err on non-empty => alertable). See scripts/obs-collect.sh.
+# ── LAN DoT cert renewal: restart routedns when Alta's uacme renews the cert ───
+# routedns loads the cert once; the render carries its fingerprint, so a renewed cert
+# makes post-cfg re-render and restart routedns. Daily, and a no-op unless it changed.
+CERTCHECK='grep -qF "$(sha256sum /cfg/certs/cert.pem 2>/dev/null | cut -c1-16)" /a/routedns/routedns.toml || /cfg/post-cfg.sh'
+if [ -s /cfg/certs/cert.pem ] && ! grep -qF "/cfg/certs/cert.pem" /etc/crontabs/root 2>/dev/null; then
+    echo "23 5 * * * $CERTCHECK" >> /etc/crontabs/root
+    /etc/init.d/cron reload >/dev/null 2>&1 || true
+fi
+
 OBSCOLLECT=/cfg/scripts/obs-collect.sh
 if [ -x "$OBSCOLLECT" ]; then
     if ! grep -qF "$OBSCOLLECT" /etc/crontabs/root 2>/dev/null; then
