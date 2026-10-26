@@ -521,14 +521,45 @@ ecs-op = \"delete\"
         rdns_groups=""
         rdns_chain='"adguard"'
     fi
+    # AdGuard over DoT when the contract names its endpoint ($LAN_DNS_DOT in seam.env; row
+    # agreed 2026-10-26: dns.net.aac.gd, 853/tcp, dialled by IP with that SNI, ops renews
+    # the cert). AdGuard answers ONE query at a time per connection and closes idle ones
+    # after 10 s (ops: hard-coded in its dnsproxy), so we hold 4 connections in a
+    # round-robin: a slow lookup stalls a quarter of the traffic instead of all of it.
+    # Idle-close reconnects tested clean (2026-10-26: after 12 s and 20 s idle, all OK,
+    # ~14 ms). A failure behaves as on plain :53: the fail-back moves to the DoH chain for
+    # reset-after. Unset ⇒ plain :53, as before.
+    if [ -n "$LAN_DNS_DOT" ]; then
+        rdns_adguard=""; rdns_ag_names=""
+        for k in 1 2 3 4; do
+            rdns_adguard="$rdns_adguard
+[resolvers.adguard-$k]
+address = \"$LAN_DNS_DOT:853\"
+protocol = \"dot\"
+bootstrap-address = \"$LAN_DNS4\"
+query-timeout = 1
+"
+            rdns_ag_names="$rdns_ag_names${rdns_ag_names:+, }\"adguard-$k\""
+        done
+        rdns_adguard="$rdns_adguard
+[groups.adguard]
+type = \"round-robin\"
+resolvers = [$rdns_ag_names]
+"
+    else
+        rdns_adguard="
+[resolvers.adguard]
+address = \"$LAN_DNS4:53\"
+protocol = \"udp\"
+query-timeout = 1
+"
+    fi
     # ⚠ This heredoc delimiter is UNQUOTED on purpose ($LAN_DNS4 must interpolate),
     # so the body is still shell: a backtick or a $ inside even a TOML *comment* is
     # executed at render time. Cost me a live `-j: not found` and a comment with a
     # hole in it, 2026-08-10. Plain prose only below.
     rdns_want=$(cat <<RDNSCFG
-[resolvers.adguard]
-address = "$LAN_DNS4:53"
-protocol = "udp"
+# AdGuard query-timeout (below, per resolver):
 # ⚠ THE BINDING CONSTRAINT IS THE CLIENT'S PATIENCE, NOT ADGUARD'S SLOWNESS.
 # This was 5s, chosen to tolerate a slow AdGuard cache-miss ("1–3s is normal").
 # Both halves of that were wrong, measured 2026-08-10:
@@ -548,7 +579,7 @@ protocol = "udp"
 # netfilter returns EPERM to the local socket, so routedns sees an instant error
 # and fails over in ~20 ms, making a broken config look healthy. A down AdGuard is
 # SILENCE — drop its REPLIES in INPUT instead, then time the FIRST query.
-query-timeout = 1
+$rdns_adguard
 $rdns_groups
 [groups.failback]
 type = "fail-back"
@@ -569,6 +600,19 @@ resolver = "failback"
 address = "127.0.0.1:5300"
 protocol = "tcp"
 resolver = "failback"
+
+# The split zone gets its own listener: AdGuard only, NO public fallback, so inside
+# names fail closed (SERVFAIL) when AdGuard is down, as the old direct pin did, but
+# over the same (encrypted) path as everything else.
+[listeners.split-udp]
+address = "127.0.0.1:5301"
+protocol = "udp"
+resolver = "adguard"
+
+[listeners.split-tcp]
+address = "127.0.0.1:5301"
+protocol = "tcp"
+resolver = "adguard"
 $rdns_lan_dot
 RDNSCFG
 )
@@ -671,7 +715,9 @@ if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS6" ] && [ -n "$SPLIT_DOMAIN" ]; then
     # IP-parser misses. Empty server (`/zone/` with nothing after) = local-only.
     REV_LOCAL="/10.in-addr.arpa/ /168.192.in-addr.arpa/ /254.169.in-addr.arpa/"
     if [ -n "$RDNS_GENERAL" ]; then
-        set -- $REV_LOCAL "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" "$RDNS_GENERAL"
+        # Split zone → routedns's AdGuard-only listener (:5301, encrypted when the contract
+        # names AdGuard's DoT endpoint), never the public fallback.
+        set -- $REV_LOCAL "/$SPLIT_DOMAIN/127.0.0.1#5301" "$RDNS_GENERAL"
     else
         set -- $REV_LOCAL \
             "/$SPLIT_DOMAIN/$LAN_DNS4" "/$SPLIT_DOMAIN/$LAN_DNS6" \

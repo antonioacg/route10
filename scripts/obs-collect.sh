@@ -468,12 +468,35 @@ dns_probe() {   # $1=addr $2=port → sets DNS_UP / DNS_MS
     _e=$(date +%s%N)
     DNS_MS=$(( (_e - _s) / 1000000 ))
 }
+# AdGuard over DoT (2026-10-26, ops asked for it): the rung probes the path routedns
+# actually uses, so an expired cert or a dead :853 reads adguard=0 instead of silently
+# turning ad-blocking off through the fallback. One query through openssl s_client with
+# the cert AND name verified; independent of routedns, so the ladder still names the
+# broken hop. ms = openssl start + fresh TLS handshake + query (~100 ms), NOT comparable
+# to the old plain-:53 figure (~5 ms). Router python has no ssl module, hence openssl.
+# Polls for the reply instead of waiting for s_client to exit (it holds stdin open).
+DOT_Q='\000\035\020\222\001\000\000\001\000\000\000\000\000\000\007example\003com\000\000\001\000\001'
+dot_probe() {   # $1=ip $2=tls name → sets DNS_UP / DNS_MS
+    _f=/tmp/.dotprobe.$$; : > "$_f"
+    _s=$(date +%s%N)
+    ( printf "$DOT_Q"; sleep 2 ) | timeout 2 openssl s_client -connect "$1:853" -servername "$2" \
+        -verify_hostname "$2" -verify_return_error -CAfile /etc/ssl/certs/ca-certificates.crt \
+        -quiet 2>/dev/null > "$_f" &
+    DNS_UP=0; _i=0
+    while [ "$_i" -lt 40 ]; do
+        if [ "$(wc -c < "$_f")" -ge 14 ]; then DNS_UP=1; break; fi
+        sleep 0.05; _i=$((_i+1))
+    done
+    _e=$(date +%s%N); DNS_MS=$(( (_e - _s) / 1000000 )); rm -f "$_f"
+}
 # AdGuard's address is a SEAM value (ops/NETWORK-CONTRACT.md §LAN DNS delegation)
 # — read it, never hardcode it. Absent ⇒ that rung is simply not probed (NaN),
 # same clean-no-op idiom as the DNS job in post-cfg.sh.
 [ -f /cfg/seam.env ] && . /cfg/seam.env
 if command -v drill >/dev/null 2>&1; then
-    if [ -n "$LAN_DNS4" ]; then
+    if [ -n "$LAN_DNS4" ] && [ -n "$LAN_DNS_DOT" ]; then
+        dot_probe "$LAN_DNS4" "$LAN_DNS_DOT"; DNS_AGH_UP=$DNS_UP; DNS_AGH_MS=$DNS_MS
+    elif [ -n "$LAN_DNS4" ]; then
         dns_probe "$LAN_DNS4" 53;  DNS_AGH_UP=$DNS_UP;     DNS_AGH_MS=$DNS_MS
     fi
     # The DoH rung probes routedns's FIRST fallback, read from its config: post-cfg

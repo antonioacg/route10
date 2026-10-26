@@ -440,6 +440,15 @@ telnet probes — they orphan the lock too.
      **Force DoH** ("no unencrypted fallback" would treat AdGuard as plaintext). The `doh`
      ladder rung probes routedns's first fallback (ops: `Route10DnsDohFallbackDown`).
      1.5k's HTTP/2 is live: one RTT per lookup over a reused connection (~10–20 ms).
+     ⭐ **route10 → AdGuard is DoT (2026-10-26 23:11Z).** `$LAN_DNS_DOT` (seam.env, contract row:
+     `dns.net.aac.gd`, 853/tcp, dialled at `$LAN_DNS4`, ops renews the cert) ⇒ 4 DoT resolvers in a
+     round-robin `adguard` group (AdGuard answers one query at a time per connection and drops
+     idle ones after 10 s; reconnects tested clean). The split zone goes to an AdGuard-only routedns
+     listener `127.0.0.1:5301` (fail-closed, no public fallback). 0 plain :53 packets router↔AdGuard.
+     The `adguard` ladder rung probes DoT via `openssl s_client` (router python has no ssl) — ~104 ms,
+     not comparable to the old ~5 ms plain figure. Tailscale (MagicDNS) devices still send general DNS
+     plain to `.1` at home: Headscale can't hand clients an encrypted AdGuard upstream (ops checked
+     2026-10-26); operator chose to leave it.
      ⭐ **Encrypted DNS for LAN devices (2026-10-26):** routedns also listens for **DoT on :853**
      (LAN, ULA and tailnet sources — a Tailscale iPhone reaches .1 through its tunnel) with Alta's own uacme Let's Encrypt wildcard for the router's ddns
      name (`/cfg/certs/{cert,key}.pem`, full chain), presented as `dns.<ddns zone>`. It tags the
