@@ -448,7 +448,8 @@ fi
 # LADDER on purpose — each hop is probed independently so the metric NAMES the
 # broken hop instead of just asserting "DNS is sad":
 #   adguard  down, rest up  → ops-side outage; we are on DoH ⇒ AD-BLOCK IS OFF
-#   doh      down, rest up  → the safety net is gone; an AdGuard blip is now fatal
+#   doh      down, rest up  → the FIRST DoH fallback is gone (routedns's doh-1; the
+#                             others in its chain may still cover an AdGuard blip)
 #   routedns down           → dnsmasq's general upstream is dead
 #   dnsmasq  down           → the whole LAN has no resolver (the loud one)
 # ⚠ timeout 2 is NOT optional: bare drill retries 3x5s and takes 15 s on a dead
@@ -475,7 +476,10 @@ if command -v drill >/dev/null 2>&1; then
     if [ -n "$LAN_DNS4" ]; then
         dns_probe "$LAN_DNS4" 53;  DNS_AGH_UP=$DNS_UP;     DNS_AGH_MS=$DNS_MS
     fi
-    dns_probe 127.0.0.1 5054;      DNS_DOH_UP=$DNS_UP;     DNS_DOH_MS=$DNS_MS
+    # The DoH rung probes routedns's FIRST fallback, read from its config: post-cfg
+    # renders it from the portal's DoH list, so its port can move. 5054 if unreadable.
+    DOH_PORT=$(awk -F'[:"]' '/^\[resolvers\.doh-1\]/{f=1} f && /^address/{print $3; exit}' /a/routedns/routedns.toml 2>/dev/null)
+    dns_probe 127.0.0.1 "${DOH_PORT:-5054}"; DNS_DOH_UP=$DNS_UP; DNS_DOH_MS=$DNS_MS
     dns_probe 127.0.0.1 5300;      DNS_RDNS_UP=$DNS_UP;    DNS_RDNS_MS=$DNS_MS
     dns_probe 127.0.0.1 53;        DNS_DNSMASQ_UP=$DNS_UP; DNS_DNSMASQ_MS=$DNS_MS
 fi

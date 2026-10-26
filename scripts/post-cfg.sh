@@ -422,6 +422,64 @@ RDNS_BIN=/a/routedns/routedns
 RDNS_CFG=/a/routedns/routedns.toml
 RDNS_GENERAL=
 if [ -x "$RDNS_BIN" ] && [ -n "$LAN_DNS4" ]; then
+    # DoH fallbacks = the firmware's https-dns-proxy instances, read from uci on every
+    # run. The portal's DoH Servers list decides which providers run and on which
+    # port, so a portal change re-maps them here on the next apply instead of leaving
+    # routedns pointed at a port that moved. Preferred providers first, the rest in
+    # portal order. 1 s each (routedns's unset default is 2 s, measured 2026-10-26):
+    # AdGuard 1 s + three DoH at 1 s keeps the worst case near 3 s, inside the client
+    # stub's ~5 s budget; a stopped proxy refuses instantly and costs nothing.
+    # The whole DoH branch sits behind an ecs-modifier that DELETES the device tag
+    # (the ECS dnsmasq adds for AdGuard's per-client log): AdGuard still gets it, the
+    # public resolvers never do. Verified on a throwaway instance 2026-10-26 (AdGuard
+    # path tagged; fallback and second fallback stripped). No DoH configured ⇒
+    # AdGuard-only, never a resolver pointed at a dead port.
+    DOH_PREFER="cloudflare-dns.com dns.quad9.net"
+    doh_all=""; i=0
+    while [ "$i" -lt 16 ] && doh_url=$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].resolver_url"); do
+        doh_port=$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].listen_port" || true)
+        if [ -n "$doh_port" ]; then
+            doh_all="$doh_all $(echo "$doh_url" | sed 's|^https://||; s|/.*||')=$doh_port"
+        fi
+        i=$((i+1))
+    done
+    doh_ports=""
+    for h in $DOH_PREFER; do
+        for e in $doh_all; do
+            if [ "${e%=*}" = "$h" ]; then doh_ports="$doh_ports ${e#*=}"; fi
+        done
+    done
+    for e in $doh_all; do
+        case " $DOH_PREFER " in *" ${e%=*} "*) ;; *) doh_ports="$doh_ports ${e#*=}" ;; esac
+    done
+    rdns_doh=""; rdns_doh_names=""; n=0
+    for p in $doh_ports; do
+        n=$((n+1))
+        rdns_doh="$rdns_doh
+[resolvers.doh-$n]
+address = \"127.0.0.1:$p\"
+protocol = \"udp\"
+query-timeout = 1
+"
+        rdns_doh_names="$rdns_doh_names${rdns_doh_names:+, }\"doh-$n\""
+    done
+    if [ -n "$rdns_doh_names" ]; then
+        rdns_groups="$rdns_doh
+[groups.doh-chain]
+type = \"fail-back\"
+resolvers = [$rdns_doh_names]
+reset-after = 10
+
+[groups.doh-noecs]
+type = \"ecs-modifier\"
+resolvers = [\"doh-chain\"]
+ecs-op = \"delete\"
+"
+        rdns_chain='"adguard", "doh-noecs"'
+    else
+        rdns_groups=""
+        rdns_chain='"adguard"'
+    fi
     # ⚠ This heredoc delimiter is UNQUOTED on purpose ($LAN_DNS4 must interpolate),
     # so the body is still shell: a backtick or a $ inside even a TOML *comment* is
     # executed at render time. Cost me a live `-j: not found` and a comment with a
@@ -450,33 +508,10 @@ protocol = "udp"
 # and fails over in ~20 ms, making a broken config look healthy. A down AdGuard is
 # SILENCE — drop its REPLIES in INPUT instead, then time the FIRST query.
 query-timeout = 1
-
-[resolvers.doh-fallback]
-address = "127.0.0.1:5054"
-protocol = "udp"
-# The firmware's https-dns-proxy for its DEFAULT DoH list: 5054 Cloudflare, 5053
-# Google, 5055 OpenDNS. All three are chained, so one provider or one stopped proxy
-# no longer takes the safety net with it. 1 s each, measured 2026-10-26 on a
-# throwaway instance: the routedns default is 2 s; AdGuard 1 s plus three DoH at 1 s
-# keeps the worst case (everything but the last one dead and silent) near 3 s, inside
-# the client stub's ~5 s budget. A stopped proxy refuses instantly and costs nothing;
-# a healthy one answers in 10 to 20 ms. Keep the portal DoH list at Alta defaults or
-# these ports point elsewhere (CLAUDE.md, post-cfg job 8).
-query-timeout = 1
-
-[resolvers.doh-fallback-2]
-address = "127.0.0.1:5053"
-protocol = "udp"
-query-timeout = 1
-
-[resolvers.doh-fallback-3]
-address = "127.0.0.1:5055"
-protocol = "udp"
-query-timeout = 1
-
+$rdns_groups
 [groups.failback]
 type = "fail-back"
-resolvers = ["adguard", "doh-fallback", "doh-fallback-2", "doh-fallback-3"]
+resolvers = [$rdns_chain]
 # Default reset-after is 60s: ONE AdGuard timeout blackholes ALL DNS to DoH
 # (ad-block OFF) for a full minute. 10s bounds a residual transient blip's
 # ad-block bypass to seconds while still not hammering a genuinely-down AdGuard.
