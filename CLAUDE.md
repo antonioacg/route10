@@ -426,6 +426,14 @@ telnet probes — they orphan the lock too.
      BLANK** ⇒ router advertises v4 `.1` + v6 **link-local** (`fe80::…`, MAC-derived,
      rotation-proof — NOT the GUA). Tailscale `accept-dns` devices bypass this (MagicDNS:
      split `net.aac.gd`→AdGuard, global→Cloudflare). See `project_route10_dns_resolver.md`.
+     ⚠ **The DoH fallback is Alta's, and the portal can move it (checked 2026-10-26, fw
+     1.5l).** routedns falls back to ONE resolver, `127.0.0.1:5054` = the firmware's
+     https-dns-proxy for its *default* DoH list (5053 Google, 5054 Cloudflare, 5055 OpenDNS).
+     Settings → Network → DNS: **Use DoH** off stops the proxies; a custom **DoH Servers**
+     list re-maps the ports; **Force DoH** ("no unencrypted fallback") would treat AdGuard as
+     plaintext. Keep all three at defaults. The `doh` ladder rung (and ops'
+     `Route10DnsDohFallbackDown`) is what catches it. 1.5k's HTTP/2 is live: the proxy reuses
+     its connection, so a lookup costs one RTT to Cloudflare (~10–20 ms).
   9. **LAN NTP server** (`system.ntp.enable_server=1` + `interface='lan'`) — serves
      udp/123 on `192.168.10.1` / the LAN ULA for clients with no battery-backed RTC.
      **LAN-only via two guards**: busybox ntpd binds the server socket to br-lan
