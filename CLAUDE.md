@@ -305,6 +305,9 @@ telnet probes — they orphan the lock too.
   every tick. The portal card still can't hold the ULA (`ipWithNetRegex` is v4-only,
   re-read 2026-10-26), so every agent apply drops it and reconcile re-adds it — fine
   when applies are rare, churn when they loop.
+  Reported upstream 2026-10-26: forum.alta.inc/t/7116/2 (the loop) and /t/7030/2 (+1 on the
+  IPv6-subnets FR). Check for a staff reply before the next firmware; once Alta fixes the
+  feed, the stamp backup can be deleted.
 - `/cfg/scripts/heartbeat.sh` — `*/2` cron, no daemon. **External dead-man → healthchecks.io**
   (LIVE 2026-08-09, verified green both ends). Sends **two** checks: *Router + internet*
   (unconditional) and *Router's home network* (`lan_ok`). Counterpart to ops's *Home server
