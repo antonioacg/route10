@@ -123,6 +123,19 @@ if [ "$(uci -q get system.@system[0].cronloglevel)" != "9" ]; then
     /etc/init.d/cron restart >/dev/null 2>&1 || true
 fi
 
+# ── banIP: stop a daily fake error while AltaBlock is off ────────────────────
+# Alta's daily cron (banip-update.sh) reloads banIP even when it is disabled, and
+# the agent writes a two-option config without `ban_autodetect`. banip.sh treats
+# that option's absence as "no valid banIP config" and logs it at user.err every
+# day (since at least 2026-10-13), then sees ban_enabled=0 and exits. Adding the
+# option at banip.sh's own default makes the config valid. Only while disabled, so
+# a config Alta writes for an enabled AltaBlock is never touched. /etc is
+# tmpfs/agent-rebuilt, so this is re-asserted each reapply/boot.
+if [ "$(uci -q get banip.global.ban_enabled)" = "0" ] && [ -z "$(uci -q get banip.global.ban_autodetect)" ]; then
+    uci set banip.global.ban_autodetect='1'
+    uci commit banip
+fi
+
 # ── syslog ring size: keep local forensics alive during an incident ──────────
 # OpenWrt's default 64 KiB ring held **14 SECONDS** of history during the
 # 2026-08-11 outage (measured: 16:10:27 → 16:10:41, 552 of 573 lines routedns).
