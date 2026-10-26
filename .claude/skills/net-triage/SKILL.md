@@ -72,6 +72,7 @@ without timestamps.
 | latency inflates under load | bufferbloat — check qdisc/shaping on `pppoe-wan3` |
 | one host with hundreds of flows + connlimit warns | torrent/p2p pressure (`.200` is the usual one) |
 | per-client rx/tx low for the complaining device while WAN total is high | the device is being starved *locally* — AP or LAN, not WAN |
+| mesh devices only: iPhone VPN icon keeps reappearing, Chrome says "network changed", pages hang then load in a burst; every probe clean | **tailnet netmap churn.** Check `grep -c "AdvertiseRoutes drifted" /cfg/scripts/mesh-health.log` and `rc: Re-running dl cfg` in syslog (Alta agent re-applying its config every minute); confirm with `route -n monitor` on a peer across a `:x0:01`/`:x5:01` tick (`RTM_DELADDR` on the tailscale utun = full tunnel rebuild). Seen 2026-10-23→, fw 1.5l: 2 rebuilds per 5 min |
 | vacuum screams / 2.4 GHz clients lose downstream ~5 min, WAN + wired + 5 GHz clean | **a Tuya device just (re)joined 2.4 GHz** — 14/16 long vacuum outages (Sep–Oct 2026) started 0–46 s after a Tuya DHCP DISCOVER/REQUEST (OUIs `70:89:76`, `84:e3:42`, `50:8b:b9`; hostnames `wlan0`/`TY_WR`/`lwip0`). Mechanism SUSPECTED, not known |
 
 ## ⭐ STEP 4 — retrospective, when it already recovered
@@ -127,6 +128,13 @@ syslog is **UTC**, `date`/`ls -l` are **local (UTC-3)**.
    40–100% loss while TCP through it was clean; use the PPP gateway as the control.
 7. **Do not put words in the user's mouth.** Their observation is data; your
    framing of it is not. If they say the link was bad, the link was bad.
+8. **Split a 1 s connect stall by destination before calling it loss** (2026-10-25).
+   It is one SYN retransmit. They were all on Quad9 v6 / OpenDNS v4 `:443`
+   (destination-side) while Cloudflare and Google were 0/43 each.
+9. **curl, sockets and ping can't see a tunnel rebuild** (2026-10-26). Browsers
+   and iOS drop in-flight requests when the route table changes; probe tools
+   don't. Two days of clean probes missed 576 rebuilds/day that the user saw as
+   the VPN icon and Chrome's "network changed".
 
 ## ⭐ STEP 5 — self-improvement (this is the point; do not skip)
 

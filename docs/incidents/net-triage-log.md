@@ -130,6 +130,32 @@ looked until the third round of questioning.
 - **Verdict:** not reproduced. A clean power-on join does not trigger it by itself; in both real outages the pair joined and then went SILENT until the AP removed them for inactivity — here they stayed responsive. Next suspect: a bulb that joins and then drops off the air (flaky/brown-out), not the join itself.
 - **New rule:** none yet — the 14/16 correlation stands, but "join" is necessary-looking, not sufficient.
 
+## 2026-10-26 15:35–15:41Z — follow-up: it is mesh netmap churn, 2 tunnel rebuilds per 5 min
+- **Reported:** "I do see it on my iPhone VPN on the status bar showing often, even when I'm on 5G WiFi, by the side of the router. And on my wired work Mac (also on the mesh) sometimes I see network changed in chrome."
+- **Measured (CONFIRMED):**
+  - route10 syslog: the Alta cloud agent re-runs its whole config apply **every minute** (`rc: Re-running dl cfg`; 1,139 runs since 10-25 20:37Z). Each run warns twice (`apkg update` rc 256; `/etc/init.d/netbird … stop` rc 32512 = not installed), rewrites `tailscale.settings.advertise_routes` to the portal's `192.168.10.0/24` and runs `/etc/init.d/tailscale reload`.
+  - mesh-health re-adds the ULA /64 at every 5-min tick; the agent's next run (~23 s later) removes it. The ULA is advertised ~23 s of every 300 s.
+  - Loki, 14 d, with a control (`wan3_up=true` present every day from 10-12): `Re-running dl cfg` and `AdvertiseRoutes drifted` both start **2026-10-23 07:00–08:00Z** (fw 1.5l), zero before. ~1,435 agent runs/day, 288 drift-heals/day.
+  - `route -n monitor` on the Mac (peer, accept-routes on): **full utun4 teardown + rebuild** (both tunnel addresses, every route including 100.100.100.100 MagicDNS) at 12:40:02 (our re-add) and 12:40:25 (agent removal) local; same at 12:35:02. The agent's no-op runs (route already absent, e.g. 12:34:24) caused **no** rebuild, so only real route-set changes reach peers.
+- **Verdict:** CONFIRMED mechanism for the mesh devices: 2 tunnel rebuilds per 5 min (~576/day) on every peer since 10-23 ⇒ iOS VPN icon re-shown, Chrome `ERR_NETWORK_CHANGED`, in-flight requests dropped and retried ("hangs then loads at once"). Matches the user's iPhone + Mac report. Does NOT explain the TV (not a mesh node), not pursued.
+- **Evidence gap:** yesterday's probes (curl, python sockets, ping) don't react to route changes, so they could not see this; the user's own observation (VPN icon, Chrome's message) is what pointed at it.
+- **New rule:** on hang/"network changed" reports from mesh devices, run `route -n monitor` on a peer across a mesh-health tick (`:x0:01`/`:x5:01`) and count `RTM_DELADDR` on the tailscale utun. A probe that doesn't care about the route table can't see a tunnel rebuild.
+
+## 2026-10-25 ~19:36Z — "stuff hangs loading then all loads at once" (reported "right now")
+- **Reported:** "Why is my internet so weird? Stuff hangs loading then all loads at once." Devices: this Mac, iPhone, TV. Apps, web pages, video. "Right now."
+- **Vantage (bridge ports, `brctl showmacs` 19:47Z):** Mac en10 wired → **eth5** (office fiber); its en0 Wi-Fi is up too, but it is not the default route. LG TV **wired to the AX73** (eth1, not a Wi-Fi station). iPhone (`A2:DD:99:C6:20:C0`, .192) on AX73 **5 GHz at −84…−87 dBm** (uplink rate 12–65 Mbit/s). The only things all three share: route10, WAN, AdGuard (Mac: MagicDNS → system default .241; TV: route10 → routedns → AdGuard).
+- **Measured (all from the Mac, all clean):**
+  - 19:36Z net-snap: gateway 0.6 ms, idle 17.0 vs loaded 17.3 ms (no bufferbloat), PON O5 fec_unc 0, no eth4/eth5 flaps in 24 h. Throughput erratic to EU hosts (Hetzner v4 0.1 Mbit/s over 15 s), CF v4 93 / v6 527.
+  - 19:38–19:42Z: 1 s DNS + TCP-connect probe; DNS ≤226 ms throughout. 1 s connect stalls (one SYN retransmit) on 14/170, **but all on Quad9 v6 (7/42) and OpenDNS v4 (6/42); Cloudflare 0/43, Google 0/43** ⇒ destination-side, not our network.
+  - 19:41Z: 30 real sites, one shot each: worst TTFB 0.56 s. 19:43Z: QUIC vs TCP to 10 sites, both families: all fast.
+  - 19:43:52–19:45:55Z, 5/s for 2 min: Mac→.1 at 1472 B 0/600 lost; Mac→8.8.8.8 1/600, max 21 ms; route10→8.8.8.8 5/600. No gap-then-burst.
+  - 19:46Z: uncached lookups via .1, the LAN ULA and .241 directly: all ≤340 ms.
+- **Side finding (real, not the cause so far):** since 2026-10-23 ~07:00Z (fw **1.5l**), mesh-health re-adds the ULA tailnet route every 5 min and something removes it again **within ~10 s** (watched 19:40:01–19:40:16Z: uci and live prefs both lose it). 800 drift lines. Two writers again. No stall at the 19:40:01 or 19:45:01 ticks.
+  - 19:48:20–20:08:17Z, 2 s watcher (475 samples, 8 sites in rotation + uncached DNS via system resolver and via .1): DNS never over 276 ms. **One hang, on one host:** `www.microsoft.com` (Akamai, `2600:1419:6a00:…`) hung 20:03:32 (1.6 s), 20:04:02, 20:04:32, 20:05:41Z (10 s timeouts), fine at 20:04:52 and from 20:06:01Z. In the same seconds the other 7 sites (including Apple on a different Akamai edge) answered in 85–770 ms.
+- **Verdict (so far):** not reproduced as a whole-network fault. CONFIRMED one ~2-minute single-destination stall (Akamai edge for microsoft.com), with every other host in the same seconds acting as the control ⇒ CDN/path, not our link. Whether that is what the user felt is SUSPECTED only: there is no complaint timestamp to match it to. The iPhone's −84…−87 dBm 5 GHz link is a sufficient cause on the iPhone alone (weak signal CONFIRMED; effect on its traffic SUSPECTED).
+- **Evidence gap:** no wall-clock moment of a felt hang from the user yet. The watcher didn't record which address or which phase (connect / TLS / first byte) hung; record `remote_ip` and the phase times next time.
+- **New rule:** a 1 s TCP-connect stall is one SYN retransmit — **split it by destination before calling it loss**. Small DNS-provider anycast :443 (Quad9, OpenDNS) drops probe SYNs; Cloudflare/Google don't.
+
 ## 2026-10-02 ~21:50Z — "WiFi unusable" after Alta firmware 1.5i
 - **Reported:** "What's going on with my WiFi now, it's unusable. Last night Alta pushed a new firmware, it seems it's out of the mesh."
 - **Vantage:** tailnet clients on the LAN (operator's Mac / iPhone); exact device not given.
