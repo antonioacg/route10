@@ -1023,6 +1023,43 @@ if [ -n "$_lldp_if" ] && [ "$_lldp_if" != "$_lldp_want" ]; then
     event "lldpd: stopped announcing on the WAN ports eth3/eth4 (now: $_lldp_want)"
 fi
 
+# ── Access log for the router's own web/DoT services ─────────────────────────
+# 2026-10-27: the stick-link exposure left one question unanswerable, "did anyone
+# open the router's web page?", because uhttpd keeps no access log. SSH needs
+# nothing here; dropbear already logs every connection (30 d in Loki). So this
+# logs new TCP connections to 80/443 from ANY source, and to DoT (853) from
+# anything that isn't LAN or mesh, since LAN DoT is constant and would bury the
+# signal. Internet-side attempts are skipped: the wan zone drops them, and they
+# are scanner noise, not access. One line per source per 10 min (xt_recent, like
+# the connlimit logger) plus a global cap. Kernel log → syslog → Loki, prefix
+# "route10.mgmt-access: ".
+install_mgmtlog() {
+    ipt="$1 -w 10"; rl=$2
+    mark="route10-mgmtlog-l1"
+    $ipt -N RT10_MGMTLOG 2>/dev/null || true
+    $ipt -N RT10_MGMTLOG_L 2>/dev/null || true
+    if ! $ipt -S RT10_MGMTLOG 2>/dev/null | grep -q -- "$mark"; then
+        $ipt -F RT10_MGMTLOG 2>/dev/null || true
+        $ipt -F RT10_MGMTLOG_L 2>/dev/null || true
+        for _wan in 'pppoe+' eth3 eth0; do
+            $ipt -A RT10_MGMTLOG -i "$_wan" -j RETURN 2>/dev/null || true
+        done
+        for _in in br-lan br-lan_99 tailscale0; do
+            $ipt -A RT10_MGMTLOG -i "$_in" -p tcp --dport 853 -j RETURN 2>/dev/null || true
+        done
+        $ipt -A RT10_MGMTLOG -p tcp -m multiport --dports 80,443,853 -j RT10_MGMTLOG_L 2>/dev/null || true
+        $ipt -A RT10_MGMTLOG -m comment --comment "$mark" -j RETURN 2>/dev/null || true
+        $ipt -A RT10_MGMTLOG_L -m recent --name "$rl" --rcheck --seconds 600 -j RETURN 2>/dev/null || true
+        $ipt -A RT10_MGMTLOG_L -m recent --name "$rl" --set 2>/dev/null || true
+        $ipt -A RT10_MGMTLOG_L -m limit --limit 60/hour --limit-burst 20 \
+            -j LOG --log-prefix "route10.mgmt-access: " --log-level notice 2>/dev/null || true
+    fi
+    $ipt -C INPUT -p tcp --syn -j RT10_MGMTLOG 2>/dev/null \
+        || $ipt -I INPUT 1 -p tcp --syn -j RT10_MGMTLOG 2>/dev/null || true
+}
+install_mgmtlog iptables  mgmt4
+install_mgmtlog ip6tables mgmt6
+
 # ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
 # A single LAN host running a P2P/torrent client opens ~1000+ simultaneous flows
 # (DHT + peer swarm). Each needs a NAT mapping on our SHARED CGNAT WAN IP. The

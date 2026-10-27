@@ -175,7 +175,40 @@ ens6nat POSTROUTING -s fd7a:115c:a1e0::/48 -o pppoe-wan3 -j MASQUERADE
 # sources from the live WAN GUA per-packet — rotation-proof, no upkeep
 # (verified: exit-node curl -6 egresses the WAN GUA and round-trips).
 
+# Egress guard (2026-10-27): nothing sourced from the router's OWN tailnet
+# address may leave via the WAN. That was the 2026-10-26 leak: with table 52
+# empty, dnsmasq's answers to mesh peers (src 100.64.0.2) took the default route
+# out pppoe-wan3 in cleartext for ~20 h. OUTPUT-scoped for the source match on
+# purpose: exit-node traffic is FORWARDED with the peer's address as source
+# (rewritten to the WAN address only in POSTROUTING), so it can never match.
+# v4 is the exact /32, because our own WAN address also sits in 100.64/10 (ISP
+# CGNAT) and a /10 would cut the router off. v6 covers the tailnet /48, both as
+# our source and as a forwarded destination (a ULA never belongs on the
+# internet). Counted, and logged rate-limited; exported by obs-collect.
+TS4=$(ip -4 -o addr show tailscale0 2>/dev/null | awk '{sub(/\/.*/,"",$4); print $4; exit}')
+iptables  -w -N RT10_MESHEGRESS 2>/dev/null
+ip6tables -w -N RT10_MESHEGRESS 2>/dev/null
+if [ -n "$TS4" ] && ! iptables -w -S RT10_MESHEGRESS 2>/dev/null | grep -qF -- "route10-meshegress-$TS4"; then
+    iptables -w -F RT10_MESHEGRESS
+    iptables -w -A RT10_MESHEGRESS -s "$TS4/32" -m limit --limit 6/min --limit-burst 5 \
+        -j LOG --log-prefix "route10.mesh-egress block: " --log-level warning
+    iptables -w -A RT10_MESHEGRESS -s "$TS4/32" -m comment --comment "route10-meshegress-$TS4" -j DROP
+    event "mesh egress guard set for $TS4 (router-sourced mesh traffic can no longer leave via the WAN)"
+fi
+if ! ip6tables -w -S RT10_MESHEGRESS 2>/dev/null | grep -qF -- "route10-meshegress6"; then
+    ip6tables -w -F RT10_MESHEGRESS
+    for m in -s -d; do
+        ip6tables -w -A RT10_MESHEGRESS $m fd7a:115c:a1e0::/48 -m limit --limit 6/min --limit-burst 5 \
+            -j LOG --log-prefix "route10.mesh-egress block: " --log-level warning
+        ip6tables -w -A RT10_MESHEGRESS $m fd7a:115c:a1e0::/48 -m comment --comment "route10-meshegress6" -j DROP
+    done
+fi
 [ "$FW_ADDED" = 1 ] && event "tailscale0 firewall/NAT rules re-added (fw3 reload had flushed them)"
+FW_ADDED=0
+ens4 OUTPUT  -o pppoe+ -j RT10_MESHEGRESS
+ens6 OUTPUT  -o pppoe+ -j RT10_MESHEGRESS
+ens6 FORWARD -o pppoe+ -d fd7a:115c:a1e0::/48 -j RT10_MESHEGRESS
+[ "$FW_ADDED" = 1 ] && event "mesh egress guard jumps (re)installed"
 
 # ── 4. br-lan GRO + TSO off (mesh->LAN forward-path fixes) ────────────────────
 # Two distinct bugs on the same interface, both reachable ONLY from the mesh.

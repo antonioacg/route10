@@ -270,6 +270,11 @@ if [ -d /sys/class/net/tailscale0 ]; then
     ip6tables -w -C FORWARD -i tailscale0 -j ACCEPT 2>/dev/null || FW_MISSING="$FW_MISSING v6-fwd-in"
     ip6tables -w -C FORWARD -o tailscale0 -j ACCEPT 2>/dev/null || FW_MISSING="$FW_MISSING v6-fwd-out"
     ip6tables -w -t nat -C POSTROUTING -s fd7a:115c:a1e0::/48 -o br-lan -j MASQUERADE 2>/dev/null || FW_MISSING="$FW_MISSING v6-masq-lan"
+    # Egress guard (reconcile step 3): the jump, and a v4 rule for the CURRENT address.
+    _ts4=$(ip -4 -o addr show tailscale0 2>/dev/null | awk '{sub(/\/.*/,"",$4); print $4; exit}')
+    iptables  -w -C OUTPUT -o pppoe+ -j RT10_MESHEGRESS 2>/dev/null || FW_MISSING="$FW_MISSING v4-egress-guard"
+    [ -n "$_ts4" ] && ! iptables -w -S RT10_MESHEGRESS 2>/dev/null | grep -qF -- "-s $_ts4/32" && FW_MISSING="$FW_MISSING v4-egress-guard-addr"
+    ip6tables -w -C OUTPUT -o pppoe+ -j RT10_MESHEGRESS 2>/dev/null || FW_MISSING="$FW_MISSING v6-egress-guard"
     if [ -n "$FW_MISSING" ]; then
         warn "tailscale0 firewall/NAT rules MISSING:$FW_MISSING (fw3 reload flushed them) — mesh->LAN is blackholed; healing via reconcile"
         heal

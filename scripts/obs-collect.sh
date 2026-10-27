@@ -406,6 +406,26 @@ F5=$(cat /sys/class/net/eth5/carrier_changes 2>/dev/null)
 FBR=$(cat /sys/class/net/br-lan/carrier_changes 2>/dev/null)
 CRC5=$(ethtool -S eth5 2>/dev/null | awk '/rx_crc_err:/{print $2; exit}')
 
+# Stick-link exposure, added 2026-10-27. The ISP does not keep customers apart on
+# the PPPoE VLAN, so neighbours' broadcasts reach eth4. That was ~4/s for at
+# least two weeks and NOTHING exported showed it. rx broadcast/multicast = how
+# much neighbour traffic reaches us; a step up means a new network joined the
+# segment. tx multicast = what WE announce there; ~0 since lldpd left eth4, so
+# anything rising is new. The guard counters are what post-cfg's RT10_ONTEDGE
+# turned away, and RT10_MESHEGRESS is reconcile's block on router-sourced mesh
+# traffic leaving via the WAN (baseline 0; anything >0 is the 2026-10-26 leak).
+# A missing chain reads NaN, so a guard that vanished shows up as a gap, not as 0.
+E4S=$(ethtool -S eth4 2>/dev/null)
+E4RXB=$(echo "$E4S" | awk '$1=="rx_broadcast:"{print $2; exit}')
+E4RXM=$(echo "$E4S" | awk '$1=="rx_multicast:"{print $2; exit}')
+E4TXB=$(echo "$E4S" | awk '$1=="tx_broadcast:"{print $2; exit}')
+E4TXM=$(echo "$E4S" | awk '$1=="tx_multicast:"{print $2; exit}')
+chain_drops() { $1 -w 2 $2 -L "$3" -v -n -x 2>/dev/null | awk '$3=="DROP"{s+=$1; n++} END{if (n) print s}'; }
+GRD4=$(chain_drops iptables  "-t raw" RT10_ONTEDGE)
+GRD6=$(chain_drops ip6tables "-t raw" RT10_ONTEDGE)
+MEG4=$(chain_drops iptables  "" RT10_MESHEGRESS)
+MEG6=$(chain_drops ip6tables "" RT10_MESHEGRESS)
+
 A4=$(ip -4 addr show dev br-lan 2>/dev/null | grep -c 'inet ')
 AG=$(ip -6 addr show dev br-lan scope global 2>/dev/null | grep -c 'inet6 [23]')
 AU=$(ip -6 addr show dev br-lan scope global 2>/dev/null | grep -c 'inet6 f[cd]')
@@ -518,13 +538,15 @@ if command -v drill >/dev/null 2>&1; then
     fi
 fi
 
-JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"flap":{"eth4":%s,"eth5":%s,"brlan":%s},"crc":{"eth5":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"l4_v":%s,"l4_a":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s,"w2_v":%s,"w2_a":%s},"dns":{"agh_up":%s,"agh_ms":%s,"doh_up":%s,"doh_ms":%s,"rdns_up":%s,"rdns_ms":%s,"dnsmasq_up":%s,"dnsmasq_ms":%s,"agh6_up":%s,"agh6_ms":%s,"dnsmasq6_up":%s,"dnsmasq6_ms":%s}}' \
+JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"flap":{"eth4":%s,"eth5":%s,"brlan":%s},"crc":{"eth5":%s},"e4":{"rxbc":%s,"rxmc":%s,"txbc":%s,"txmc":%s},"guard":{"v4":%s,"v6":%s},"meg":{"v4":%s,"v6":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"l4_v":%s,"l4_a":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s,"w2_v":%s,"w2_a":%s},"dns":{"agh_up":%s,"agh_ms":%s,"doh_up":%s,"doh_ms":%s,"rdns_up":%s,"rdns_ms":%s,"dnsmasq_up":%s,"dnsmasq_ms":%s,"agh6_up":%s,"agh6_ms":%s,"dnsmasq6_up":%s,"dnsmasq6_ms":%s}}' \
     "$(jnum "$CPU_TOT")" "$(jnum "$CPU_IDLE")" "$(jnum "$CPU_SIRQ")" "$(jnum "$CPU_IOW")" \
     "$(jnum "$SN_D")" "$(jnum "$SN_S")" "$(jnum "$IRQ")" \
     "$(jnum "$CT")" "$(jnum "$CTMAX")" \
     "$(jnum "$CT4")" "$(jnum "$CT6")" "$(jnum "$CTW4")" "$TOP4" "$TOP6" "$STALL4" "$IFJSON" \
     "$(jnum "$C4")" "$(jnum "$C5")" "$(jnum "$CBR")" \
     "$(jnum "$F4")" "$(jnum "$F5")" "$(jnum "$FBR")" "$(jnum "$CRC5")" \
+    "$(jnum "$E4RXB")" "$(jnum "$E4RXM")" "$(jnum "$E4TXB")" "$(jnum "$E4TXM")" \
+    "$(jnum "$GRD4")" "$(jnum "$GRD6")" "$(jnum "$MEG4")" "$(jnum "$MEG6")" \
     "$(jnum "$A4")" "$(jnum "$AG")" "$(jnum "$AU")" "$(jnum "$W3")" \
     "$(jnum "$L4T")" "$(jnum "$L4TX")" "$(jnum "$L4RX")" "$(jnum "$L4V")" "$(jnum "$L4A")" \
     "$(jnum "$W2T")" "$(jnum "$W2TX")" "$(jnum "$W2RX")" "$(jnum "$W2V")" "$(jnum "$W2A")" \

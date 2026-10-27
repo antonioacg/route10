@@ -68,6 +68,18 @@ SELECT
   'route10_eth_carrier_changes_total{iface=\"br-lan\"} ' || COALESCE(json_extract(json,'\$.flap.brlan'),'NaN') || char(10) ||
   '# HELP route10_eth_rx_crc_errors_total Office-fibre receive CRC errors (ethtool driver counter, NOT the /proc/net/dev errs column, which reads 0 while this climbs). This is the counter that hit 51k+ in the 2026-06 dirty-ferrule incident and took the whole LAN down while the WAN was fine. ONE DIRECTION ONLY: route10->office corruption lands on the office switch counters, which we cannot see, so a flat value here does NOT clear the fibre.' || char(10) ||
   'route10_eth_rx_crc_errors_total{iface=\"eth5\"} ' || COALESCE(json_extract(json,'\$.crc.eth5'),'NaN') || char(10) ||
+  '# HELP route10_eth_broadcast_packets_total Broadcast frames on eth4, the ODI stick link (ethtool). The ISP does not keep customers apart on the PPPoE VLAN, so dir=rx is how much NEIGHBOUR broadcast reaches us: ~4/s standing since at least 2026-10-13; a step up means a new network joined the segment. dir=tx is what route10 itself broadcasts there (rare: ARP for the stick, PPPoE discovery on reconnect). Resets on reboot.' || char(10) ||
+  'route10_eth_broadcast_packets_total{iface=\"eth4\",dir=\"rx\"} ' || COALESCE(json_extract(json,'\$.e4.rxbc'),'NaN') || char(10) ||
+  'route10_eth_broadcast_packets_total{iface=\"eth4\",dir=\"tx\"} ' || COALESCE(json_extract(json,'\$.e4.txbc'),'NaN') || char(10) ||
+  '# HELP route10_eth_multicast_packets_total Multicast frames on eth4 (ethtool; broadcast NOT included). dir=tx baseline is ~0 since lldpd left eth4 on 2026-10-27, so a rising rate means route10 is announcing on the shared ISP segment again. dir=rx ran ~60/s from 2026-10-20 to 10-25, source never captured.' || char(10) ||
+  'route10_eth_multicast_packets_total{iface=\"eth4\",dir=\"rx\"} ' || COALESCE(json_extract(json,'\$.e4.rxmc'),'NaN') || char(10) ||
+  'route10_eth_multicast_packets_total{iface=\"eth4\",dir=\"tx\"} ' || COALESCE(json_extract(json,'\$.e4.txmc'),'NaN') || char(10) ||
+  '# HELP route10_stick_link_guard_dropped_packets_total IP packets the stick-link guard (raw RT10_ONTEDGE) dropped on eth4/ont_mgmt0: everything that is not the stick. Steady rate = neighbours on the shared segment being turned away. NaN means the guard chain is MISSING, i.e. the stick link is open to the neighbours again. Resets when post-cfg rebuilds the chain.' || char(10) ||
+  'route10_stick_link_guard_dropped_packets_total{family=\"ipv4\"} ' || COALESCE(json_extract(json,'\$.guard.v4'),'NaN') || char(10) ||
+  'route10_stick_link_guard_dropped_packets_total{family=\"ipv6\"} ' || COALESCE(json_extract(json,'\$.guard.v6'),'NaN') || char(10) ||
+  '# HELP route10_mesh_egress_blocked_packets_total Router-sourced mesh traffic stopped from leaving via the WAN (RT10_MESHEGRESS). Baseline 0. Any increase is the 2026-10-26 leak class (no kernel routes to mesh peers, so replies took the default route in cleartext); mesh-health assertion 8 heals it. NaN means the guard is missing.' || char(10) ||
+  'route10_mesh_egress_blocked_packets_total{family=\"ipv4\"} ' || COALESCE(json_extract(json,'\$.meg.v4'),'NaN') || char(10) ||
+  'route10_mesh_egress_blocked_packets_total{family=\"ipv6\"} ' || COALESCE(json_extract(json,'\$.meg.v6'),'NaN') || char(10) ||
   'route10_brlan_addr_present{family=\"ipv4\"} '     || COALESCE(json_extract(json,'\$.addr.v4'),'NaN')  || char(10) ||
   'route10_brlan_addr_present{family=\"ipv6_gua\"} ' || COALESCE(json_extract(json,'\$.addr.gua'),'NaN') || char(10) ||
   'route10_brlan_addr_present{family=\"ipv6_ula\"} ' || COALESCE(json_extract(json,'\$.addr.ula'),'NaN') || char(10) ||

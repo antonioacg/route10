@@ -225,6 +225,13 @@ telnet probes — they orphan the lock too.
     good cache; consumers gate on `route10_ax73_up` +
     `route10_ax73_scrape_timestamp_seconds`. Log: transitions only. Source:
     `scripts/ax73-scrape.sh`.
+  - **Stick-link exposure + mesh-egress counters** (obs-collect, 2026-10-27; ops told
+    via seam, names NOT frozen yet):
+    `route10_eth_{broadcast,multicast}_packets_total{iface="eth4",dir}` (rx = neighbour
+    traffic on the shared ISP segment, ~4 bcast/s standing; tx multicast baseline 0
+    since lldpd left eth3/eth4), `route10_stick_link_guard_dropped_packets_total{family}`
+    and `route10_mesh_egress_blocked_packets_total{family}` (baseline 0). Both guard
+    series read **NaN when their chain is missing**, i.e. the guard is gone.
   - **Passive experience signal** (in `obs-collect.sh`'s existing conntrack pass) —
     `route10_host_tcp_flows` / `_unanswered` per host: SYN_SENT that never
     established, i.e. the reported symptom itself. Inverts the probe's flaw — a
@@ -278,7 +285,11 @@ telnet probes — they orphan the lock too.
   daemon via the FIRMWARE init (stop/settle/start for daemon-level changes; `reload`
   for routes), tailscale0 firewall accepts + NAT both families as a BACKSTOP (the
   1.102 daemon also runs its own ts-* chains, NetfilterMode=2, but an Alta reapply
-  flushes non-fw3 rules), br-lan GRO/TSO off, **and the dnsmasq
+  flushes non-fw3 rules), the **mesh egress guard** (`RT10_MESHEGRESS`, 2026-10-27:
+  DROP+log anything leaving `pppoe+` with src = the router's own tailnet /32 or the
+  tailnet /48, or forwarded to the /48; OUTPUT-scoped for src, so exit-node traffic
+  can't match, as verified by a live exit-node round trip in both families; a /10 here
+  would cut the router off, because our WAN IP is in 100.64/10 too), br-lan GRO/TSO off, **and the dnsmasq
   tailscale0 listener** (`dhcp.@dnsmasq[0].interface` — off-LAN split-DNS; the
   entry is ours, so an Alta apply that regenerates `/etc/config/dhcp` drops it
   and restarts dnsmasq AFTER post-cfg completed, which killed off-LAN split-DNS
@@ -350,7 +361,7 @@ telnet probes — they orphan the lock too.
   boot-time route reset (2026-07-22 class); (3) compiled ACL filter admits every
   advertised subnet route, asserted on DSTs never SRCs (2026-07-20 stale-daemon
   class; QUIET on Alta's slimmed build — `debug netmap` is compiled out/404);
-  (4) tailscale0 firewall accepts + NAT present in both families (fw3-flush
+  (4) tailscale0 firewall accepts + NAT + mesh egress guard present in both families (fw3-flush
   class); (5) node still carries its ops ACL tag (2026-08-07 untagged-rejoin
   class; server-side, WARN only); (6) dnsmasq BOUND on `:53` at the tailnet
   addresses — asserts the outcome, not the uci entry (2026-08-14 cloud-regen
@@ -527,6 +538,13 @@ telnet probes — they orphan the lock too.
      Verify with `pppd notty dryrun` → syslog `refuse-pap # (from /etc/ppp/options)`.
      ⚠ Residual: a rogue server still gets a CHAP response, which is offline-crackable,
      and a boot dial that starts before post-cfg runs isn't covered.
+  13. **Access log for the router's web UI / DoT** (`RT10_MGMTLOG`, 2026-10-27).
+     uhttpd keeps no access log, so the kernel logs `route10.mgmt-access: ` (notice)
+     for new TCP to 80/443 from any source and to 853 from outside LAN/mesh.
+     Internet-side attempts are skipped (wan drops them). One line per source per
+     10 min, plus a global cap. SSH isn't here because dropbear already logs every
+     connection (`{job="route10", syslog_app="dropbear"}`, 30 d). Live-tested: the
+     Mac's https hit logged, LAN DoT stayed silent.
 
 ## Observability standard
 
