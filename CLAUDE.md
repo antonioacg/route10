@@ -441,12 +441,15 @@ telnet probes — they orphan the lock too.
      ladder rung probes routedns's first fallback (ops: `Route10DnsDohFallbackDown`).
      1.5k's HTTP/2 is live: one RTT per lookup over a reused connection (~10–20 ms).
      ⭐ **route10 → AdGuard is DoT (2026-10-26 23:11Z).** `$LAN_DNS_DOT` (seam.env, contract row:
-     `dns.net.aac.gd`, 853/tcp, dialled at `$LAN_DNS4`, ops renews the cert) ⇒ 4 DoT resolvers in a
-     round-robin `adguard` group (AdGuard answers one query at a time per connection and drops
-     idle ones after 10 s; reconnects tested clean). The split zone goes to an AdGuard-only routedns
+     `dns.net.aac.gd`, 853/tcp, dialled at `$LAN_DNS4`/`$LAN_DNS6`, ops renews the cert) ⇒ per family a
+     round-robin of 4 DoT connections (AdGuard answers one query at a time per connection and drops
+     idle ones after 10 s), v4 pool then v6 pool in a fail-back `adguard` group. Measured: v4 dead →
+     1.04 s once; all AdGuard dead → DoH in 2.0 s (`random` would walk all members, 4 s: rejected). The split zone goes to an AdGuard-only routedns
      listener `127.0.0.1:5301` (fail-closed, no public fallback). 0 plain :53 packets router↔AdGuard.
      The `adguard` ladder rung probes DoT via `openssl s_client` (router python has no ssl) — ~104 ms,
-     not comparable to the old ~5 ms plain figure. Tailscale (MagicDNS) devices still send general DNS
+     not comparable to the old ~5 ms plain figure. IPv6 rungs (2026-10-27): `adguard6` (DoT at the v6
+     VIP) and `dnsmasq6` (dnsmasq at the LAN ULA). DoH fallback order: Cloudflare v6 → v4 → Quad9 v6 → v4
+     (portal list as IP literals; Alta's proxy runs `-4` but IPv6-literal URLs still work — tested). Tailscale (MagicDNS) devices still send general DNS
      plain to `.1` at home: Headscale can't hand clients an encrypted AdGuard upstream (ops checked
      2026-10-26); operator chose to leave it.
      ⭐ **Encrypted DNS for LAN devices (2026-10-26):** routedns also listens for **DoT on :853**

@@ -462,6 +462,7 @@ fi
 # that tells the truth about an ops-side outage.
 DNS_AGH_UP=0; DNS_AGH_MS=""; DNS_DOH_UP=0; DNS_DOH_MS=""
 DNS_RDNS_UP=0; DNS_RDNS_MS=""; DNS_DNSMASQ_UP=0; DNS_DNSMASQ_MS=""
+DNS_AGH6_UP=""; DNS_AGH6_MS=""; DNS_DNSMASQ6_UP=""; DNS_DNSMASQ6_MS=""   # unset ⇒ null (not probed)
 dns_probe() {   # $1=addr $2=port → sets DNS_UP / DNS_MS
     _s=$(date +%s%N)
     timeout 2 drill -Q -p "$2" example.com "@$1" >/dev/null 2>&1 && DNS_UP=1 || DNS_UP=0
@@ -479,7 +480,8 @@ DOT_Q='\000\035\020\222\001\000\000\001\000\000\000\000\000\000\007example\003co
 dot_probe() {   # $1=ip $2=tls name → sets DNS_UP / DNS_MS
     _f=/tmp/.dotprobe.$$; : > "$_f"
     _s=$(date +%s%N)
-    ( printf "$DOT_Q"; sleep 2 ) | timeout 2 openssl s_client -connect "$1:853" -servername "$2" \
+    case "$1" in *:*) _h="[$1]" ;; *) _h="$1" ;; esac
+    ( printf "$DOT_Q"; sleep 2 ) | timeout 2 openssl s_client -connect "$_h:853" -servername "$2" \
         -verify_hostname "$2" -verify_return_error -CAfile /etc/ssl/certs/ca-certificates.crt \
         -quiet 2>/dev/null > "$_f" &
     DNS_UP=0; _i=0
@@ -505,9 +507,18 @@ if command -v drill >/dev/null 2>&1; then
     dns_probe 127.0.0.1 "${DOH_PORT:-5054}"; DNS_DOH_UP=$DNS_UP; DNS_DOH_MS=$DNS_MS
     dns_probe 127.0.0.1 5300;      DNS_RDNS_UP=$DNS_UP;    DNS_RDNS_MS=$DNS_MS
     dns_probe 127.0.0.1 53;        DNS_DNSMASQ_UP=$DNS_UP; DNS_DNSMASQ_MS=$DNS_MS
+    # IPv6 rungs (2026-10-26): the same hops over IPv6, so a v6-only break shows. AdGuard
+    # over DoT at its v6 VIP (routedns's second pool), and dnsmasq at the LAN ULA (what
+    # DHCPv6 hands clients). Not probed (null) when the seam values are absent.
+    if [ -n "$LAN_DNS6" ] && [ -n "$LAN_DNS_DOT" ]; then
+        dot_probe "$LAN_DNS6" "$LAN_DNS_DOT"; DNS_AGH6_UP=$DNS_UP; DNS_AGH6_MS=$DNS_MS
+    fi
+    if [ -n "$LAN_ULA" ]; then
+        dns_probe "${LAN_ULA%/*}" 53; DNS_DNSMASQ6_UP=$DNS_UP; DNS_DNSMASQ6_MS=$DNS_MS
+    fi
 fi
 
-JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"flap":{"eth4":%s,"eth5":%s,"brlan":%s},"crc":{"eth5":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"l4_v":%s,"l4_a":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s,"w2_v":%s,"w2_a":%s},"dns":{"agh_up":%s,"agh_ms":%s,"doh_up":%s,"doh_ms":%s,"rdns_up":%s,"rdns_ms":%s,"dnsmasq_up":%s,"dnsmasq_ms":%s}}' \
+JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":%s,"squeeze":%s},"irq_edma":%s,"ct":{"n":%s,"max":%s,"v4":%s,"v6":%s,"wan4":%s,"top4":%s,"top6":%s,"stall4":%s},"if":%s,"carrier":{"eth4":%s,"eth5":%s,"brlan":%s},"flap":{"eth4":%s,"eth5":%s,"brlan":%s},"crc":{"eth5":%s},"addr":{"v4":%s,"gua":%s,"ula":%s,"wan3":%s},"ddm":{"l4_t":%s,"l4_tx":%s,"l4_rx":%s,"l4_v":%s,"l4_a":%s,"w2_t":%s,"w2_tx":%s,"w2_rx":%s,"w2_v":%s,"w2_a":%s},"dns":{"agh_up":%s,"agh_ms":%s,"doh_up":%s,"doh_ms":%s,"rdns_up":%s,"rdns_ms":%s,"dnsmasq_up":%s,"dnsmasq_ms":%s,"agh6_up":%s,"agh6_ms":%s,"dnsmasq6_up":%s,"dnsmasq6_ms":%s}}' \
     "$(jnum "$CPU_TOT")" "$(jnum "$CPU_IDLE")" "$(jnum "$CPU_SIRQ")" "$(jnum "$CPU_IOW")" \
     "$(jnum "$SN_D")" "$(jnum "$SN_S")" "$(jnum "$IRQ")" \
     "$(jnum "$CT")" "$(jnum "$CTMAX")" \
@@ -520,7 +531,9 @@ JSON=$(printf '{"cpu":{"tot":%s,"idle":%s,"sirq":%s,"iow":%s},"softnet":{"drop":
     "$(jnum "$DNS_AGH_UP")" "$(jnum "$DNS_AGH_MS")" \
     "$(jnum "$DNS_DOH_UP")" "$(jnum "$DNS_DOH_MS")" \
     "$(jnum "$DNS_RDNS_UP")" "$(jnum "$DNS_RDNS_MS")" \
-    "$(jnum "$DNS_DNSMASQ_UP")" "$(jnum "$DNS_DNSMASQ_MS")")
+    "$(jnum "$DNS_DNSMASQ_UP")" "$(jnum "$DNS_DNSMASQ_MS")" \
+    "$(jnum "$DNS_AGH6_UP")" "$(jnum "$DNS_AGH6_MS")" \
+    "$(jnum "$DNS_DNSMASQ6_UP")" "$(jnum "$DNS_DNSMASQ6_MS")")
 
 OUT=$(sqlite3 "$DB" "
 PRAGMA busy_timeout=5000;

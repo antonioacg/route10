@@ -93,16 +93,20 @@ SELECT
   'route10_optical_voltage_volts{module=\"W2\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_v'),'NaN') || char(10) ||
   'route10_optical_bias_ma{module=\"L4\"} ' || COALESCE(json_extract(json,'\$.ddm.l4_a'),'NaN') || char(10) ||
   'route10_optical_bias_ma{module=\"W2\"} ' || COALESCE(json_extract(json,'\$.ddm.w2_a'),'NaN') || char(10) ||
-  '# HELP route10_dns_up A LADDER, not one verdict: each resolver hop probed independently so the broken hop names itself. resolver=\"adguard\" 0 with the rest 1 means an ops-side outage AND that ad-blocking is silently OFF (we are serving from the DoH fallback). resolver=\"dnsmasq\" 1 does NOT prove LAN DNS is healthy - it answers the stable probe name from cache while the whole upstream chain is dead.' || char(10) ||
+  '# HELP route10_dns_up A LADDER, not one verdict: each resolver hop probed independently so the broken hop names itself. resolver=\"adguard\" 0 with the rest 1 means an ops-side outage AND that ad-blocking is silently OFF (we are serving from the DoH fallback). adguard/adguard6 = AdGuard over DoT at its v4/v6 VIP; dnsmasq6 = dnsmasq at the LAN ULA. resolver=\"dnsmasq\" 1 does NOT prove LAN DNS is healthy - it answers the stable probe name from cache while the whole upstream chain is dead.' || char(10) ||
   'route10_dns_up{resolver=\"adguard\"} '  || COALESCE(json_extract(json,'\$.dns.agh_up'),'NaN')     || char(10) ||
   'route10_dns_up{resolver=\"doh\"} '      || COALESCE(json_extract(json,'\$.dns.doh_up'),'NaN')     || char(10) ||
   'route10_dns_up{resolver=\"routedns\"} ' || COALESCE(json_extract(json,'\$.dns.rdns_up'),'NaN')    || char(10) ||
   'route10_dns_up{resolver=\"dnsmasq\"} '  || COALESCE(json_extract(json,'\$.dns.dnsmasq_up'),'NaN') || char(10) ||
+  'route10_dns_up{resolver=\"adguard6\"} '  || COALESCE(json_extract(json,'\$.dns.agh6_up'),'NaN')     || char(10) ||
+  'route10_dns_up{resolver=\"dnsmasq6\"} '  || COALESCE(json_extract(json,'\$.dns.dnsmasq6_up'),'NaN') || char(10) ||
   '# HELP route10_dns_query_ms Probe latency per hop. On failure this reads the 2000 ms probe CEILING, not a real measurement - gate on route10_dns_up before trusting it. Stable probe name, so this is liveness latency and NOT cold-lookup latency.' || char(10) ||
   'route10_dns_query_ms{resolver=\"adguard\"} '  || COALESCE(json_extract(json,'\$.dns.agh_ms'),'NaN')     || char(10) ||
   'route10_dns_query_ms{resolver=\"doh\"} '      || COALESCE(json_extract(json,'\$.dns.doh_ms'),'NaN')     || char(10) ||
   'route10_dns_query_ms{resolver=\"routedns\"} ' || COALESCE(json_extract(json,'\$.dns.rdns_ms'),'NaN')    || char(10) ||
-  'route10_dns_query_ms{resolver=\"dnsmasq\"} '  || COALESCE(json_extract(json,'\$.dns.dnsmasq_ms'),'NaN')
+  'route10_dns_query_ms{resolver=\"dnsmasq\"} '  || COALESCE(json_extract(json,'\$.dns.dnsmasq_ms'),'NaN') || char(10) ||
+  'route10_dns_query_ms{resolver=\"adguard6\"} '  || COALESCE(json_extract(json,'\$.dns.agh6_ms'),'NaN')     || char(10) ||
+  'route10_dns_query_ms{resolver=\"dnsmasq6\"} '  || COALESCE(json_extract(json,'\$.dns.dnsmasq6_ms'),'NaN')
 FROM samples ORDER BY ts DESC LIMIT 1;
 "
 

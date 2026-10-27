@@ -475,12 +475,16 @@ allowed-net = [\"192.168.0.0/16\", \"fd00::/8\", \"fe80::/10\", \"100.64.0.0/10\
 "
         fi
     fi
-    DOH_PREFER="1.1.1.1 cloudflare-dns.com 9.9.9.9 dns.quad9.net"
+    # Cloudflare first (steady 17–22 ms here; Quad9 spikes to 180–360 ms, measured
+    # 2026-10-27), alternating family within each provider: a dead family (v4 CGNAT
+    # brownout, v6 trouble) costs at most one step, a dead provider two. The portal list
+    # holds both families as IP literals; hosts are bracket-stripped below so v6 matches.
+    DOH_PREFER="2606:4700:4700::1111 1.1.1.1 2620:fe::fe 9.9.9.9 cloudflare-dns.com dns.quad9.net"
     doh_all=""; i=0
     while [ "$i" -lt 16 ] && doh_url=$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].resolver_url"); do
         doh_port=$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].listen_port" || true)
         if [ -n "$doh_port" ]; then
-            doh_all="$doh_all $(echo "$doh_url" | sed 's|^https://||; s|/.*||')=$doh_port"
+            doh_all="$doh_all $(echo "$doh_url" | sed 's|^https://||; s|/.*||; s|^\[||; s|\].*$||')=$doh_port"
         fi
         i=$((i+1))
     done
@@ -522,29 +526,45 @@ ecs-op = \"delete\"
         rdns_chain='"adguard"'
     fi
     # AdGuard over DoT when the contract names its endpoint ($LAN_DNS_DOT in seam.env; row
-    # agreed 2026-10-26: dns.net.aac.gd, 853/tcp, dialled by IP with that SNI, ops renews
-    # the cert). AdGuard answers ONE query at a time per connection and closes idle ones
-    # after 10 s (ops: hard-coded in its dnsproxy), so we hold 4 connections in a
-    # round-robin: a slow lookup stalls a quarter of the traffic instead of all of it.
-    # Idle-close reconnects tested clean (2026-10-26: after 12 s and 20 s idle, all OK,
-    # ~14 ms). A failure behaves as on plain :53: the fail-back moves to the DoH chain for
-    # reset-after. Unset ⇒ plain :53, as before.
+    # agreed 2026-10-26: dns.net.aac.gd, 853/tcp, dialled at the LAN VIPs with that SNI, ops
+    # renews the cert). AdGuard answers ONE query at a time per connection and closes idle
+    # ones after 10 s (ops: hard-coded in its dnsproxy), so each family is a round-robin of
+    # 4 connections: a slow lookup stalls a quarter of the traffic, not all of it. The two
+    # families (v4 VIP, then v6 VIP) sit in a fail-back, so a dead family costs one 1 s
+    # timeout and then traffic stays on the other for 10 s. Measured 2026-10-26 on a
+    # throwaway instance: v4 dead → first query 1.04 s then fast; v6 dead → no change; all
+    # AdGuard dead → general path reaches the DoH chain in 2.0 s, the split zone fails
+    # closed (SERVFAIL) in 2.0 s. Not "random": with everything dead it walks every member
+    # (4 s), too close to the client's ~5 s budget. Idle-close reconnects tested clean.
+    # Unset ⇒ plain :53, as before.
     if [ -n "$LAN_DNS_DOT" ]; then
-        rdns_adguard=""; rdns_ag_names=""
-        for k in 1 2 3 4; do
-            rdns_adguard="$rdns_adguard
-[resolvers.adguard-$k]
+        rdns_adguard=""; rdns_pools=""
+        for fam in 4 6; do
+            if [ "$fam" = 4 ]; then ag_boot="$LAN_DNS4"; else ag_boot="$LAN_DNS6"; fi
+            if [ -z "$ag_boot" ]; then continue; fi
+            ag_names=""
+            for k in 1 2 3 4; do
+                rdns_adguard="$rdns_adguard
+[resolvers.adguard-$fam-$k]
 address = \"$LAN_DNS_DOT:853\"
 protocol = \"dot\"
-bootstrap-address = \"$LAN_DNS4\"
+bootstrap-address = \"$ag_boot\"
 query-timeout = 1
 "
-            rdns_ag_names="$rdns_ag_names${rdns_ag_names:+, }\"adguard-$k\""
+                ag_names="$ag_names${ag_names:+, }\"adguard-$fam-$k\""
+            done
+            rdns_adguard="$rdns_adguard
+[groups.adguard-v$fam]
+type = \"round-robin\"
+resolvers = [$ag_names]
+"
+            rdns_pools="$rdns_pools${rdns_pools:+, }\"adguard-v$fam\""
         done
         rdns_adguard="$rdns_adguard
 [groups.adguard]
-type = \"round-robin\"
-resolvers = [$rdns_ag_names]
+type = \"fail-back\"
+resolvers = [$rdns_pools]
+reset-after = 10
 "
     else
         rdns_adguard="
