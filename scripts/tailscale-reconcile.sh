@@ -100,6 +100,19 @@ if [ "$DAEMON_DIRTY" = 1 ] || [ "$ROUTES_DIRTY" = 1 ]; then
     event "uci tailscale config converged (routes: $ROUTES + exit-node)"
 fi
 
+# `restart`: mesh-health asks for this when the daemon is up but its kernel
+# routes to peers are gone (2026-10-26: table 52 empty for ~20 h). Only a daemon
+# restart re-installs them. Refused while login_url disagrees with the contract,
+# because then the init would log the node out.
+RESTART_WHY="daemon-level uci changed"
+if [ "$1" = restart ]; then
+    if [ -n "$TS_LOGIN_URL" ] && [ "$(uci -q get tailscale.settings.login_url)" != "$TS_LOGIN_URL" ]; then
+        err "restart requested but login_url disagrees with the contract — NOT restarting (the init would log the node out)"
+    else
+        DAEMON_DIRTY=1; RESTART_WHY="restart requested (peer routes missing)"
+    fi
+fi
+
 # ── 2. daemon running + prefs match ───────────────────────────────────────────
 NEED_APPLY=0
 if ! pidof tailscaled >/dev/null 2>&1; then
@@ -109,7 +122,7 @@ elif [ "$DAEMON_DIRTY" = 1 ]; then
     # The init's reload->restart does NOT reliably re-apply procd params when
     # stop/start happen back-to-back (observed 2026-07-22: log flags ignored);
     # an explicit stop, settle, start does.
-    event "daemon-level uci changed — restarting tailscaled (stop/settle/start)"
+    event "$RESTART_WHY — restarting tailscaled (stop/settle/start)"
     /etc/init.d/tailscale stop >/dev/null 2>&1
     sleep 2
     /etc/init.d/tailscale start >/dev/null 2>&1

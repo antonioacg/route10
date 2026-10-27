@@ -57,11 +57,20 @@
 #      is why drift must not wait for somebody to report corrupted data. Heal:
 #      reconcile (its step 4 owns both flags).
 #
+#   8. PEER ROUTES — every mesh peer address must route via tailscale0. From
+#      2026-10-26 ~18–22Z table 52 was EMPTY for ~20 h while the daemon was
+#      Running and assertions 1-7 stayed green. Every reply to a peer took the
+#      default route out pppoe-wan3 in CLEARTEXT (DNS answers seen leaving), and
+#      the mesh return path was dead. tailscaled only re-programs routes on a
+#      config change, so it never noticed. Heal: reconcile `restart`
+#      (stop/settle/start), at most once per 30 min.
+#
 # Design notes:
 #   - Assertion 3's expected grants are DERIVED from AdvertiseRoutes (minus the
 #     exit-node defaults, which the filter fragments); assertion 2 is what makes
 #     that base trustworthy. Assert on filter DSTs, NEVER SRCs (srcs churn).
 #   - Heal = tailscale-reconcile.sh, at most once per run, then one re-check.
+#     Assertion 8 asks it for a daemon restart instead, rate-limited separately.
 #   - Clean no-op on a stick-only router (no tailscale installed).
 #
 # ⛔ DELIBERATELY ABSENT: a Headscale control-plane reachability assertion.
@@ -354,6 +363,46 @@ if [ -d /sys/class/net/br-lan ] && [ -d /sys/class/net/tailscale0 ]; then
         OFF_DRIFT=$(offload_drift)
         [ -z "$OFF_DRIFT" ] && event "healed: br-lan offloads back to gro=off tso=off" \
                             || err "heal FAILED: br-lan offloads still drifted:$OFF_DRIFT"
+    fi
+fi
+
+# ── 8. kernel routes to mesh peers (the cleartext-leak guard) ────────────────
+# See the header. Asserts the OUTCOME the kernel will act on (`ip route get`)
+# for every peer address in both families, so any path to an emptied table 52
+# is caught, whatever empties it. No peers ⇒ nothing to assert.
+peer_route_drift() {
+    $TS status --json 2>/dev/null | python3 -c '
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+for p in (d.get("Peer") or {}).values():
+    for ip in p.get("TailscaleIPs") or []: print(ip)
+' 2>/dev/null | while read -r ip; do
+        case "$ip" in *:*) R=$(ip -6 route get "$ip" 2>/dev/null) ;; *) R=$(ip -4 route get "$ip" 2>/dev/null) ;; esac
+        echo "$R" | grep -q " dev tailscale0 " && continue
+        D=$(echo "$R" | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)
+        printf ' %s->%s' "$ip" "${D:-unreachable}"
+    done
+}
+RESTART_STAMP=/var/run/mesh-health.ts-restart
+if [ -d /sys/class/net/tailscale0 ] && [ "$STATE" = Running ]; then
+    ROUTE_DRIFT=$(peer_route_drift)
+    # Routes land ~2 s after a (re)start by anyone else; confirm before acting.
+    [ -n "$ROUTE_DRIFT" ] && { sleep 5; ROUTE_DRIFT=$(peer_route_drift); }
+    if [ -n "$ROUTE_DRIFT" ]; then
+        warn "kernel routes to mesh peers do NOT use tailscale0:$ROUTE_DRIFT — replies to those peers leave via that path IN CLEARTEXT and the mesh return path is dead (2026-10-26 class: tailscaled stopped programming table 52); healing by restarting tailscaled"
+        LAST=$(cat "$RESTART_STAMP" 2>/dev/null || echo 0)
+        if [ $(( $(date +%s) - ${LAST:-0} )) -lt 1800 ]; then
+            err "heal DEFERRED: tailscaled was restarted for this less than 30 min ago and the routes are still missing — needs a human"
+        elif [ -x /cfg/scripts/tailscale-reconcile.sh ]; then
+            date +%s > "$RESTART_STAMP"
+            /cfg/scripts/tailscale-reconcile.sh restart >/dev/null 2>&1
+            for _i in 1 2 3 4 5 6 7 8 9 10; do
+                ROUTE_DRIFT=$(peer_route_drift); [ -z "$ROUTE_DRIFT" ] && break; sleep 2
+            done
+            [ -z "$ROUTE_DRIFT" ] && event "healed: tailscaled restarted, all mesh peers route via tailscale0 again" \
+                                  || err "heal FAILED: after a tailscaled restart, peers still off tailscale0:$ROUTE_DRIFT"
+        fi
     fi
 fi
 

@@ -285,7 +285,8 @@ telnet probes — they orphan the lock too.
   for ~20 h on 2026-08-14). Idempotent, quiet,
   **no connectivity gate / no revert** (the retired sideload hook's one-ping
   revert caused the 2026-07-22 outage). Called by post-cfg (every boot/reapply)
-  and mesh-health (heal). The old sideload (`/a/tailscale` + fork
+  and mesh-health (heal; `restart` arg = a stop/settle/start that is refused while
+  `login_url` disagrees with seam.env). The old sideload (`/a/tailscale` + fork
   `alta-route10-tailscale`) is RETIRED. Log: `/cfg/scripts/ts-reconcile.log`.
   Source: `scripts/tailscale-reconcile.sh`. See `project_route10_native_tailscale.md`
   and `docs/reference/portal-tailscale-migration.md` (ownership table).
@@ -355,14 +356,15 @@ telnet probes — they orphan the lock too.
   addresses — asserts the outcome, not the uci entry (2026-08-14 cloud-regen
   class: ~20 h of dead off-LAN split-DNS that every other assertion on both
   sides missed; heal via reconcile step 5).
-  ⛔ **Blind spot: it does NOT assert the kernel route to peers.** From 2026-10-26
-  ~18–22Z table 52 was EMPTY for ~20 h. Every reply to a mesh peer (DNS answers seen)
-  went out `pppoe-wan3` in cleartext into the ISP's CGNAT range, tailscale0 tx ≈ 0,
-  and every assertion above stayed quiet. Fixed 2026-10-27 by restarting tailscaled
-  through the firmware init (stop, settle, start). The tell is
-  `ip route get <peer 100.64.x>` → `dev pppoe-wan3`. ⚠ The router's own `tailscale
-  status` shows Self Online=false and PrimaryRoutes=None even when healthy; check
-  from a PEER.
+  (8) every mesh peer address, both families, routes via `tailscale0` (`ip route
+  get`), re-confirmed after 5 s. This is the 2026-10-26 class: table 52 was EMPTY
+  for ~20 h while the daemon was Running and (1)–(7) stayed green, so every reply to
+  a peer went out `pppoe-wan3` in cleartext (DNS answers seen) and the mesh return
+  path was dead. Heal: `tailscale-reconcile.sh restart` (a logout-guarded
+  stop/settle/start), at most once per 30 min (`/var/run/mesh-health.ts-restart`),
+  then `err` "heal DEFERRED". Verified 2026-10-27 by deleting a peer route: warn →
+  restart → healed in 10 s. ⚠ The router's own `tailscale status` shows Self
+  Online=false and PrimaryRoutes=None even when healthy; judge from a PEER.
   Log: `/cfg/scripts/mesh-health.log`. Source: `scripts/mesh-health.sh`.
   See `project_route10_tailscale_stale_binary_filter.md`, `project_route10_native_tailscale.md`.
 - `/cfg/post-cfg.sh` — runs after every Alta cloud-config reapply. Source:
@@ -515,7 +517,7 @@ telnet probes — they orphan the lock too.
      handler, so the kernel counts them in `rx_dropped` *before* netfilter.
      `rx_fifo_errors` stays 0, and this guard does not clear the alert.
      Same block, same day: **pins the stick's ARP entry** (`nud permanent`; the guard
-     filters IP, not ARP) and **takes eth4 out of lldpd**. LLDP carried the real chassis
+     filters IP, not ARP) and **takes the WAN ports eth3/eth4 out of lldpd**. LLDP carried the real chassis
      MAC, firmware, kernel and tailnet v6, and the stick's OMCI ME 79 filter (all zero)
      forwards bridge-management frames upstream.
   12. **`refuse-pap` in `/etc/ppp/options`** (2026-10-27). pppd takes the first PADO

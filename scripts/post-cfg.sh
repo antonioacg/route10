@@ -1008,18 +1008,19 @@ install_ontedge ip6tables
 # script follows every one of those.
 ip neigh replace "$STICK_IP" lladdr "$STICK_MAC" dev ont_mgmt0 nud permanent 2>/dev/null || true
 
-# ── LLDP: don't announce on the stick link ───────────────────────────────────
+# ── LLDP: don't announce on the WAN-facing ports ──────────────────────────────
 # lldpd's LLDPDU carries the real chassis MAC, firmware, kernel and our LAN and
 # tailnet management addresses. On eth4 the only intended listener is the
 # stick, and its ISP-pushed bridge filter (OMCI ME 79, all zero) forwards
-# bridge-management frames upstream onto the shared customer segment.
+# bridge-management frames upstream onto the shared customer segment. eth3 is
+# the same ISP path through the Huawei ONT (the manual fibre-swap backup).
 _lldp_if=$(uci -q get lldpd.config.interface 2>/dev/null || true)
-_lldp_want=$(echo "$_lldp_if" | tr ' ' '\n' | grep -vx eth4 | tr '\n' ' ' | sed 's/ *$//')
+_lldp_want=$(echo "$_lldp_if" | tr ' ' '\n' | grep -vxE 'eth3|eth4' | tr '\n' ' ' | sed 's/ *$//')
 if [ -n "$_lldp_if" ] && [ "$_lldp_if" != "$_lldp_want" ]; then
     uci set lldpd.config.interface="$_lldp_want"
     uci commit lldpd
     /etc/init.d/lldpd restart >/dev/null 2>&1 || true
-    event "lldpd: stopped announcing on eth4 (now: $_lldp_want)"
+    event "lldpd: stopped announcing on the WAN ports eth3/eth4 (now: $_lldp_want)"
 fi
 
 # ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
