@@ -493,10 +493,12 @@ telnet probes — they orphan the lock too.
   11. **Stick-link edge guard** (`RT10_ONTEDGE`, raw PREROUTING, both families,
      2026-10-27) — drops every IP packet arriving on `eth4`, and on `ont_mgmt0`
      everything except the stick (`192.168.1.1` **and** MAC `e0:da:90:c4:f8:85`; v6
-     has no exception). Why: on 2026-10-27 ~13:37Z the ISP stopped keeping
-     customers apart, so neighbours' broadcasts (PPPoE PADIs, DHCP, mDNS, whole home
-     LANs) reach eth4, and the `ont_mgmt` zone's input=ACCEPT exposed SSH, web and DoT
-     to them. PPPoE isn't IP, so the WAN never shows up as `-i eth4`. raw, so it doesn't
+     has no exception). Why: the ISP does not keep customers apart on the PPPoE VLAN,
+     so neighbours' broadcasts (PPPoE PADIs, DHCP, MikroTik MNDP, sometimes whole home
+     LANs; ~130 devices, ~4/s) reach eth4, and the `ont_mgmt` zone's input=ACCEPT
+     exposed SSH, web and DoT to them. Found 2026-10-27. **Not new**: eth4
+     `rx_broadcast` shows the same ~4/s since at least the 10-24 boot (the 13:37Z alert
+     was one bridged home joining). PPPoE isn't IP, so the WAN never shows up as `-i eth4`. raw, so it doesn't
      depend on tailscaled's jump order. Fails OPEN if flushed, which is the safe
      direction for the stick's 9099 dial-back, and is why the zone stays ACCEPT.
      ⚠ **Change `STICK_MAC` first if the stick's ELAN_MAC ever changes**, or every
@@ -504,6 +506,9 @@ telnet probes — they orphan the lock too.
      on eth4 is this leak, not a NAPI stall: Huawei `0xfffc` frames have no
      handler, so the kernel counts them in `rx_dropped` *before* netfilter.
      `rx_fifo_errors` stays 0, and this guard does not clear the alert.
+     ⚠ **Open risk: pppd takes the first PADO from anyone** — no AC/MAC pin and no
+     `refuse-pap`, so on a reconnect a neighbour could pose as the server and ask
+     for PAP (password in cleartext). The ISP uses CHAP.
 
 ## Observability standard
 

@@ -937,11 +937,13 @@ elif ! ip -4 addr show ont_mgmt0 | grep -q "192.168.1.2"; then
 fi
 
 # ── stick link: nothing but the stick gets in ────────────────────────────────
-# Everything here assumed the only other host on the eth4 wire is the stick. On
-# 2026-10-27 the ISP stopped keeping customers apart, and neighbours' broadcasts
-# (PPPoE discovery, DHCP, mDNS, whole home LANs: 116 MACs in 30 s) started
-# arriving on eth4. The ont_mgmt zone's input=ACCEPT then exposed SSH, web and
-# DoT to them on 192.168.1.2, plus both link-locals (ont_mgmt0 and eth4). Also
+# Everything here assumed the only other host on the eth4 wire is the stick. It
+# isn't: the ISP does not keep customers apart on the PPPoE VLAN. Neighbours'
+# broadcasts (PPPoE discovery, DHCP, MikroTik MNDP, sometimes whole home LANs;
+# ~130 devices) arrive on eth4 at ~4/s. Found 2026-10-27; eth4's rx_broadcast
+# shows the same rate since at least the 10-24 boot. The ont_mgmt zone's
+# input=ACCEPT exposed SSH, web and DoT to them on 192.168.1.2, plus both
+# link-locals (ont_mgmt0 and eth4). Also
 # FORWARD accepts anything routed out tailscale0 before any zone rule, so a
 # neighbour's packet to a tailnet address is forwarded whenever tailscaled has
 # its routes in table 52.
