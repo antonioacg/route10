@@ -936,6 +936,55 @@ elif ! ip -4 addr show ont_mgmt0 | grep -q "192.168.1.2"; then
     ifup ont_mgmt
 fi
 
+# ── stick link: nothing but the stick gets in ────────────────────────────────
+# Everything here assumed the only other host on the eth4 wire is the stick. On
+# 2026-10-27 the ISP stopped keeping customers apart, and neighbours' broadcasts
+# (PPPoE discovery, DHCP, mDNS, whole home LANs: 116 MACs in 30 s) started
+# arriving on eth4. The ont_mgmt zone's input=ACCEPT then exposed SSH, web and
+# DoT to them on 192.168.1.2, plus both link-locals (ont_mgmt0 and eth4). Also
+# FORWARD accepts anything routed out tailscale0 before any zone rule, so a
+# neighbour's packet to a tailnet address is forwarded whenever tailscaled has
+# its routes in table 52.
+#
+# Nothing of ours needs this path inbound. PPPoE is not IP, so the WAN shows up
+# as pppoe-wan3, never -i eth4. route10 only OPENS connections to the stick,
+# except the stick's nc dial-back on 9099 (pon-collect). So drop every IP packet
+# arriving on eth4, and on ont_mgmt0 everything but the stick, matched on IP AND
+# MAC: a 192.168.1.1 source is one ifconfig away for a neighbour, and some of
+# them run 192.168.1.x LANs.
+#
+# raw PREROUTING, not filter: it runs before conntrack and before INPUT/FORWARD,
+# so it does not depend on where tailscaled re-inserts its ts-* jumps. If it is
+# flushed it fails OPEN (back to the zone's ACCEPT), which is the safe direction
+# for the stick: a dropped dial-back hangs the stick's nc and wedges its single
+# CLI (pon-collect's 9099 note). That is also why the zone stays input=ACCEPT,
+# and why the DROP is only added once the stick's RETURN is in place.
+# ⚠ If the stick's LAN MAC ever changes (ELAN_MAC reflash), update STICK_MAC
+# FIRST, or every reply from the stick is dropped here.
+STICK_IP=192.168.1.1
+STICK_MAC=e0:da:90:c4:f8:85          # stick LAN MAC (docs/reference/onu-config.md)
+install_ontedge() {
+    # -w for the same xtables-lock reason as the connlimit guard below.
+    ipt="$1 -w 10"
+    # The marker hashes the stick identity, so editing it forces the rebuild.
+    mark="route10-ontedge-$(printf '%s %s' "$STICK_IP" "$STICK_MAC" | md5sum | cut -c1-8)"
+    $ipt -t raw -N RT10_ONTEDGE 2>/dev/null || true
+    if ! $ipt -t raw -S RT10_ONTEDGE 2>/dev/null | grep -q -- "$mark"; then
+        $ipt -t raw -F RT10_ONTEDGE 2>/dev/null || true
+        # v6: we never use it on this wire, so there is no exception to make.
+        if [ "$1" = ip6tables ] || $ipt -t raw -A RT10_ONTEDGE -i ont_mgmt0 \
+                -s "$STICK_IP" -m mac --mac-source "$STICK_MAC" -j RETURN 2>/dev/null; then
+            $ipt -t raw -A RT10_ONTEDGE -m comment --comment "$mark" -j DROP 2>/dev/null || true
+        fi
+    fi
+    for _if in eth4 ont_mgmt0; do
+        $ipt -t raw -C PREROUTING -i "$_if" -j RT10_ONTEDGE 2>/dev/null \
+            || $ipt -t raw -I PREROUTING 1 -i "$_if" -j RT10_ONTEDGE 2>/dev/null || true
+    done
+}
+install_ontedge iptables
+install_ontedge ip6tables
+
 # ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
 # A single LAN host running a P2P/torrent client opens ~1000+ simultaneous flows
 # (DHT + peer swarm). Each needs a NAT mapping on our SHARED CGNAT WAN IP. The

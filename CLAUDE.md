@@ -490,6 +490,20 @@ telnet probes — they orphan the lock too.
      that changes: AdGuard goes quiet for the client while its traffic continues.
      ⛔ **This does NOT bound the box's CGNAT footprint** — the burst goes to
      CloudFront, not to the AM endpoint. See the connlimit note below.
+  11. **Stick-link edge guard** (`RT10_ONTEDGE`, raw PREROUTING, both families,
+     2026-10-27) — drops every IP packet arriving on `eth4`, and on `ont_mgmt0`
+     everything except the stick (`192.168.1.1` **and** MAC `e0:da:90:c4:f8:85`; v6
+     has no exception). Why: on 2026-10-27 ~13:37Z the ISP stopped keeping
+     customers apart, so neighbours' broadcasts (PPPoE PADIs, DHCP, mDNS, whole home
+     LANs) reach eth4, and the `ont_mgmt` zone's input=ACCEPT exposed SSH, web and DoT
+     to them. PPPoE isn't IP, so the WAN never shows up as `-i eth4`. raw, so it doesn't
+     depend on tailscaled's jump order. Fails OPEN if flushed, which is the safe
+     direction for the stick's 9099 dial-back, and is why the zone stays ACCEPT.
+     ⚠ **Change `STICK_MAC` first if the stick's ELAN_MAC ever changes**, or every
+     reply from the stick is dropped. ⚠ The ops alert `Route10DeviceRxDropsSustained`
+     on eth4 is this leak, not a NAPI stall: Huawei `0xfffc` frames have no
+     handler, so the kernel counts them in `rx_dropped` *before* netfilter.
+     `rx_fifo_errors` stays 0, and this guard does not clear the alert.
 
 ## Observability standard
 
