@@ -264,6 +264,19 @@ uci set firewall.ont_mgmt.forward='REJECT'  # no LAN forwarding (Level 1)
 
 uci commit firewall
 
+# ── pppd: never send the PPPoE password in the clear ─────────────────────────
+# The ISP's PPPoE VLAN does not keep customers apart (see the stick-link guard
+# below), so at any reconnect a neighbour can answer our PADI before the BNG
+# and ask for PAP, which would hand them the password in cleartext. The BNG
+# authenticates us with CHAP (pppd: "CHAP authentication succeeded"), so
+# refusing PAP costs nothing. It goes in the global options file, not netifd's
+# pppd_options: pppd reads the file on every start, so it applies from the next
+# (re)connect, whereas a uci change on wan/wan3 makes netifd restart the
+# session, i.e. bounces the WAN. Placed before the MAC override's network
+# reload so that redial picks it up. / is tmpfs, so it's re-added every run.
+# Not covered: a boot-time dial that starts before this script runs.
+grep -qx 'refuse-pap' /etc/ppp/options 2>/dev/null || echo 'refuse-pap' >> /etc/ppp/options
+
 # ── eth4 MAC override (fresh identity for stuck-BNG-session recovery) ─────
 # Brazilian residential BNGs key the PPPoE session by GPON SN + dialing MAC.
 # When our pppd terminates without a PADT (e.g. LCP-echo failure during an
@@ -986,6 +999,28 @@ install_ontedge() {
 }
 install_ontedge iptables
 install_ontedge ip6tables
+
+# Pin the stick's ARP entry. The guard above filters IP, not ARP, so a forged
+# reply for 192.168.1.1 from the shared wire would point our stick polling at a
+# neighbour. Their IP replies are dropped above, so that costs the DDM and
+# pon-collect path rather than credentials; pinning removes even that. Runtime
+# state, lost only when ont_mgmt0 is recreated (a network reload), and this
+# script follows every one of those.
+ip neigh replace "$STICK_IP" lladdr "$STICK_MAC" dev ont_mgmt0 nud permanent 2>/dev/null || true
+
+# ── LLDP: don't announce on the stick link ───────────────────────────────────
+# lldpd's LLDPDU carries the real chassis MAC, firmware, kernel and our LAN and
+# tailnet management addresses. On eth4 the only intended listener is the
+# stick, and its ISP-pushed bridge filter (OMCI ME 79, all zero) forwards
+# bridge-management frames upstream onto the shared customer segment.
+_lldp_if=$(uci -q get lldpd.config.interface 2>/dev/null || true)
+_lldp_want=$(echo "$_lldp_if" | tr ' ' '\n' | grep -vx eth4 | tr '\n' ' ' | sed 's/ *$//')
+if [ -n "$_lldp_if" ] && [ "$_lldp_if" != "$_lldp_want" ]; then
+    uci set lldpd.config.interface="$_lldp_want"
+    uci commit lldpd
+    /etc/init.d/lldpd restart >/dev/null 2>&1 || true
+    event "lldpd: stopped announcing on eth4 (now: $_lldp_want)"
+fi
 
 # ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
 # A single LAN host running a P2P/torrent client opens ~1000+ simultaneous flows
