@@ -164,3 +164,18 @@ looked until the third round of questioning.
 - **Verdict:** CONFIRMED, not WiFi. 1.5i dropped built-in Tailscale, so route10 left the mesh. Tailnet clients send `*.net.aac.gd` to route10's tailnet IPs (Headscale split DNS); those names timed out while the network itself was fine (ops-measured on the operator's Mac). A client using route10 as exit node loses everything. Restored 22:16Z via the portal Tailscale card.
 - **Evidence gap:** the detectors were silent for 15 h — mesh-health exited 0 on "binary absent", and ops' tag check stays green on a logged-out node. Both are fixed router-side.
 - **New rule:** on a "WiFi unusable" report after a firmware update, check `tailscale status` on route10 first. A tailnet client loses internal names (or all internet, with an exit node) while every LAN/WAN probe reads healthy.
+
+## 2026-10-29 20:53:35Z → ongoing at 21:09Z — "Is internet down?" (WAN outage, PPP flapping every 20–40 s)
+- **Reported:** "Check what's going on with my network please. Is internet down?" (asked 21:00Z; the user was already on the iPhone hotspot, gateway 172.20.10.1)
+- **Vantage:** whole house; WAN path (route10 → ODI stick → fiber)
+- **Measured:**
+  - 20:53:35Z netifd "wan3 link connectivity loss". eth4 carrier_changes went 175 → 299 by 21:04:45Z, 48 flaps in 8 min.
+  - pppd: PADO timeouts and "Unable to complete PPPoE Discovery". Sessions that do come up (CHAP OK every time) drop within seconds; the live watch 21:03:39–21:04:49Z saw 4 drops.
+  - Stick pon rows: O5 until 20:53, **O3 at 20:54**, O5 again at 20:57 with ranging_req 1/1/3. Stick uptime continuous (16.2 d, NO reboot).
+  - Stick raw 20:54: **DS PLOAM CRC 172/243**, **BWMAP CRC 11,736/528k** (+2,488 invalid), GEM LOS 2,809, HEC-corrected 300k, DS-ETH FCS 67. LOS/LOF/SF/SD all clear, BIP 0, FEC 0. All of these were **0 for the 24 h before 20:53Z**: abrupt onset, not degradation.
+  - DDM flat throughout: Rx −15.1 dBm, Tx +2.3 dBm, 3.23 V, 13.7 mA, 42 °C.
+  - Neighbour broadcasts on eth4 stayed ~200/min, with no re-dial (PADI) storm, so the rest of the segment does not look reset.
+  - Our config: no change since 10-27, no cloud apply or post-cfg before the onset; CHAP succeeds (refuse-pap is irrelevant).
+- **Verdict:** confirmed WAN outage caused by **downstream signal corruption at our ONU with normal optical power**. Mechanism of the corruption NOT known. Our drop/connector/stick is SUSPECTED over an OLT-wide event, because neighbours aren't re-dialling; inference only.
+- **Evidence gap:** a second ONU on the same fiber to A/B against (the Huawei is the swap target), and visibility of the OLT side.
+- **New rule:** ONU O5→O3 plus DS PLOAM/BWMAP CRC errors with flat Rx power ⇒ a PON-layer fault, not routing or config. The neighbour PADI rate (`route10_eth_broadcast_packets_total{dir=rx}`) separates segment-wide from local-only.
