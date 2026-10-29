@@ -176,6 +176,6 @@ looked until the third round of questioning.
   - DDM flat throughout: Rx −15.1 dBm, Tx +2.3 dBm, 3.23 V, 13.7 mA, 42 °C.
   - Neighbour broadcasts on eth4 stayed ~200/min, with no re-dial (PADI) storm, so the rest of the segment does not look reset.
   - Our config: no change since 10-27, no cloud apply or post-cfg before the onset; CHAP succeeds (refuse-pap is irrelevant).
-- **Verdict:** confirmed WAN outage caused by **downstream signal corruption at our ONU with normal optical power**. Mechanism of the corruption NOT known. Our drop/connector/stick is SUSPECTED over an OLT-wide event, because neighbours aren't re-dialling; inference only.
+- **Verdict:** confirmed WAN outage caused by **downstream signal corruption at our ONU with normal optical power**. Mechanism of the corruption NOT known. ⚠ RETRACTED 21:20Z: "no neighbour re-dial storm ⇒ local" does NOT hold. If our whole PON branch failed, those neighbours' ONUs are down too and their PADIs never reach the OLT, so the storm would be invisible. The evidence does not separate our stick from an ISP-side fault on our branch. The operator also notes nobody touched the fiber, which argues against a connector fault.
 - **Evidence gap:** a second ONU on the same fiber to A/B against (the Huawei is the swap target), and visibility of the OLT side.
 - **New rule:** ONU O5→O3 plus DS PLOAM/BWMAP CRC errors with flat Rx power ⇒ a PON-layer fault, not routing or config. The neighbour PADI rate (`route10_eth_broadcast_packets_total{dir=rx}`) separates segment-wide from local-only.
