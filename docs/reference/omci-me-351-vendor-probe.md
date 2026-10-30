@@ -1,5 +1,21 @@
 # OMCI ME 351 — the vendor ME our OLT polls and we cannot answer
 
+## ✅ RESOLVED 2026-10-30 — it is Huawei's "Ethernet PM4" per-UNI-port Ethernet PM ME
+
+The operator verified this **on a real EG8145X6-10 unit** (2026-10-30; device
+query and evidence archived in the operator's private storage — outside this
+repo): ME 351 is named **`Ethernet PM4`**, 4 instances (0x0101–0x0104 = the 4
+UNI ports), instance size 82 bytes; only the in-use port's instance carries
+non-zero counters. The paywalled-Scribd hypothesis below is hereby
+**confirmed from the device** — 351 is a Huawei per-port Ethernet
+packet-counter PM ME, which is exactly why it rides the 15-min PM sweep.
+Sibling vendor MEs, also named by the device: `Me(350)(ONT image mode)`,
+`Me(370)(HW extended PPT)`, `Me(373)(extend ont2 abi)` — the same {350,370,373}
+set `realtek-libohwtc` implements, plus 351 which it does not. The operator
+also holds a full 148-ME named MIB dump of the real HGU. Potential follow-up
+if the retransmits ever matter: a `mib_Me351.so` for the stick's ohwtc set
+(Ethernet PM counters, 4 instances keyed by UNI port).
+
 Researched 2026-08-11, after the OMCI log capture was fixed and the very first
 real cycle surfaced it. Confidence is marked per claim: **[CONFIRMED]** with a
 source, or **[UNVERIFIED]**. The unverified parts are the interesting ones and
@@ -62,7 +78,8 @@ Huawei's, which is exactly `{350, 370, 373}`:
   *"for Telekom Malaysia … **ME 351 is needed which only exist on Nijika Fw**"*.
   No public Nijika source or changelog, and it never says who owns 351.
 
-**[UNVERIFIED — leading hypothesis]** A Huawei ONT console log names a handler
+**[CONFIRMED 2026-10-30 from the device itself — see RESOLVED header]**
+*(was: [UNVERIFIED — leading hypothesis])* A Huawei ONT console log names a handler
 `omci_me_me351_get_curr_op`, printing `PortId`, `RxuniPktCnt`, `RxmutiPktCnt`,
 `RxbroadPktCnt`, `TxuniPktCnt`, `TxmutiPktCnt`, `TxbroadPktCnt`. **The only
 source is a paywalled Scribd document (id 766570762) that was never opened** —
@@ -134,10 +151,11 @@ blocked.
 `"351" repo:Anime4000/RTL960x` returns 0 while Discussion #328 demonstrably
 contains it. A false negative that looks like an answer.
 
-## The one lead that would settle it
+## The one lead that would settle it — no longer needed
 
-Scribd document **766570762** ("Huawei OMCI consolelog") — a Huawei ONT's own
-log, which would confirm both the counter semantics and Huawei ownership.
+~~Scribd document **766570762** ("Huawei OMCI consolelog")~~ — settled
+2026-10-30: the operator queried a real EG8145X6-10, which names ME 351
+`Ethernet PM4`. The paywalled doc is now moot.
 
 ## How we monitor it now
 
