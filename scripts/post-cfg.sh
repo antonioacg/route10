@@ -277,6 +277,31 @@ uci commit firewall
 # Not covered: a boot-time dial that starts before this script runs.
 grep -qx 'refuse-pap' /etc/ppp/options 2>/dev/null || echo 'refuse-pap' >> /etc/ppp/options
 
+# ── pppd: stop the firmware's PPP-up hook from reloading the network ─────────
+# Alta's /etc/ppp/ip-up.d/ppp-up.sh runs `cfg -r vpns` whenever the PPP IP
+# changes, which is every session here (CGNAT hands out a new one each time).
+# That cfg run diffs the cloud's /etc/config/network against the live one,
+# counts this script's edits (eth4 MAC, LAN ULA, ip6class) as changes and
+# reloads the network. The eth4 MAC change restarts wan3, the next session gets
+# a new IP, and it repeats about every 10 s while CHAP succeeds each time.
+# 2026-10-30 it held the WAN down for 26 min after the fiber went back to the
+# stick. Loki shows the same loop on 1.5l (10-24 after the firmware push, and
+# 10-29), so it isn't new to 1.5m. Sometimes it stops after one round and
+# sometimes it runs for minutes. We use no Alta VPN (Tailscale has its own
+# reconcile), so only that call goes; the hook's DDNS refresh stays. / is
+# tmpfs, so this re-applies every run. If a session comes up before this
+# runs at boot, the loop can go one round; that round's cfg apply runs this
+# script, which stops it.
+PPPUP=/etc/ppp/ip-up.d/ppp-up.sh
+PPPUP_MARK='disabled by route10 post-cfg.sh'
+if grep -q '^[[:space:]]*cfg -r vpns[[:space:]]*$' "$PPPUP" 2>/dev/null; then
+    sed -i "s/^\([[:space:]]*\)cfg -r vpns[[:space:]]*\$/\1: # cfg -r vpns  -- $PPPUP_MARK/" "$PPPUP" || true
+    grep -q "$PPPUP_MARK" "$PPPUP" && event "ppp-up.sh: 'cfg -r vpns' disabled (it reloads the network on every PPP IP change)"
+fi
+# Loud if the hook changed shape: a reworded call would bring the loop back.
+grep -q "$PPPUP_MARK" "$PPPUP" 2>/dev/null \
+    || warn "ppp-up.sh: no 'cfg -r vpns' line to disable and no route10 marker — the firmware hook changed; check that a PPP reconnect doesn't loop"
+
 # ── eth4 MAC override (fresh identity for stuck-BNG-session recovery) ─────
 # Brazilian residential BNGs key the PPPoE session by GPON SN + dialing MAC.
 # When our pppd terminates without a PADT (e.g. LCP-echo failure during an

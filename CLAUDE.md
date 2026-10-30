@@ -546,6 +546,15 @@ telnet probes — they orphan the lock too.
      10 min, plus a global cap. SSH isn't here because dropbear already logs every
      connection (`{job="route10", syslog_app="dropbear"}`, 30 d). Live-tested: the
      Mac's https hit logged, LAN DoT stayed silent.
+  14. **Disables `cfg -r vpns` in Alta's `/etc/ppp/ip-up.d/ppp-up.sh`** (2026-10-30).
+     The hook runs it on every PPP IP change (every session, CGNAT). cfg then sees this
+     script's network edits (eth4 MAC, ULA, ip6class) as changes and reloads the
+     network, so wan3 restarts with a new IP and it loops about every 10 s while CHAP
+     succeeds each time. It held the WAN down 26 min on 10-30, and Loki shows the
+     same loop on 1.5l (10-24 after the push, and 10-29), so it isn't new to 1.5m.
+     Tell: `cfg: Found interface config changes` right after each `pppd: local IP`.
+     ⚠ It `warn`s if the hook has neither the stock line nor our marker, i.e. the
+     firmware changed the hook and the loop may be back.
 
 ## Observability standard
 
