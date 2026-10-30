@@ -324,8 +324,9 @@ telnet probes — they orphan the lock too.
   re-read 2026-10-26), so every agent apply drops it and reconcile re-adds it — fine
   when applies are rare, churn when they loop.
   Reported upstream 2026-10-26: forum.alta.inc/t/7116/2 (the loop) and /t/7030/2 (+1 on the
-  IPv6-subnets FR). Check for a staff reply before the next firmware; once Alta fixes the
-  feed, the stamp backup can be deleted.
+  IPv6-subnets FR). ✅ **Fixed upstream in 1.5m (pushed 2026-10-30 06:52Z):** `netbird/0.80.0-1`
+  returns 200, apkg refreshed and wrote its own stamp at boot, and the loop did not return (verified).
+  The hand-written stamp is moot; `.stamp.bak-20261026` can be deleted. 1.5m ships tailscale 1.104.4.
 - `/cfg/scripts/heartbeat.sh` — `*/2` cron, no daemon. **External dead-man → healthchecks.io**
   (LIVE 2026-08-09, verified green both ends). Sends **two** checks: *Router + internet*
   (unconditional) and *Router's home network* (`lan_ok`). Counterpart to ops's *Home server
