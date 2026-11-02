@@ -8,8 +8,12 @@ which this note supersedes on the "no provider exists" question.*
 
 ## Verdict
 
+> **⛔ NOT ADOPTED — operator decision, 2026-11-02.** No portal Save and no
+> `terraform apply` was ever made against this site, and none is planned. This note
+> stays as the record of the evaluation, not a plan.
+
 **Yes, and it fits our constraints better than anything we would have built.** Not
-adopted yet — see "What is not done". The decisive evidence is not the README, it
+adopted — see the decision above and "What is not done". The decisive evidence is not the README, it
 is that the provider's own compile-mapping test **passes against our actual
 router** (below). Everything else is a reading; that is a measurement.
 
@@ -57,6 +61,10 @@ construction) against our live site and router:
 | Terraform 1.14+ required | Was a hand-placed 1.6.6 binary from Dec 2023 at `~/.local/bin` (PATH 50). Now `terraform = "latest"` in the chezmoi-managed mise config → **1.16.3** via mise shim (PATH 3), which shadows the old binary without deleting it. |
 
 Firmware minimum is 1.5g; we run exactly 1.5g.
+
+> **2026-11-02:** the router now runs **1.5m**. Everything above was measured on
+> 1.5g and has not been repeated. If this is ever revisited, re-run the live tests
+> first; the compile mapping is the result most likely to move with firmware.
 
 ## Operational gotchas (both cost a failed run)
 
@@ -140,16 +148,25 @@ interchangeable for `set -e` semantics and the target is the only one that count
 
 ## What is not done
 
-- **Not adopted.** No cloud write has been made through it; no `terraform apply`
-  has ever run against this site.
+- **Not adopted — operator decision 2026-11-02.** No cloud write has been made
+  through it; no `terraform apply` has ever run against this site.
 - The provider's safety-rails section has not been read closely. Do that before
   pointing it at the live router — the gated transaction is the whole reason this
   is safe, and an unexamined safety mechanism is an assumption.
+  > *2026-09-18, later the same day:* read. Five rails: no write while
+  > `md5(config.json) != hash.txt` (they matched at the time), apply re-reads the
+  > cloud and refuses on concurrent change, `read_only` refuses any cloud write,
+  > delete removes from state only, and cleanup survives an interrupted apply.
 - The portal-capability check that would turn the "~11 uci sections" row into an
   exact list needs `alta-portal-recon` (blocked while the playwriter MCP server
   fails to connect).
+  > *2026-09-18, later the same day:* ran via `npx playwriter@latest` (the MCP
+  > server was never needed). Results are in the `alta-portal-recon` skill.
 
 ## Upstream contributions available
+
+> **2026-11-02: not filed — dropped by operator decision**, along with the two
+> hook-section items (the stale `MarkdownDescription` and the missing `|| true`).
 
 Both are things we verified live and their schema does not record:
 

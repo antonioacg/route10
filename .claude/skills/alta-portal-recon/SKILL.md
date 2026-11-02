@@ -202,9 +202,12 @@ means "never configured", NOT "unsupported."**
    (`Any`, `Custom`; read from the DOM, see the technique note below).
    ⭐ **BUT see Q2 — a group reference is a third path and it changes the answer.** **This is the only reason the router-side v6 pinhole exists**: our ISP
    /64 rotates (3× in 2 days), so a literal rule goes stale within hours and repairing
-   it costs a WAN flap. **If this gains a variable/host reference, RETIRE the router
-   script to the portal.** A community request for exactly this was filed 2024-11-16
-   and has **never been answered** — this is the highest-value thing to endorse.
+   it costs a WAN flap. A community request for a prefix-relative destination was
+   filed 2024-11-16 and has never been answered.
+   ⛔ **DECIDED 2026-11-02 (operator): `RT10_P2P6` STAYS ROUTER-SIDE. Do not propose
+   moving it to the portal**, by hostname group or otherwise — see the decision note
+   under Q2. This bullet used to say "if this gains a host reference, retire the
+   router script"; Q2 found exactly that, and the move was rejected on the merits.
 2. ✅ **RESOLVED 2026-09-18 — Firewall Groups ARE the path, client-side verified.**
    Three separate facts, each read out of the served bundle or DOM, no write:
    - **The `ipv6-net` type exists.** Type menu is exactly
@@ -223,8 +226,27 @@ means "never configured", NOT "unsupported."**
    ⇒ **A v6 WAN→LAN accept whose destination is a NAME is expressible in the portal.**
    ⚠ **Still unverified and it is the load-bearing half:** that the *backend* resolves
    the hostname and refreshes it (all evidence above is client-side), and how fast it
-   tracks a rotation. Confirming needs a Save = a write = a WAN flap. Do not "just try
-   it" — decide deliberately, and see the retirement note in the workaround table.
+   tracks a rotation. Confirming needs a Save = a write = a WAN flap.
+   ⛔ **DECISION 2026-11-02 (operator): do NOT use this to retire `RT10_P2P6`.** The
+   capability is real; using it for the pinhole is a bad trade:
+   - **Today the router does it better.** It sees the rotation and rewrites its own
+     rule in the same tick, deleting the stale one, so an accept can never point into
+     a prefix someone else now owns. Local, no external dependency, no cloud write.
+   - **The portal version is a longer, weaker chain:** router → public DNS update
+     (machinery we don't have) → DNS propagation → Alta's cloud re-resolves on an
+     unverified schedule → cloud push → router applies. Any lagging hop leaves exactly
+     the stale accept the router version prevents, and each rotation costs a cloud
+     write, i.e. a WAN bounce.
+   - **The name would have to be PUBLIC**, because Alta's cloud does the resolving. The
+     split-horizon zone deliberately answers a `192.0.2.1` stub publicly, so it would
+     resolve to the stub and silently accept nothing. And the destination is the
+     host's own EUI-64 address, so publishing it publishes the whole host, not a
+     service — today it is unfindable without scanning a /64.
+   - "The portal **can** express it" ≠ "the portal **should** own it". Portal-first
+     exists so the dashboard stays truthful, not to move things the router does better.
+   Re-open only if the portal gains a destination that **tracks a LAN client or a
+   prefix-relative address itself** (no public name), and only by operator decision.
+   Hostname groups stay useful where the destination naturally IS a public name.
 3. ✅ **Port-forward/NAT** — v4-shaped, no IP-version selector, no IPv6. Closed as a
    path for v6 work; v6 needs a Filter rule, not DNAT.
 4. **Is there an API write path that avoids a full reapply?** UNKNOWN, and no public
@@ -275,7 +297,7 @@ Mark each as `portal-native now` / `still a gap (field X missing)` / `not checke
 | Router-side workaround | The portal question to actually test |
 |---|---|
 | ONU/ONT **management path** (MACVLAN on the WAN port + its own firewall zone) | Can `Networks` create a second L3 address / management interface on a WAN port? Can `Firewall → Firewall Groups`/zones scope it? |
-| **v6 inbound pinhole** for the p2p listener | See open question 1 — needs a non-literal destination |
+| **v6 inbound pinhole** for the p2p listener | ⛔ **Settled 2026-11-02: stays router-side by operator decision.** Expressible via an `ipv6-net` hostname group (Q2), rejected on the merits (Q2 decision note). Not a gap to close. |
 | **LAN ULA** as a static br-lan address | Does `Networks` expose a ULA / secondary IPv6 prefix field? |
 | **ULA /64 in Tailscale AdvertiseRoutes** (`tailscale-reconcile.sh` `add_list`) | ⛔ **ANSWERED 2026-10-26 (served bundle `main.fe70e2e6.js`): still a gap.** The Route10 → VPN → Tailscale card flags the subnet list invalid if any entry fails `ipWithNetRegex` = `^(?:<IPv4>/<0-32>\|0.0.0.0/<1-32>)$`, IPv4 only. Keep the reconcile add. Cost: every agent apply drops it (see CLAUDE.md, tailscale-reconcile ⛔ note). |
 | **pppd LCP keepalive** loosened | Any WAN tuning fields? |
