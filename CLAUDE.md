@@ -569,6 +569,18 @@ telnet probes — they orphan the lock too.
      Tell: `cfg: Found interface config changes` right after each `pppd: local IP`.
      ⚠ It `warn`s if the hook has neither the stock line nor our marker, i.e. the
      firmware changed the hook and the loop may be back.
+  15. **LAN → `100.64.0.0/10` fence** (`RT10_LANCGNAT`, mangle PREROUTING, v4, 2026-11-06,
+     ops ask). Drops NEW connections from `br-lan+` into 100.64/10. That range covers the router's
+     mesh address (web UI, SSH and quad-100 were reachable from any LAN host), its WAN address,
+     every mesh peer through the subnet route, and other ISP customers in CGNAT space. LAN-side
+     policies that treat 100.64/10 as internet (the cluster's pod egress) got around the LAN block
+     that way. Mesh nodes at home are unaffected: they arrive on tailscale0. Replies to mesh-initiated
+     flows are ESTABLISHED and pass. It's in mangle because tailscaled's `ts-forward` ACCEPTs
+     `-o tailscale0` above anything we'd put in filter FORWARD. Logs `route10.lan-cgnat block: `
+     once per source per 10 min. Enforced without a log-only stage (operator call); before
+     enforcing, the access log showed no LAN user of the range except the probes. Verified:
+     LAN path → 100.64.0.2 :443/:22/ping all fail; mesh path, LAN web UI, v4 internet and :9100
+     unaffected. Ops wants the invariant in `NETWORK-CONTRACT.md` (they propose the wording).
 
 ## Observability standard
 

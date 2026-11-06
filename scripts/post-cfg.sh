@@ -1085,6 +1085,35 @@ install_mgmtlog() {
 install_mgmtlog iptables  mgmt4
 install_mgmtlog ip6tables mgmt6
 
+# ── LAN → 100.64.0.0/10 fence ────────────────────────────────────────────────
+# 2026-11-06, ops ask. A LAN host could reach the router's web UI and SSH on its
+# mesh address (100.64.0.2) and its WAN address (CGNAT space too), any mesh peer
+# through the subnet route, and other ISP customers in the CGNAT range. LAN-side
+# policies that treat 100.64/10 as internet (the cluster's pod egress among them)
+# get around the LAN block that way. Nothing on the LAN needs it: every local
+# service answers on the LAN address, and mesh nodes at home reach the mesh through
+# their own tunnel, which arrives on tailscale0, not br-lan. So NEW connections from
+# the LAN bridges into 100.64/10 are dropped; replies to mesh-initiated flows are
+# ESTABLISHED and pass. mangle PREROUTING, because tailscaled's ts-forward ACCEPTs
+# everything leaving via tailscale0 near the top of filter FORWARD, and nothing in
+# mangle ACCEPTs before us. One log line per source per 10 min plus a global cap,
+# prefix "route10.lan-cgnat block: ". v4 only: the tailnet v6 range is ULA.
+install_lancgnat() {
+    ipt="iptables -w 10"
+    mark="route10-lancgnat-l1"
+    $ipt -t mangle -N RT10_LANCGNAT 2>/dev/null || true
+    if ! $ipt -t mangle -S RT10_LANCGNAT 2>/dev/null | grep -q -- "$mark"; then
+        $ipt -t mangle -F RT10_LANCGNAT 2>/dev/null || true
+        $ipt -t mangle -A RT10_LANCGNAT -m recent --name lancgnat --rcheck --seconds 600 -j DROP 2>/dev/null || true
+        $ipt -t mangle -A RT10_LANCGNAT -m recent --name lancgnat --set -m limit --limit 60/hour --limit-burst 20 \
+            -j LOG --log-prefix "route10.lan-cgnat block: " --log-level notice 2>/dev/null || true
+        $ipt -t mangle -A RT10_LANCGNAT -m comment --comment "$mark" -j DROP 2>/dev/null || true
+    fi
+    $ipt -t mangle -C PREROUTING -i br-lan+ -d 100.64.0.0/10 -m conntrack --ctstate NEW -j RT10_LANCGNAT 2>/dev/null \
+        || $ipt -t mangle -I PREROUTING 1 -i br-lan+ -d 100.64.0.0/10 -m conntrack --ctstate NEW -j RT10_LANCGNAT 2>/dev/null || true
+}
+install_lancgnat
+
 # ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
 # A single LAN host running a P2P/torrent client opens ~1000+ simultaneous flows
 # (DHT + peer swarm). Each needs a NAT mapping on our SHARED CGNAT WAN IP. The
