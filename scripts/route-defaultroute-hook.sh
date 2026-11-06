@@ -27,6 +27,9 @@
 # leave table 3 to mwan3. The `main` miss is the whole bug; fixing it lets
 # mwan3rtmon repopulate table 3 on its own.
 #
+# The cron path also heals mwan3 POLICY DRIFT (heal_mwan3_drift below): a WAN the
+# routing policy still counts as online while its own tracker says offline.
+#
 # `/` is tmpfs — post-cfg.sh installs the ip-up.d symlink and the cron line each
 # boot. Log (persistent; logread is volatile here): /cfg/scripts/route-hook.log
 
@@ -57,6 +60,48 @@ fix_iface() {
     fi
 }
 
+# mwan3 policy drift. Alta's mwan3track (1.5j+, "WAN down in traffic graphs")
+# records an outage when it starts before the WAN is up, then RESUMES it on the
+# first connect via `disconnected 1`, which writes STATUS=offline and returns
+# WITHOUT the hotplug event. The ifup had already put the WAN in the policy
+# (initial_state=online), and a WAN that never passes tracking never sends
+# another event, so the policy keeps a dead uplink for good. Hit at boot on
+# 2026-11-04 and 11-06: the fibreless Huawei on eth0 (wan2) outranks the stick,
+# so ALL v4 went to it while v6 (no mwan3 policy) worked. Heal: send the event
+# the tracker skipped once the mismatch has held for two runs (a real transition
+# clears within a second), then drop that WAN's marked connections — the
+# connmark keeps them on the dead table and UDP flows never time out. The event
+# itself rebuilds policy + sticky rules and flushes the sticky sets.
+DRIFT_DIR=/var/run/route-hook.mwan3-drift
+heal_mwan3_drift() {
+    for f in /var/run/mwan3/iface_state/*; do
+        [ -e "$f" ] || continue
+        i=${f##*/}; st="$DRIFT_DIR/$i"
+        pol=$(cat "$f" 2>/dev/null)
+        trk=$(cat "/var/run/mwan3track/$i/STATUS" 2>/dev/null)
+        if [ "$pol" != online ] || [ "$trk" != offline ]; then
+            [ -e "$st" ] && { event "mwan3 drift on $i cleared (policy=$pol tracker=$trk)"; rm -f "$st"; }
+            continue
+        fi
+        mkdir -p "$DRIFT_DIR"
+        case "$(cat "$st" 2>/dev/null)" in
+            '') echo pending > "$st" ;;                 # first sighting: confirm next run
+            pending)
+                dev=$(cat "/var/run/mwan3track/$i/DEVICE" 2>/dev/null)
+                mask=$(uci -q get mwan3.globals.mmx_mask || echo 0x3f00)
+                mark=$(iptables -w -t mangle -S "mwan3_iface_in_$i" 2>/dev/null |
+                       sed -n "s/.*--comment $i -j MARK --set-xmark \(0x[0-9a-fA-F]*\)\/.*/\1/p" | head -1)
+                env -i ACTION=disconnected INTERFACE="$i" DEVICE="$dev" /sbin/hotplug-call iface
+                [ -n "$mark" ] && conntrack -D --mark "$mark/$mask" >/dev/null 2>&1
+                echo healed > "$st"
+                warn "mwan3 drift on $i: policy online, tracker offline for >=1 min; sent the missed 'disconnected' event${mark:+, dropped its $mark connections}" ;;
+            healed)
+                err "mwan3 drift on $i survived the heal (policy still online, tracker offline); not retrying until it clears"
+                echo failed > "$st" ;;
+        esac
+    done
+}
+
 if [ -n "${IFNAME:-$1}" ]; then          # pppd link-up: one iface, gateways from env
     CALLER=link-up
     case "${IFNAME:-$1}" in pppoe-*) fix_iface "${IFNAME:-$1}" "$IPREMOTE" "$LLREMOTE" ;; esac
@@ -66,5 +111,6 @@ else                                      # cron backstop: discover active pppoe
         [ -e "$d" ] || continue
         fix_iface "$(basename "$d")" "" ""
     done
+    heal_mwan3_drift
 fi
 exit 0

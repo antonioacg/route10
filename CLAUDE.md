@@ -404,6 +404,20 @@ telnet probes — they orphan the lock too.
      `route-defaultroute-hook.sh` ip-up.d symlink + `* * * * *` cron, and the
      `lan-prefix-track.sh` hotplug hook (`/etc/hotplug.d/iface/89-lan-prefix`,
      fires on `ifupdate`) + `* * * * *` cron backstop (stale-IPv6-prefix deprecation).
+     ⭐ **The default-route cron also heals mwan3 policy drift** (2026-11-06). Alta's mwan3track
+     (1.5j+) records an outage when it starts before a WAN is up, then resumes it with
+     `disconnected 1`, which sets STATUS=offline WITHOUT the hotplug event. The ifup had already
+     put the WAN in the policy, so a WAN with link + DHCP but no internet stays in it for good.
+     With the fibreless Huawei on eth0 (wan2, metric 101) outranking the stick (102), every boot
+     sent ALL v4 there while v6 worked: 4h51m on 11-04, ~3h45m after the fibre came back on
+     11-06. No portal setting orders WANs. The cron compares `/var/run/mwan3/iface_state/<wan>` with
+     `/var/run/mwan3track/<wan>/STATUS`; online-vs-offline on two runs in a row ⇒ it sends the missed
+     `disconnected` event (rebuilds the policy, flushes the sticky sets) and drops that WAN's marked
+     conntrack. Log: `route10.route-hook` warn `mwan3 drift on <wan>: …`, then notice `… cleared`;
+     `err` `… survived the heal` if it didn't take (no retry until it clears). Tested live by
+     inducing it with `mwan3 ifup wan2`: healed on the 2nd run, ~70 s of v4 loss. Manual fix if the
+     cron is gone: `mwan3 ifdown wan2` (eth0 keeps its address), then clear any
+     `mwan3_rule_ipv4_default_pbr …,0x200` sticky entry and `conntrack -D --mark 0x200/0x3f00`.
   7. **Per-host connlimit guard** (`RT10_CONNLIMIT` chain, per-family): caps concurrent
      NEW connections per LAN host on the `br-lan → pppoe-wan3` path (internet-bound
      only; `--ctstate NEW`, so established/LAN/mesh traffic is untouched). REJECT is TCP
