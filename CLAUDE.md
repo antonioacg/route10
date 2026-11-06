@@ -580,7 +580,10 @@ telnet probes — they orphan the lock too.
      once per source per 10 min. Enforced without a log-only stage (operator call); before
      enforcing, the access log showed no LAN user of the range except the probes. Verified:
      LAN path → 100.64.0.2 :443/:22/ping all fail; mesh path, LAN web UI, v4 internet and :9100
-     unaffected. Ops wants the invariant in `NETWORK-CONTRACT.md` (they propose the wording).
+     unaffected (also verified by ops from `.200`).
+     ⛔ **Contract-recorded** (`ops/NETWORK-CONTRACT.md` §"LAN → `100.64.0.0/10` fence", wording
+     approved 2026-11-06): ops' pod containment depends on it. Removing it, or adding ANY exception
+     (a LAN host that must reach a mesh or CGNAT address), needs a contract entry FIRST.
 
 ## Observability standard
 
