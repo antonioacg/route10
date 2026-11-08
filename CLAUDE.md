@@ -409,8 +409,8 @@ telnet probes — they orphan the lock too.
      `disconnected 1`, which sets STATUS=offline WITHOUT the hotplug event. The ifup had already
      put the WAN in the policy, so a WAN with link + DHCP but no internet stays in it for good.
      With the fibreless Huawei on eth0 (wan2, metric 101) outranking the stick (102), every boot
-     sent ALL v4 there while v6 worked: 4h51m on 11-04, ~3h45m after the fibre came back on
-     11-06. No portal setting orders WANs. The cron compares `/var/run/mwan3/iface_state/<wan>` with
+     sent ALL v4 there while v6 worked: 4h51m on 11-04, ~2h20m after the fibre came back on
+     11-06 (~12:23Z real; the router clock read 10:58 because it was still seeded ~1h25m behind). No portal setting orders WANs. The cron compares `/var/run/mwan3/iface_state/<wan>` with
      `/var/run/mwan3track/<wan>/STATUS`; online-vs-offline on two runs in a row ⇒ it sends the missed
      `disconnected` event (rebuilds the policy, flushes the sticky sets) and drops that WAN's marked
      conntrack. Log: `route10.route-hook` warn `mwan3 drift on <wan>: …`, then notice `… cleared`;
