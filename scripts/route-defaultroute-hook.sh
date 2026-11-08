@@ -28,7 +28,8 @@
 # mwan3rtmon repopulate table 3 on its own.
 #
 # The cron path also heals mwan3 POLICY DRIFT (heal_mwan3_drift below): a WAN the
-# routing policy still counts as online while its own tracker says offline.
+# routing policy still counts as online while its own tracker says offline; and a
+# PPP session that never got an IPv6 prefix delegated (heal_missing_pd).
 #
 # `/` is tmpfs — post-cfg.sh installs the ip-up.d symlink and the cron line each
 # boot. Log (persistent; logread is volatile here): /cfg/scripts/route-hook.log
@@ -80,7 +81,12 @@ heal_mwan3_drift() {
         pol=$(cat "$f" 2>/dev/null)
         trk=$(cat "/var/run/mwan3track/$i/STATUS" 2>/dev/null)
         if [ "$pol" != online ] || [ "$trk" != offline ]; then
-            [ -e "$st" ] && { event "mwan3 drift on $i cleared (policy=$pol tracker=$trk)"; rm -f "$st"; }
+            # A PPP reconnect leaves wan3 here for ~25 s (tracker re-proving it), so a
+            # lone "pending" is routine; only a real heal gets a "cleared" line.
+            case "$(cat "$st" 2>/dev/null)" in
+                healed|failed) event "mwan3 drift on $i cleared (policy=$pol tracker=$trk)" ;;
+            esac
+            rm -f "$st"
             continue
         fi
         mkdir -p "$DRIFT_DIR"
@@ -102,6 +108,43 @@ heal_mwan3_drift() {
     done
 }
 
+# IPv6 prefix delegation missing for the PPP session. This ISP delegates only at
+# session start and ignores every later SOLICIT, so if that first exchange fails
+# the LAN has no GUA (no v6 egress) until the next session. 2026-11-06: after
+# the area-wide fibre cut, the ADVERTISE came back in 5 ms but all 10 REQUESTs
+# went unanswered; the LAN ran 2.5 days without v6. A delegation normally lands
+# within seconds, so once wan36 has been up PD_WAIT with an empty prefix list we
+# redial wan3 (netifd down+up, which ends the session cleanly with a PADT).
+# Backoff 1h, 2h, 4h, capped at 6h, so an ISP-wide v6 outage can't turn into a
+# stream of WAN drops; it resets once a prefix arrives. Not counted across
+# reboots (tmpfs), and a reboot starts a new session anyway.
+PD_DIR=/var/run/route-hook.pd
+PD_WAIT=600
+heal_missing_pd() {
+    st=$(ubus call network.interface.wan36 status 2>/dev/null) || return 0
+    [ "$(echo "$st" | jsonfilter -e '@.up' 2>/dev/null)" = true ] || return 0
+    pfx=$(echo "$st" | jsonfilter -e '@["ipv6-prefix"][0].address' 2>/dev/null)
+    mkdir -p "$PD_DIR"
+    n=$(cat "$PD_DIR/attempts" 2>/dev/null || echo 0)
+    if [ -n "$pfx" ]; then
+        [ "$n" -gt 0 ] && event "IPv6 prefix delegated ($pfx/$(echo "$st" | jsonfilter -e '@["ipv6-prefix"][0].mask' 2>/dev/null)) after $n reconnect(s)"
+        rm -f "$PD_DIR/attempts" "$PD_DIR/last" "$PD_DIR/deferred"
+        return 0
+    fi
+    up=$(echo "$st" | jsonfilter -e '@.uptime' 2>/dev/null)
+    [ "${up:-0}" -ge "$PD_WAIT" ] || return 0
+    now=$(cut -d. -f1 /proc/uptime); last=$(cat "$PD_DIR/last" 2>/dev/null || echo 0)
+    wait=$((3600 << (n > 0 ? n - 1 : 0))); [ "$wait" -gt 21600 ] && wait=21600
+    if [ "$n" -gt 0 ] && [ $((now - last)) -lt "$wait" ]; then
+        [ -e "$PD_DIR/deferred" ] || { err "still no IPv6 prefix after $n reconnect(s); next try in $(( (wait - now + last) / 60 )) min"; touch "$PD_DIR/deferred"; }
+        return 0
+    fi
+    n=$((n + 1)); echo "$n" > "$PD_DIR/attempts"; echo "$now" > "$PD_DIR/last"; rm -f "$PD_DIR/deferred"
+    warn "no IPv6 prefix delegated after ${up}s of this PPP session (LAN has no v6 egress); redialling wan3 to ask again (attempt $n)"
+    ubus call network.interface down '{ "interface": "wan3" }' 2>/dev/null
+    ubus call network.interface up '{ "interface": "wan3" }' 2>/dev/null
+}
+
 if [ -n "${IFNAME:-$1}" ]; then          # pppd link-up: one iface, gateways from env
     CALLER=link-up
     case "${IFNAME:-$1}" in pppoe-*) fix_iface "${IFNAME:-$1}" "$IPREMOTE" "$LLREMOTE" ;; esac
@@ -112,5 +155,6 @@ else                                      # cron backstop: discover active pppoe
         fix_iface "$(basename "$d")" "" ""
     done
     heal_mwan3_drift
+    heal_missing_pd
 fi
 exit 0

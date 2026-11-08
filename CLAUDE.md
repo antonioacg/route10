@@ -418,6 +418,17 @@ telnet probes — they orphan the lock too.
      inducing it with `mwan3 ifup wan2`: healed on the 2nd run, ~70 s of v4 loss. Manual fix if the
      cron is gone: `mwan3 ifdown wan2` (eth0 keeps its address), then clear any
      `mwan3_rule_ipv4_default_pbr …,0x200` sticky entry and `conntrack -D --mark 0x200/0x3f00`.
+     ⭐ **And it redials a PPP session that never got an IPv6 prefix** (2026-11-08). The ISP
+     delegates only at session start and ignores every later SOLICIT (the post-cfg SIGUSR1 nudge
+     can't help). On 11-06, after the area-wide fibre cut, the ADVERTISE came in 5 ms but all 10
+     REQUESTs went unanswered: wan36 sat with `ipv6-prefix: []` and br-lan had no GUA, so the LAN
+     ran **2.5 days without v6 egress** while the router's own v6 worked. When wan36 has been up
+     10 min with no prefix, the cron redials wan3 (ubus down+up, a clean PADT) with backoff 1h → 2h →
+     4h → 6h cap, reset when a prefix lands. Log: `route10.route-hook` warn `no IPv6 prefix
+     delegated … redialling wan3 (attempt N)`, err `still no IPv6 prefix after N reconnect(s)`,
+     notice `IPv6 prefix delegated (…) after N reconnect(s)`. Tested live on the real fault:
+     WAN down 4 s, prefix and br-lan GUA 4 s later, LAN v6 restored.
+     ⚠ "Router v6 works" ≠ "LAN v6 works": check wan36 `ipv6-prefix`, not a ping from the router.
   7. **Per-host connlimit guard** (`RT10_CONNLIMIT` chain, per-family): caps concurrent
      NEW connections per LAN host on the `br-lan → pppoe-wan3` path (internet-bound
      only; `--ctstate NEW`, so established/LAN/mesh traffic is untouched). REJECT is TCP
