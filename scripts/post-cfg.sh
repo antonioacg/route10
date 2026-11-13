@@ -1158,7 +1158,12 @@ install_lancgnat
 # one host's torrent headroom — 800 was too lax and caused the outage above. The
 # durable fix is taming the client (peer-limit) or moving it to IPv6 (no CGNAT).
 CONNLIMIT_V4_WARN=300;  CONNLIMIT_V4_BLOCK=500    # v4: tight — ISP CGNAT ceiling (800 caused an outage; keep <~900)
-CONNLIMIT_V6_WARN=1000; CONNLIMIT_V6_BLOCK=2000   # v6: loose — anomaly smell only (conntrack_max is 500k)
+# v6 was 1000/2000 until 2026-11-13. That BLOCK did false-positive: the cluster node
+# (.200) carries every pod's v6 egress on its one /128 (NAT66), and its BitTorrent pods
+# sat at ~2000-2550 v6 flows. Each crossing refused ALL new v6 from the node, its probes
+# and Alertmanager included (TCP reset, so ~5 ms failures), while v6 conntrack was 2690 of
+# 500k. 5000/20000 keeps a runaway stop (25 such hosts still fit) above that load.
+CONNLIMIT_V6_WARN=5000; CONNLIMIT_V6_BLOCK=20000  # v6: loose — anomaly smell only (conntrack_max is 500k)
 install_connlimit_guard() {
     # -w: wait for the xtables lock. tailscale-reconcile.sh also edits iptables
     # (from post-cfg above AND from mesh-health's */5 cron, which can run
