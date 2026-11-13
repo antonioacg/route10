@@ -1162,8 +1162,10 @@ CONNLIMIT_V4_WARN=300;  CONNLIMIT_V4_BLOCK=500    # v4: tight — ISP CGNAT ceil
 # (.200) carries every pod's v6 egress on its one /128 (NAT66), and its BitTorrent pods
 # sat at ~2000-2550 v6 flows. Each crossing refused ALL new v6 from the node, its probes
 # and Alertmanager included (TCP reset, so ~5 ms failures), while v6 conntrack was 2690 of
-# 500k. 5000/20000 keeps a runaway stop (25 such hosts still fit) above that load.
-CONNLIMIT_V6_WARN=5000; CONNLIMIT_V6_BLOCK=20000  # v6: loose — anomaly smell only (conntrack_max is 500k)
+# 500k. Raised to 5000/20000 at 11:46Z, then made WARN-ONLY the same day (operator
+# decision): v6 has no scarce resource to protect, so the guard's job is to NAME an
+# anomalous host, not to cut its whole address off. BLOCK=0 means no block tier at all.
+CONNLIMIT_V6_WARN=5000; CONNLIMIT_V6_BLOCK=0      # v6: warn-only anomaly smell (conntrack_max is 500k)
 install_connlimit_guard() {
     # -w: wait for the xtables lock. tailscale-reconcile.sh also edits iptables
     # (from post-cfg above AND from mesh-health's */5 cron, which can run
@@ -1222,6 +1224,7 @@ install_connlimit_guard() {
         # 28 chars max here — iptables caps --log-prefix at 29; verified accepted
         # and untruncated on this build before shipping.
         for _tier in "W route10.connlimit warn: $fam " "B route10.connlimit block: $fam "; do
+            [ "$block" = 0 ] && [ "${_tier%% *}" = B ] && continue   # warn-only family
             _c="RT10_CL_LOG${_tier%% *}"; _pfx="${_tier#* }"; _rl="${rlist}$(echo "${_tier%% *}" | tr 'WB' 'wb')"
             $ipt -A "$_c" -m recent --name "$_rl" --rcheck --seconds 600 -j RETURN 2>/dev/null || true
             $ipt -A "$_c" -m recent --name "$_rl" --set 2>/dev/null || true
@@ -1242,6 +1245,8 @@ install_connlimit_guard() {
         # starved us. The real "why" lives in the route10.connlimit WARN log above.
         # BLOCK is also LOGGED (per-source gated) before the rejects — a silently
         # capping firewall is un-alertable; ops keys an ntfy alert on this line.
+        # block=0 ⇒ warn-only: no BLOCK log, no rejects (v6 since 2026-11-13).
+        if [ "$block" != 0 ]; then
         $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
             -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
             -j RT10_CL_LOGB 2>/dev/null || true
@@ -1251,6 +1256,7 @@ install_connlimit_guard() {
         $ipt -A RT10_CONNLIMIT -m conntrack --ctstate NEW \
             -m connlimit --connlimit-above "$block" --connlimit-mask "$mask" --connlimit-saddr \
             -j REJECT --reject-with "$icmpreject" 2>/dev/null || true
+        fi
         # Marker: encodes the active thresholds so the next run can skip an unchanged
         # rebuild. RETURN is a no-op (the chain returns at its end anyway).
         $ipt -A RT10_CONNLIMIT -m comment --comment "$mark" -j RETURN 2>/dev/null || true

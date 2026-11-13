@@ -437,11 +437,11 @@ telnet probes — they orphan the lock too.
      jobs): **v4 WARN 300 / BLOCK 500** — tight, the real fix: stops a rogue client
      (torrent swarm) from exhausting the ISP CGNAT NAT-session table and starving
      everyone else's v4 (EHOSTUNREACH); keep BLOCK <~900 (800 caused an outage, CGNAT
-     starved at ~1400). **v6 WARN 5000 / BLOCK 20000** — loose, a pure anomaly *smell*
-     (route10 conntrack is 500k, never the bottleneck; v6 has no CGNAT): WARN logs a
-     wildly abnormal host, BLOCK is a runaway stop that ~never fires; per-/128 so SLAAC
-     privacy addresses evade it — fine for a smell, not a hard cap. ⚠ It was 1000/2000
-     until 2026-11-13, and that BLOCK DID false-positive: the cluster node `.200` carries
+     starved at ~1400). **v6 WARN 5000, WARN-ONLY (no block)** — a pure anomaly *smell*
+     (route10 conntrack is 500k, never the bottleneck; v6 has no CGNAT): it names a
+     wildly abnormal host and never cuts it off (`CONNLIMIT_V6_BLOCK=0` = no block tier);
+     per-/128 so SLAAC privacy addresses evade it — fine for a smell. Operator decision
+     2026-11-13. ⚠ It was 1000/2000 until then, and that BLOCK DID false-positive: the cluster node `.200` carries
      every pod's v6 egress on one /128, and its torrent pods sit at ~2000–2550 v6 flows.
      Each crossing refused ALL new v6 from the node, probes and Alertmanager included
      (TCP reset, so ~5 ms failures), while v6 conntrack was 2690/500k. A per-host cap
