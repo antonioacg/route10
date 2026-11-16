@@ -607,9 +607,13 @@ telnet probes — they orphan the lock too.
      defence against the edge itself; this is the one control it can't rewrite. Keyed on source, not
      `-i tailscale0`. It does NOT stop a takeover that re-addresses the edge as another node (ops' gap).
      Enforced from day one: nothing legitimate uses the path. Logs `route10.edge-mesh block: ` (global
-     cap). ⚠ It can only be proven jointly: the ACL drops the traffic before it reaches us, so ops opens
-     the ACL + accept-routes for one probe while our counter moves. Until then it's verified only as
-     installed and matching nothing (counters 0). Contract line to follow (ops proposes it).
+     cap). It can only be proven jointly, because the ACL drops the traffic before it reaches us.
+     **Proven 2026-11-16 22:14Z:** ops opened the ACL + accept-routes for one SSH connect per family to
+     `.200`; 5 SYNs per family hit the drop (counters 0 → 5, log IN=tailscale0 OUT=br-lan), and none
+     reached `.200`'s capture.
+     ⛔ **Contract-recorded** (`ops/NETWORK-CONTRACT.md` §"Edge mesh node → LAN", wording approved
+     2026-11-16). Removing it, or re-addressing the edge node, means changing that line and the rule
+     together.
 
 ## Observability standard
 
