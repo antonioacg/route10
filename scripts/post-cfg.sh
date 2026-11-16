@@ -1114,6 +1114,36 @@ install_lancgnat() {
 }
 install_lancgnat
 
+# ── edge mesh node → LAN fence ───────────────────────────────────────────────
+# 2026-11-16, ops ask. The edge VPS runs the mesh control plane. Two things keep it
+# out of the LAN behind our subnet route, its own accept-routes=false and the ACL,
+# and both live on the edge, so a compromised edge can undo both. This is the
+# control it can't rewrite: nothing from its tailnet addresses is forwarded into a
+# LAN bridge (br-lan+), whatever the state, except replies to flows the LAN opened.
+# Keyed on source, not -i tailscale0, so no other ingress can carry it either.
+# mangle FORWARD at position 1: the only rule there (ndpi) never ACCEPTs, and
+# tailscaled's ts-forward ACCEPT sits later, in filter. Nothing legitimate uses this
+# path (ops checked 2026-11-16), so it drops from day one. It stops an ACL edit or
+# an accept-routes flip; it does not stop a takeover that re-addresses the edge.
+# Prefix "route10.edge-mesh block: ", global cap. Contract-recorded once proven.
+EDGE_MESH_V4=100.64.0.5
+EDGE_MESH_V6=fd7a:115c:a1e0::5
+install_edgemesh() {
+    ipt="$1 -w 10"; src="$2"
+    mark="route10-edgemesh-l1"
+    $ipt -t mangle -N RT10_EDGEMESH 2>/dev/null || true
+    if ! $ipt -t mangle -S RT10_EDGEMESH 2>/dev/null | grep -q -- "$mark"; then
+        $ipt -t mangle -F RT10_EDGEMESH 2>/dev/null || true
+        $ipt -t mangle -A RT10_EDGEMESH -m limit --limit 60/hour --limit-burst 20 \
+            -j LOG --log-prefix "route10.edge-mesh block: " --log-level notice 2>/dev/null || true
+        $ipt -t mangle -A RT10_EDGEMESH -m comment --comment "$mark" -j DROP 2>/dev/null || true
+    fi
+    $ipt -t mangle -C FORWARD -s "$src" -o br-lan+ -m conntrack ! --ctstate ESTABLISHED,RELATED -j RT10_EDGEMESH 2>/dev/null \
+        || $ipt -t mangle -I FORWARD 1 -s "$src" -o br-lan+ -m conntrack ! --ctstate ESTABLISHED,RELATED -j RT10_EDGEMESH 2>/dev/null || true
+}
+install_edgemesh iptables  "$EDGE_MESH_V4"
+install_edgemesh ip6tables "$EDGE_MESH_V6"
+
 # ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
 # A single LAN host running a P2P/torrent client opens ~1000+ simultaneous flows
 # (DHT + peer swarm). Each needs a NAT mapping on our SHARED CGNAT WAN IP. The

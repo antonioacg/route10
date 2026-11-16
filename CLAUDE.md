@@ -600,6 +600,16 @@ telnet probes — they orphan the lock too.
      ⛔ **Contract-recorded** (`ops/NETWORK-CONTRACT.md` §"LAN → `100.64.0.0/10` fence", wording
      approved 2026-11-06): ops' pod containment depends on it. Removing it, or adding ANY exception
      (a LAN host that must reach a mesh or CGNAT address), needs a contract entry FIRST.
+  16. **Edge mesh node → LAN fence** (`RT10_EDGEMESH`, mangle FORWARD position 1, both families,
+     2026-11-16, ops ask). Drops anything from the edge's tailnet addresses (`EDGE_MESH_V4`/`_V6` at
+     the top of the block) leaving via `br-lan+`, except replies to LAN-opened flows. The edge runs the
+     mesh control plane, so the ACL and its own accept-routes, which both live on the edge, are no
+     defence against the edge itself; this is the one control it can't rewrite. Keyed on source, not
+     `-i tailscale0`. It does NOT stop a takeover that re-addresses the edge as another node (ops' gap).
+     Enforced from day one: nothing legitimate uses the path. Logs `route10.edge-mesh block: ` (global
+     cap). ⚠ It can only be proven jointly: the ACL drops the traffic before it reaches us, so ops opens
+     the ACL + accept-routes for one probe while our counter moves. Until then it's verified only as
+     installed and matching nothing (counters 0). Contract line to follow (ops proposes it).
 
 ## Observability standard
 
