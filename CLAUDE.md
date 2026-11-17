@@ -614,6 +614,31 @@ telnet probes — they orphan the lock too.
      ⛔ **Contract-recorded** (`ops/NETWORK-CONTRACT.md` §"Edge mesh node → LAN", wording approved
      2026-11-16). Removing it, or re-addressing the edge node, means changing that line and the rule
      together.
+  17. **Mesh → LAN / exit-node allowlist + node-key pins** (`RT10_MESHFWD`, mangle FORWARD right after
+     EDGEMESH, both families, 2026-11-17). ⛔ **Contract-recorded** (`ops/NETWORK-CONTRACT.md`
+     §"Mesh → LAN / exit-node allowlist + node-key pins"). Values come from **`MESH_ALLOW` in
+     `/cfg/seam.env`**: the contract changes first, then seam.env.
+     - **Who owns it:** `scripts/mesh-allow.sh` owns the chain and runs from post-cfg and a `* * * * *`
+       cron. `scripts/mesh-keypin.py` decides; it's pure logic and can be tested off-box against a saved
+       `tailscale status --json`.
+     - **The allowlist:** traffic in on `tailscale0` that isn't a reply to a LAN-opened flow is forwarded
+       only for a listed source, to its listed scope: the LAN (`br-lan+`), one `ip:port`, and/or the
+       exit node (`pppoe+`, `eth0`). Anything else is logged `route10.mesh-fwd block: ` and dropped.
+     - **The key pin:** every peer whose `AllowedIPs` covers a listed address must carry the pinned
+       node key. A mismatch closes that address, `conntrack -D`s its flows and logs **`err` under
+       `route10.mesh-allow`** (ops alerts on it). If status can't be read (tailscaled down or logged
+       out), every entry closes, with a warn only.
+     - ⚠ **Strict on purpose:** a peer advertising an exit node or a route over the tailnet range closes
+       EVERY entry. tailscale trims idle peers out of wireguard-go, so "longest prefix wins" isn't safe.
+     - ⚠ **Re-enrolling a device costs its LAN access.** A reinstall, logout/login or restore mints a new
+       node key, and the device has no mesh → LAN until the contract and seam.env change.
+     - ⚠ **Containment, not prevention:** it's polled once a minute.
+     - **Proven 2026-11-17 ~15:32Z:**
+       - With the Mac's v6 entry removed, `curl -6` to `.240` over the mesh timed out with log lines.
+         It passed again once the entry was restored.
+       - With the PS5 pinned to a wrong key: one err, its 2 rules removed, the rest untouched, and the
+         next run quiet.
+     - **Tailscale SSH** (`RunSSH`) stays off (contract).
 
 ## Observability standard
 

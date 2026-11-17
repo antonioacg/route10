@@ -1144,6 +1144,22 @@ install_edgemesh() {
 install_edgemesh iptables  "$EDGE_MESH_V4"
 install_edgemesh ip6tables "$EDGE_MESH_V6"
 
+# ── mesh → LAN / exit-node allowlist + node-key pins ─────────────────────────
+# 2026-11-17, contract §"Mesh → LAN / exit-node allowlist + node-key pins". Anything
+# in on tailscale0 is forwarded only for a listed source whose node key still
+# matches its pin; everything else drops (RT10_MESHFWD, right after EDGEMESH).
+# mesh-allow.sh owns the chain; values come from MESH_ALLOW in /cfg/seam.env. Run
+# here so a reapply's flush is repaired at once, and every minute from cron for the
+# key pins. See scripts/mesh-allow.sh + scripts/mesh-keypin.py.
+MESHALLOW=/cfg/scripts/mesh-allow.sh
+if [ -x "$MESHALLOW" ]; then
+    "$MESHALLOW" || true
+    if ! grep -qF "$MESHALLOW" /etc/crontabs/root 2>/dev/null; then
+        echo "* * * * * $MESHALLOW" >> /etc/crontabs/root
+        /etc/init.d/cron reload >/dev/null 2>&1 || true
+    fi
+fi
+
 # ── per-host connection cap — CGNAT session-exhaustion guard ────────────────
 # A single LAN host running a P2P/torrent client opens ~1000+ simultaneous flows
 # (DHT + peer swarm). Each needs a NAT mapping on our SHARED CGNAT WAN IP. The
