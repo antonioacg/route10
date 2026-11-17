@@ -266,6 +266,11 @@ telnet probes — they orphan the lock too.
     notice/info; tell ops before changing. ⚠ It also fires on a persistent
     un-healable drift (deleted binary, version skew, ACL filter, tags unreadable),
     because each of those repeats every tick (12/h).
+  - **`route10.mesh-allow` at `severity=err` means "an allowlist entry is closed against
+    intent" — FROZEN (2026-11-17).** Ops's `Route10MeshKeyPinMismatch` (critical) fires on
+    any such line in a 70-min window, matching our hourly repeat. Keep routine output at
+    notice and warning (unreadable status stays warning); tell ops before changing the tag or
+    the meaning.
   - `route10_host_flows{family,host,ip}` on `/metrics` carries **verbatim,
     uncurated DHCP hostnames** (operator decision 2026-08-10 — private LAN, and a
     masked offender list is worth less than an honest one). They reach ops's
