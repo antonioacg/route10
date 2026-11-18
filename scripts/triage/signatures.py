@@ -372,7 +372,8 @@ def _airtime(f, cov):
 def _tuya(f, cov):
     """A Tuya device (re)joining 2.4 GHz precedes multi-minute downstream loss to 2.4 GHz clients
     (14/16 vacuum outages). Trigger CONFIRMED, mechanism inside the AP UNKNOWN. Needs a LAN probe
-    target that is really ON the AX73 2.4 GHz radio: the vacuum moved off it by 2026-11-18."""
+    target that is really ON the AX73 2.4 GHz radio and answers when healthy (see
+    probe-target-mismatch: 11-16 → 11-18 the "vacuum" probe was pinging the wired PS5)."""
     tuya = ("70:89:76", "84:e3:42", "50:8b:b9")
     joins = sorted({x[0] for x in f.get("dhcp", []) if x[2] and x[2][:8] in tuya and x[1] in ("DHCPDISCOVER", "DHCPREQUEST")}
                    | {e[0] for e in f["wifi"]["events"] if e[2][:8] in tuya and e[3] in ("E_ASSOC_IND", "E_REASSOC_IND")})
@@ -406,16 +407,47 @@ def _tuya(f, cov):
 
 @rule("ap-deauth-storm", "2026-11-18", "SUSPECTED", 15)
 def _deauth(f, cov):
-    """A station in an auth/deauth loop (seen: Tuya 84:e3:42:08:76:fe, ~10/s at 11:51Z 11-18).
-    Effect on other clients unmeasured."""
+    """A station in an auth/deauth loop. Seen 2026-11-18: Tuya 84:e3:42:08:76:fe, 63 auth→deauth
+    (reason 1, ~0.1 s apart) in 7 s, never associated, and NO DHCP lease in 30 days of Loki: the
+    device is simply offline. Not an ACL (macmode 0). Suspect: WPA2/WPA3 transition + PMF on
+    the 2.4 GHz BSS vs an old IoT module (UNCONFIRMED). Effect on other clients unmeasured."""
     if not f["wifi"]["events"]:
         return na("no AP association log")
-    n = {}
+    n, reasons, assoc = {}, {}, set()
     for e in f["wifi"]["events"]:
+        if e[3] in ("E_ASSOC_IND", "E_REASSOC_IND"):
+            assoc.add(e[2])
         if e[3] in ("E_DEAUTH", "E_DEAUTH_IND", "E_DISASSOC_IND") and e[0] >= f["meta"]["from"]:
             n[e[2]] = n.get(e[2], 0) + 1
+            r = reasons.setdefault(e[2], {})
+            r[e[4]] = r.get(e[4], 0) + 1
     loud = {m: c for m, c in n.items() if c >= 10}
-    return hit(", ".join("%s ×%d" % kv for kv in loud.items())) if loud else miss("max %d per station" % max(n.values() or [0]))
+    if not loud:
+        return miss("max %d per station" % max(n.values() or [0]))
+    leased = {x[2] for x in f.get("dhcp", [])}
+    return hit("; ".join("%s ×%d (reasons %s)%s%s" % (
+        m, c, reasons[m], "" if m in assoc else ", never associated in the log",
+        "" if m in leased else ", no DHCP in window") for m, c in loud.items()))
+
+
+@rule("probe-target-mismatch", "2026-11-18", "CONFIRMED", 70)
+def _probe_target(f, cov):
+    """A LAN probe pings an IP that now belongs to a DIFFERENT device. lan-probe follows a
+    target by DHCP name, so while the named device holds no lease it keeps pinging its old IP:
+    11-16 → 11-18 the "vacuum" canary pinged the PS5 (wired, AX73 port 3) and read clean."""
+    lq = f.get("lanq") or {}
+    if not any("dhcp" in q for q in lq.values()):
+        return na("capture predates the check")
+    bad = []
+    for n, q in lq.items():
+        if not q.get("dhcp") or not q.get("mac"):
+            continue
+        if q.get("dhcp_mac") is None:
+            bad.append("'%s' pings %s, leased to %s, while its own device ('%s') holds no lease" % (
+                n, q["ip"], q.get("ip_vendor") or q["mac"], q["dhcp"]))
+        elif q["dhcp_mac"] != q["mac"]:
+            bad.append("'%s' pings %s (%s) but '%s' is %s" % (n, q["ip"], q.get("ip_vendor") or q["mac"], q["dhcp"], q["dhcp_mac"]))
+    return hit("; ".join(bad) + " — its loss figures describe the wrong device") if bad else miss("every named probe pings its own device")
 
 
 @rule("ssid-switch", "2026-11-18", "CONFIRMED", 5)

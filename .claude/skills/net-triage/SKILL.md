@@ -57,11 +57,12 @@ Then confirm, in the user's words, what the report can't know:
 | **what "slow" means** | a number, a spinner, graining, a drop? Graining is bitrate; a drop is a stall |
 | **where they are** | coverage findings need it: a phone walking away reads as signal falling |
 
-**Topology (2026-11-18; the report's `at` column is the live truth):** route10 `eth1` → AX73
-(AP only, `BigHouse` 2.4 GHz `wl1.1`, `BigHouse-5G` `wl0.1`). The wired Mac and `.200` sit on
-route10 `eth5` (office fiber). The vacuum is NOT on the AX73's radios: the AP learns it on its
-wired port `eth2`, so it is no longer a 2.4 GHz canary. A shared AP uplink degrades both its
-wired and its wireless clients.
+**Topology (2026-11-18; the report's `at` column is the live truth):** route10 `eth1` → AX73,
+the ONLY access point (AP mode, 2.4 GHz `wl1.1`, 5 GHz `wl0.1`). The wired Mac and `.200` sit on
+route10 `eth5` (office fiber); the PS5 is wired to AX73 port 3 (`eth2`). The vacuum is on 2.4 GHz
+(−40 dBm since it moved next to the AP on 11-18). The LAN probe follows it by DHCP name and pinged
+whatever held its old IP while it had no lease (the PS5, 11-16 → 11-18): `probe-target-mismatch`
+flags that. A shared AP uplink degrades both its wired and its wireless clients.
 
 **Judgement calls the rules don't encode** (compare within one run, never across runs):
 - the network **total** falls, not just one client → link; one slow client → that client

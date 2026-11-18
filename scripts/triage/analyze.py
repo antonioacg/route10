@@ -238,6 +238,24 @@ def parse_leases(text):
     return v4, v6
 
 
+_OUI = None
+
+
+def vendor(mac):
+    """Vendor from the OUI, via nmap's local table if present. Offline only, by design."""
+    global _OUI
+    if _OUI is None:
+        _OUI = {}
+        for path in ("/opt/homebrew/share/nmap/nmap-mac-prefixes", "/usr/local/share/nmap/nmap-mac-prefixes",
+                     "/usr/share/nmap/nmap-mac-prefixes"):
+            for line in read(path).splitlines():
+                if len(line) > 7 and not line.startswith("#"):
+                    _OUI[line[:6].upper()] = line[7:].strip()
+            if _OUI:
+                break
+    return _OUI.get((mac or "").replace(":", "")[:6].upper()) if mac else None
+
+
 def parse_targets(text):
     out = []
     for line in text.splitlines():
@@ -353,7 +371,7 @@ def parse_ax73(text):
     for line in sec.get("events", "").splitlines():
         p = line.split()
         if len(p) >= 8 and p[0].isdigit() and mac_norm(p[2]):
-            out["events"].append([int(p[0]) / 1000.0, p[1], mac_norm(p[2]), p[7].split("/")[0], p[4]])
+            out["events"].append([int(p[0]) / 1000.0, p[1], mac_norm(p[2]), p[7].split("/")[0], int(p[5]) if p[5].isdigit() else None])
     out["events"].sort()
     out["fdb"] = parse_bridge(sec.get("fdb", ""))
     samples = {}
@@ -754,7 +772,12 @@ def build_facts(cap):
         if ap_port and ap_port != up_ap:
             return ("wifi:" + (band_of(ap_port) or "?") + ":" + ap_port) if ap_port.startswith("wl") else "ap-port:" + ap_port
         return "route10:" + p if p else None
+    host2mac = {v["host"].lower(): m for m, v in v4.items() if v.get("host")}
     for name, q in lanq.items():
+        t = next((t for t in targets if t["name"] == name), {})
+        q["dhcp"] = t.get("dhcp")
+        q["dhcp_mac"] = host2mac.get(t["dhcp"].lower()) if t.get("dhcp") else None
+        q["ip_vendor"] = vendor(ip2mac.get(q["ip"]))
         q["mac"] = ip2mac.get(q["ip"])
         q["where"] = location(q["mac"]) if q["mac"] else None
     f["lanq"] = lanq
@@ -1054,7 +1077,7 @@ def sanitize(f):
     hash; hostnames, probe names (people's names), SSIDs, the client query, per-minute app
     names (DPI) and free-text log messages are hashed or dropped. Check the diff anyway."""
     f = copy.deepcopy(f)
-    secret_keys = ("name", "host", "ssid", "query", "client_query", "note")
+    secret_keys = ("name", "host", "ssid", "query", "client_query", "note", "dhcp")
 
     def walk(x):
         if isinstance(x, dict):
