@@ -1,7 +1,9 @@
 # net-triage log
 
-One entry per slowness complaint, **including the ones we failed to catch**. The
-near-misses are the point: a log of only wins teaches nothing. Newest first.
+One entry per real network incident, **including the ones we failed to catch**. The
+near-misses are the point: a log of only wins teaches nothing. Newest first. Device-side or
+coverage complaints don't get an entry (operator, 2026-11-11): they teach through a rule in
+`scripts/triage/signatures.py` and a fixture instead.
 
 Written by the `net-triage` skill. Mark claims **CONFIRMED** only with the
 measurement beside them, otherwise **SUSPECTED**.

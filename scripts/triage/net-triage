@@ -1,0 +1,173 @@
+#!/bin/sh
+# net-triage — capture a network complaint from every vantage AT ONCE and print a verdict.
+#
+#   scripts/triage/net-triage [--client <ip|mac|name>] [--note "<what the user sees>"]
+#                             [--at <HH:MM local | epoch>] [--window <min>] [--no-speed]
+#   scripts/triage/net-triage --replay <capture-dir>     re-analyse a saved capture
+#   scripts/triage/net-triage --selftest                 check every signature against its fixtures
+#   scripts/triage/net-triage --save-fixture <name> <capture-dir>   (see SKILL.md, STEP 5)
+#
+# Read-only everywhere, ~15 s. Collectors run in parallel, each under a deadline:
+#   route10   collect-route10.sh over ssh (WAN, PON, DNS ladder, per-client bytes, LAN
+#             probes, syslog, firewall drop deltas, mesh, bridge, live client capture)
+#   ax73      collect-ax73.sh over ssh (BSSes, station RSSI, association log, bridge
+#             ports, channel airtime)
+#   ap        the AP's /metrics, scraped twice 12 s apart (live per-station retries)
+#   prom      ops Grafana: per-station RSSI and retry history for the window
+#   mac       this Mac: vantage, gateway/internet ping, idle vs loaded latency,
+#             one-shot throughput per family, uncached DNS through each resolver
+# Then analyze.py prints the report and writes report.txt + facts.json next to the raw
+# files in ~/.cache/net-triage/<UTC stamp>/ (kept 30 days, never committed: it holds
+# DNS names and addresses).
+#
+# ⛔ Every line is timestamped; every probe is single-shot against a distinct host. A
+# symmetrical v4+v6 failure is a broken probe until shown otherwise (2026-08-12).
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+PY="python3 -I"
+R10=route10
+AP=ax73
+AP_METRICS=http://192.168.10.11:9100/metrics
+LAN_DNS4=192.168.10.1
+LAN_DNS6=fd5f:d7ef:9c25:10::1
+ADGUARD=192.168.10.241
+CACHE=${NET_TRIAGE_CACHE:-$HOME/.cache/net-triage}
+
+CLIENT=; NOTE=; AT=; WINDOW=; SPEED=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --client) CLIENT=$2; shift 2 ;;
+        --note) NOTE=$2; shift 2 ;;
+        --at) AT=$2; shift 2 ;;
+        --window) WINDOW=$2; shift 2 ;;
+        --no-speed) SPEED=0; shift ;;
+        --replay) exec $PY "$HERE/analyze.py" "$2" ;;
+        --selftest) exec $PY "$HERE/analyze.py" --selftest ;;
+        --save-fixture) exec $PY "$HERE/analyze.py" --save-fixture "$2" "$3" ;;
+        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+# deadline <secs> <cmd...> — run with a hard wall-clock cap (macOS has no timeout(1) by default)
+deadline() { perl -e 'alarm shift @ARGV; exec @ARGV or die' "$@"; }
+
+NOW=$(date +%s)
+LIVE=1
+if [ -n "$AT" ]; then
+    case "$AT" in
+        *:*) T=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%F) $AT" +%s 2>/dev/null) ;;
+        *) T=$AT ;;
+    esac
+    [ -n "$T" ] || { echo "bad --at '$AT' (HH:MM local or epoch)" >&2; exit 2; }
+    [ "$T" -gt "$NOW" ] && T=$((T - 86400))      # an HH:MM later than now meant yesterday
+    W=${WINDOW:-30}
+    FROM=$((T - W * 60 * 2 / 3)); TO=$((T + W * 60 / 3))
+    [ "$TO" -gt "$NOW" ] && TO=$NOW
+    [ $((NOW - T)) -gt 600 ] && { LIVE=0; SPEED=0; }   # complaint is history: skip "now" probes
+else
+    W=${WINDOW:-45}
+    FROM=$((NOW - W * 60)); TO=$NOW
+fi
+
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+CAP="$CACHE/$STAMP"
+mkdir -p "$CAP" || exit 1
+find "$CACHE" -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null
+$PY -c 'import json,sys; print(json.dumps(dict(zip(["stamp","now","from","to","live","client","note","speed"], sys.argv[1:]))))' \
+    "$STAMP" "$NOW" "$FROM" "$TO" "$LIVE" "$CLIENT" "$NOTE" "$SPEED" > "$CAP/meta.json"
+echo "net-triage $STAMP — collecting (window $(date -r "$FROM" +%H:%M)–$(date -r "$TO" +%H:%M) local, live=$LIVE) …" >&2
+
+# job <name> <secs> <stdin-file> <cmd...> — run in the background into $CAP/<name>.out.
+# ⛔ stdin must be redirected INSIDE the job: sh hands an asynchronous list /dev/null as
+# stdin, so a redirect on the `job` call itself never reaches ssh (first run, 2026-11-18).
+job() {
+    n=$1; s=$2; in=$3; shift 3
+    (
+        t0=$(date +%s)
+        deadline "$s" "$@" < "$in" > "$CAP/$n.out" 2> "$CAP/$n.err"
+        echo "rc=$? took=$(( $(date +%s) - t0 )) limit=$s" > "$CAP/$n.status"
+    ) &
+}
+
+job route10 30 "$HERE/collect-route10.sh" ssh -o ConnectTimeout=5 -o BatchMode=yes $R10 \
+    "FROM=$FROM TO=$TO LIVE=$LIVE CLIENT='$(printf '%s' "$CLIENT" | tr -cd 'A-Za-z0-9:._-')' sh -s"
+job ax73 25 "$HERE/collect-ax73.sh" ssh -o ConnectTimeout=5 -o BatchMode=yes $AP 'sh -s'
+job ap0 6 /dev/null curl -sS -m 5 "$AP_METRICS"
+( sleep 10; job ap1 6 /dev/null curl -sS -m 5 "$AP_METRICS"; wait ) &
+
+# prom <name> <promql> — ops Grafana, token via stdin config only (never argv)
+prom() {
+    body=$($PY -c 'import json,sys; f,t,e=sys.argv[1:]; print(json.dumps({"from":str(int(f)*1000),"to":str(int(t)*1000),"queries":[{"refId":"A","datasource":{"uid":"prometheus"},"expr":e,"range":True,"instant":False,"intervalMs":120000,"maxDataPoints":400}]}))' "$FROM" "$TO" "$2")
+    tok=$HOME/.config/fiber-edge/grafana-token
+    [ -r "$tok" ] || { echo '{"error":"no token file"}' > "$CAP/prom-$1.out"; return; }
+    (
+        printf 'header = "Authorization: Bearer %s"\n' "$(cat "$tok")" | deadline 12 curl -sS -K - -m 10 \
+            --resolve grafana.net.aac.gd:443:192.168.10.240 -H 'Content-Type: application/json' \
+            -X POST https://grafana.net.aac.gd/api/ds/query -d "$body" > "$CAP/prom-$1.out" 2> "$CAP/prom-$1.err"
+    ) &
+}
+prom rssi    'ax73_sta_rssi_dbm'
+prom retries 'rate(ax73_sta_tx_retries_total[5m])'
+prom frames  'rate(ax73_sta_tx_ucast_packets_total[5m])'
+
+# ── this Mac ────────────────────────────────────────────────────────────────
+mac_vantage() {
+    IF=$(route -n get default 2>/dev/null | awk '/interface/{print $2}')
+    GW=$(route -n get default 2>/dev/null | awk '/gateway/{print $2}')
+    PORT=$(networksetup -listallhardwareports 2>/dev/null | grep -B1 "Device: $IF\$" | head -1 | sed 's/Hardware Port: //')
+    echo "iface=$IF gateway=$GW port=$PORT"
+    case "$PORT" in *Wi-Fi*) system_profiler SPAirPortDataType 2>/dev/null | sed -n '/Current Network/,/Other Local/p' \
+        | grep -E "PHY Mode|Channel|Signal|Transmit Rate" | head -5 ;; esac
+}
+mac_ping() {
+    # gateway = the honest control. ⛔ never 1.1.1.1 for loss: it rate-limits ICMP on this path.
+    # ⛔ wait on OUR pids only: a bare `wait` also waits for the route10/ax73 jobs, which
+    # held the speed test back ~10 s (first runs, 2026-11-18).
+    ping -c 20 -i 0.2 -t 6 "$LAN_DNS4" 2>/dev/null | tail -2 > "$CAP/mac-gw.tmp" & p1=$!
+    ping -c 20 -i 0.2 -t 6 8.8.8.8 2>/dev/null | tail -2 > "$CAP/mac-inet.tmp" & p2=$!
+    wait $p1 $p2
+    echo "## gw"; cat "$CAP/mac-gw.tmp"; echo "## inet"; cat "$CAP/mac-inet.tmp"
+    rm -f "$CAP/mac-gw.tmp" "$CAP/mac-inet.tmp"
+}
+mac_speed() {
+    # one download per family and host, with latency sampled UNDER load (the idle
+    # baseline is mac_ping's inet run, just before). ⛔ one request per host:
+    # hammering one endpoint rate-limits our CGNAT address (2026-08-12).
+    ping -c 15 -i 0.2 -t 4 8.8.8.8 2>/dev/null | tail -1 > "$CAP/mac-loaded.tmp" & lp=$!
+    # ⛔ hosts must be NEAR: a 3 s cap to Germany (Hetzner) read 9 Mbit/s on a 600 Mbit/s
+    # link — slow start over ~200 ms RTT, not the link (first run, 2026-11-18). Cloudflare
+    # and Google both serve from Brazil; ~30-40 MB each, so a healthy link finishes in <1 s.
+    for spec in "4 https://speed.cloudflare.com/__down?bytes=40000000" \
+                "6 https://speed.cloudflare.com/__down?bytes=40000000" \
+                "4 https://dl.google.com/chrome/install/GoogleChromeStandaloneEnterprise64.msi" \
+                "6 https://dl.google.com/chrome/install/GoogleChromeStandaloneEnterprise64.msi"; do
+        fam=${spec%% *}; url=${spec#* }
+        echo "tput v$fam $(echo "$url" | sed -e 's|https://||' -e 's|/.*||') $(date +%s) $(curl -"$fam" -s -o /dev/null -r 0-30000000 -w '%{speed_download} %{http_code} %{time_connect}' --max-time 2.5 "$url" 2>/dev/null)"
+    done
+    wait $lp
+    echo "## loaded"; cat "$CAP/mac-loaded.tmp"; rm -f "$CAP/mac-loaded.tmp"
+}
+mac_dns() {
+    # an uncached name exercises the whole chain (dnsmasq → routedns → AdGuard → upstream)
+    n="nt$(date +%s)$$.cloudflare.com"
+    for srv in "$LAN_DNS4" "$LAN_DNS6" "$ADGUARD"; do
+        out=$(dig +tries=1 +time=2 @"$srv" "$n" A 2>&1)
+        echo "dns $srv uncached status=$(echo "$out" | sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1) ms=$(echo "$out" | sed -n 's/.*Query time: \([0-9]*\).*/\1/p')"
+        out=$(dig +tries=1 +time=2 @"$srv" example.com A 2>&1)
+        echo "dns $srv cached status=$(echo "$out" | sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1) ms=$(echo "$out" | sed -n 's/.*Query time: \([0-9]*\).*/\1/p')"
+    done
+}
+mac_all() {
+    mac_vantage > "$CAP/mac-vantage.txt" 2>&1 & v=$!
+    mac_dns > "$CAP/mac-dns.txt" 2>&1 & d=$!
+    if [ "$LIVE" = 1 ]; then
+        mac_ping > "$CAP/mac-ping.txt" 2>&1
+        [ "$SPEED" = 1 ] && mac_speed > "$CAP/mac-speed.txt" 2>&1
+    fi
+    wait $v $d
+}
+t0=$(date +%s); mac_all; echo "rc=0 took=$(( $(date +%s) - t0 ))" > "$CAP/mac.status"; echo done > "$CAP/mac.out"
+wait
+echo "collected in $(( $(date +%s) - NOW )) s → $CAP" >&2
+exec $PY "$HERE/analyze.py" "$CAP"

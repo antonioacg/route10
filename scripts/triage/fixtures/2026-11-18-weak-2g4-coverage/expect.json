@@ -1,0 +1,22 @@
+{
+ "hit": [
+  "weak-wifi-coverage",
+  "ssid-switch",
+  "ap-deauth-storm"
+ ],
+ "not_hit": [
+  "tuya-join-outage",
+  "cgnat-pressure",
+  "client-radio-outlier",
+  "lan-fence-hits-client",
+  "wan-down",
+  "mwan3-policy-drift",
+  "pon-layer-fault",
+  "upstream-of-onu",
+  "dns-path-down",
+  "mesh-down",
+  "bufferbloat",
+  "probe-broken"
+ ],
+ "why": "2026-11-18 ~12:27Z, live. iPhone left the 5 GHz SSID (its 5 GHz signal fell -43 -> -77 dBm, consistent with moving away from the AP; location not confirmed) for 2.4 GHz at 11:50Z and sat at -68...-79 dBm with 55-136% retries while WAN, PON, DNS and a wired Mac (695/566 Mbit/s) were clean; retries tracked RSSI across all six 2.4 GHz stations. A Tuya-OUI device (84:e3:42) was in a deauth loop. Must NOT fire: tuya-join-outage (the only 2.4 GHz probe target is a dozing iPhone that ignores ping; the second run of the tool read that as 7 outages), cgnat-pressure (.200 at 318 flows is its normal p2p level, WAN total 533), lan-fence-hits-client (one join-time MagicDNS packet, benign)."
+}
