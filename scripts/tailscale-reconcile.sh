@@ -210,36 +210,29 @@ ens6 OUTPUT  -o pppoe+ -j RT10_MESHEGRESS
 ens6 FORWARD -o pppoe+ -d fd7a:115c:a1e0::/48 -j RT10_MESHEGRESS
 [ "$FW_ADDED" = 1 ] && event "mesh egress guard jumps (re)installed"
 
-# ── 4. br-lan GRO + TSO off (mesh->LAN forward-path fixes) ────────────────────
-# Two distinct bugs on the same interface, both reachable ONLY from the mesh.
+# ── 4. br-lan GRO off (mesh->LAN forward-path fix) ────────────────────────────
+# Reachable ONLY from the mesh.
 #
 #   gro off (2026-07-18) — br-lan GRO coalesced WG-tunnel segments into frames
 #   lost re-segmenting for the 1280 tunnel. Bulk mesh->LAN transfers blackholed
 #   (ssh "Connection closed", dd 0 bytes). A/B/A'd as the sole culprit THEN.
 #
-#   tso off (2026-09-18) — a SECOND, independent bug the gro fix never covered.
-#   wireguard-go does its own TCP GRO in userspace and hands the kernel a
-#   coalesced super-segment (measured: 4198 B payload, gso_size 1240 from the
-#   1280 tunnel). Forwarding that out br-lan, the IPQ9574 hardware TSO engine
-#   mis-segments a non-1460 gso_size — payload boundaries stop matching the
-#   sequence numbers, and since the engine also computes the checksums the
-#   receiver ACCEPTS the corrupt bytes. TLS then fails the record MAC.
-#   ⛔ SILENT DATA CORRUPTION, not loss: nothing logs it, no counter moves.
-#   ⛔ ethtool -K tailscale0 gro off does NOT help — the coalescing is inside
-#   wireguard-go, not kernel GRO, and this build exposes no knob for it
-#   (only TS_DEBUG_DISABLE_UDP_GSO/GRO, which are the encrypted UDP side).
-#   ⭐ TSO is the SOLE culprit, A/B/A'd: tso off + gso on PASSES, tso on +
-#   gso off FAILS. GSO stays ON — software segmentation splits it correctly.
-#   Threshold is the first upload needing >1 tunnel MSS (~2 KB), not 8 KB.
-#   Cost of tso off is ZERO measured (WAN->LAN 703 vs 697 Mbit/s over 3
-#   alternating 50 MB runs): ecm/qca_nss_sfe shortcut-forwards WAN->LAN around
-#   the kernel path, so mesh traffic (userspace WG, never offloadable) is the
-#   only traffic that meets this engine at all.
+#   tso off (2026-09-18 -> 2026-11-20) RETIRED. A second bug on this interface:
+#   mesh->LAN uploads over ~2 KB arrived with valid checksums but WRONG bytes
+#   (TLS "bad record MAC"; nothing logged, no counter moved). Alta traced it to
+#   Qualcomm's closed network driver testing the GSO flags with == instead of
+#   as a bitmask, and fixed it in fw 1.5o (forum t/7178/21). Verified here on
+#   1.5o, A/B/A: 2 KB-32 MiB uploads through the tunnel all intact with TSO on,
+#   while tcpdump showed up to 7413 oversized packets per run handed to the
+#   hardware. TSO is now left at the firmware default (on).
+#   ⛔ If silent mesh->LAN corruption returns after a firmware change, suspect
+#   this first: re-add `ethtool -K br-lan tso off` here and the flag to
+#   mesh-health assertion 7. Repro without sudo, from a LAN Mac on the tailnet:
+#   ssh -o ProxyCommand="tailscale nc %h %p" <lan-host> sha256sum < 2MB-file
 # ⛔ NOT expressible in the Alta portal: the cloud config model has no
 #   offload/ethtool concept and does not know tailscale0 exists — checked
 #   against /cfg/config.json, not assumed.
 ethtool -K br-lan gro off 2>/dev/null
-ethtool -K br-lan tso off 2>/dev/null
 
 # ── 5. dnsmasq mesh listener (off-LAN split-DNS) ──────────────────────────────
 # Headscale split-DNS points mesh clients at this node's TAILNET addresses for

@@ -294,7 +294,7 @@ telnet probes — they orphan the lock too.
   DROP+log anything leaving `pppoe+` with src = the router's own tailnet /32 or the
   tailnet /48, or forwarded to the /48; OUTPUT-scoped for src, so exit-node traffic
   can't match, as verified by a live exit-node round trip in both families; a /10 here
-  would cut the router off, because our WAN IP is in 100.64/10 too), br-lan GRO/TSO off, **and the dnsmasq
+  would cut the router off, because our WAN IP is in 100.64/10 too), br-lan GRO off (TSO too until fw 1.5o fixed the driver; dropped 2026-11-20), **and the dnsmasq
   tailscale0 listener** (`dhcp.@dnsmasq[0].interface` — off-LAN split-DNS; the
   entry is ours, so an Alta apply that regenerates `/etc/config/dhcp` drops it
   and restarts dnsmasq AFTER post-cfg completed, which killed off-LAN split-DNS

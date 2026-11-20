@@ -20,7 +20,7 @@ evaluation, kept for its reasoning.
 | `state_file` under `/cfg` | Package default (`/cfg/tailscaled.state`) | Reconcile asserts it |
 | Quiet daemon logs | **Reconcile** | Package default is `log_stdout/stderr=1` (verbose into syslog) |
 | tailscale0 firewall + NAT | Daemon (`NetfilterMode=2`, ts-* chains) + **reconcile backstop** | An Alta reapply flushes non-fw3 rules |
-| br-lan GRO/TSO off | **Reconcile** | Not portal-expressible |
+| br-lan GRO off | **Reconcile** | Not portal-expressible. TSO off too until fw 1.5o fixed the driver bug (dropped 2026-11-20) |
 | dnsmasq tailnet listener | **Reconcile** | Cloud DHCP regen drops it |
 | Router does not take tailnet DNS/routes | Prefs (`CorpDNS=false`, `RouteAll=false`) | Preserved in the state file |
 

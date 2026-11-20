@@ -46,16 +46,13 @@
 #      green). Asserts the BIND (outcome), not the uci entry (intent). Heal:
 #      reconcile (its step 5 owns the convergence).
 #
-#   7. LAN FORWARD-PATH OFFLOADS — br-lan GRO and TSO must both be OFF; they are
-#      the mesh->LAN datapath fixes (2026-07-18 blackhole, 2026-09-18 silent
-#      corruption). Asserted because the TSO failure mode emits NOTHING: the
-#      hardware engine mis-segments a tunnel-sourced gso_size and then computes
-#      valid checksums over the mangled bytes, so the receiver ACCEPTS them —
-#      no counter moves, no log line, and the application's own integrity check
-#      (a TLS record MAC) is the only thing that ever notices. Every other
-#      assertion here guards a loud failure; this one guards a silent one, which
-#      is why drift must not wait for somebody to report corrupted data. Heal:
-#      reconcile (its step 4 owns both flags).
+#   7. LAN FORWARD-PATH OFFLOAD — br-lan GRO must be OFF; it is the mesh->LAN
+#      datapath fix for the 2026-07-18 blackhole (bulk transfers stall, small
+#      ones pass). Only mesh->LAN bulk traffic hits it, and no probe here sends
+#      any, so drift would wait for somebody to notice a stalled copy. TSO was
+#      asserted here too until 2026-11-20 (silent corruption, fixed in fw 1.5o's
+#      driver; see reconcile step 4 for the history and the repro). Heal:
+#      reconcile (its step 4 owns the flag).
 #
 #   8. PEER ROUTES — every mesh peer address must route via tailscale0. From
 #      2026-10-26 ~18–22Z table 52 was EMPTY for ~20 h while the daemon was
@@ -344,14 +341,13 @@ if [ -d /sys/class/net/tailscale0 ]; then
     fi
 fi
 
-# ── 7. br-lan forward-path offloads (silent-corruption guard) ────────────────
-# See the header: this is the one assertion whose failure mode is inaudible.
+# ── 7. br-lan forward-path offload (mesh->LAN blackhole guard) ───────────────
 # ethtool -k prints "off" or "off [fixed]", so match the VALUE not the line — a
 # NIC that cannot enable the flag reads as compliant, not as drift. A flag the
 # kernel does not expose at all yields "" and is simply not asserted.
 offload_drift() {
     M=""
-    for f in generic-receive-offload tcp-segmentation-offload; do
+    for f in generic-receive-offload; do
         V=$(ethtool -k br-lan 2>/dev/null | awk -F': ' -v k="$f" '$1==k {print $2; exit}')
         case "$V" in
             off*|"") ;;
@@ -363,10 +359,10 @@ offload_drift() {
 if [ -d /sys/class/net/br-lan ] && [ -d /sys/class/net/tailscale0 ]; then
     OFF_DRIFT=$(offload_drift)
     if [ -n "$OFF_DRIFT" ]; then
-        warn "br-lan forward-path offload drift:$OFF_DRIFT — mesh->LAN bulk uploads are being SILENTLY CORRUPTED (no counter moves; a TLS record-MAC failure is the only symptom); healing via reconcile"
+        warn "br-lan forward-path offload drift:$OFF_DRIFT — mesh->LAN bulk transfers stall (small ones still pass); healing via reconcile"
         heal
         OFF_DRIFT=$(offload_drift)
-        [ -z "$OFF_DRIFT" ] && event "healed: br-lan offloads back to gro=off tso=off" \
+        [ -z "$OFF_DRIFT" ] && event "healed: br-lan offloads back to gro=off" \
                             || err "heal FAILED: br-lan offloads still drifted:$OFF_DRIFT"
     fi
 fi
