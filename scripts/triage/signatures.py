@@ -292,8 +292,11 @@ def _mesh_allow(f, cov):
 @rule("lan-fence-hits-client", "2026-11-18", "CONFIRMED", 45)
 def _lancgnat(f, cov):
     """The client hit RT10_LANCGNAT (LAN → 100.64/10). One hit right at join is an iPhone's
-    MagicDNS query leaking before its tunnel is up: benign (2026-11-18, 1 packet). Repeated hits
-    mean something on the device really depends on a mesh/CGNAT address via the LAN."""
+    MagicDNS query leaking before its tunnel is up: benign (2026-11-18). ⚠ The log keeps only the
+    FIRST drop per source per 10 min, so a hit is not a packet: read the chain counters. Measured
+    2026-11-23 on a deliberate Wi-Fi rejoin: ≤6 packets dropped, 406/406 DNS answered, pages
+    loaded at once. Repeated hits (≥3 = ≥20 min of leaking) mean something on the device
+    really depends on a mesh/CGNAT address via the LAN."""
     c = f.get("client")
     if not c:
         return na("no --client")

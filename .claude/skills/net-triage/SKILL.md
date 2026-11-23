@@ -127,3 +127,7 @@ flags that. A shared AP uplink degrades both its wired and its wireless clients.
     compare stations on frame-weighted 15-minute retries.
 14. **In `sh`, a background job's stdin is `/dev/null`**: redirect inside the job, or ssh
     `sh -s` receives nothing and the collector "fails" silently.
+15. **A capture on `br-lan` can't see what the fences drop** (2026-11-23). Bridged frames meet
+    iptables on the bridge PORT (the log says `PHYSIN=eth1`), before `br-lan`'s capture point,
+    so a dropped packet never shows there: 0 captured while `RT10_LANCGNAT` logged the phone.
+    Capture on the port (`eth1` = AX73, `eth5` = office) or diff the chain counters.
