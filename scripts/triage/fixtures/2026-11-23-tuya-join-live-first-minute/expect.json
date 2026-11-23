@@ -1,0 +1,21 @@
+{
+ "hit": [
+  "tuya-join-outage",
+  "airtime-congestion-2g4"
+ ],
+ "not_hit": [
+  "wan-down",
+  "mwan3-policy-drift",
+  "pon-layer-fault",
+  "upstream-of-onu",
+  "cgnat-pressure",
+  "dns-path-down",
+  "mesh-down",
+  "probe-broken",
+  "probe-target-mismatch",
+  "weak-wifi-coverage",
+  "ap-deauth-storm",
+  "lan-fence-hits-client"
+ ],
+ "why": "2026-11-23 18:53Z, live, operator heard the vacuum announce it lost internet. A Tuya (84:e3:42 OUI, -67 dBm) associated to 2.4 GHz at 18:51:29Z and sent three DHCPDISCOVERs; the vacuum (-38 dBm, still associated) lost the router's pings 18:52-18:53Z and came back at 18:54:03Z. The capture landed one minute into the loss, so only ONE lost row was in the window and the two-row rule missed it; it must fire as ongoing. 2.4 GHz was 89% busy (AP tx 75%) against 17-43% in every earlier run, so airtime-congestion-2g4 is a true reading here, but it is the same event, not neighbours. WAN, PON and DNS clean; the wired Mac ran 564/509 Mbit/s."
+}

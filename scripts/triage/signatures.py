@@ -385,7 +385,12 @@ def _tuya(f, cov):
     """A Tuya device (re)joining 2.4 GHz precedes multi-minute downstream loss to 2.4 GHz clients
     (14/16 vacuum outages). Trigger CONFIRMED, mechanism inside the AP UNKNOWN. Needs a LAN probe
     target that is really ON the AX73 2.4 GHz radio and answers when healthy (see
-    probe-target-mismatch: 11-16 → 11-18 the "vacuum" probe was pinging the wired PS5)."""
+    probe-target-mismatch: 11-16 → 11-18 the "vacuum" probe was pinging the wired PS5).
+    2026-11-23 (one event, 18:51:29Z join → vacuum dark 18:52–18:54Z, still associated at −38 dBm):
+    2.4 GHz was 89% busy, 75% of it the AP's own transmissions (busy 17–43% in every earlier run,
+    30% two minutes later), and every echo sent across the gap was answered within 1 ms at
+    recovery: frames were HELD (AP queue or the vacuum's own tx, not yet split), not dropped. A live run caught at minute one of
+    the loss counts it as ongoing; a closed single lost minute still does not."""
     tuya = ("70:89:76", "84:e3:42", "50:8b:b9")
     joins = sorted({x[0] for x in f.get("dhcp", []) if x[2] and x[2][:8] in tuya and x[1] in ("DHCPDISCOVER", "DHCPREQUEST")}
                    | {e[0] for e in f["wifi"]["events"] if e[2][:8] in tuya and e[3] in ("E_ASSOC_IND", "E_REASSOC_IND")})
@@ -412,8 +417,15 @@ def _tuya(f, cov):
                 onset = a[0]
                 pre = [j for j in joins if 0 <= onset - j <= 300]
                 out.append("%s lost from %s%s" % (n, _hm(onset), ", Tuya joined %d s before" % (onset - pre[-1]) if pre else ", no Tuya join before"))
+        # A live run taken while the loss is still in its first minute (2026-11-23: the user heard the
+        # vacuum, the capture had one lost row and the rule missed).
+        last = rows[-1] if rows else None
+        if f["meta"].get("live") and last and last[1] and (last[2] or 0) >= 80 and (len(rows) < 2 or (rows[-2][2] or 0) < 80):
+            pre = [j for j in joins if 0 <= last[0] - j <= 300]
+            out.append("%s lost from %s (ongoing)%s" % (n, _hm(last[0]), ", Tuya joined %d s before" % (last[0] - pre[-1]) if pre else ", no Tuya join before"))
     if any("Tuya joined" in o for o in out):
-        return hit("; ".join(out))
+        air = [c for c in f["wifi"]["radios"].values() if c.get("band") == "2.4G" and c.get("busy") is not None]
+        return hit("; ".join(out) + ("; 2.4 GHz busy %s%%, AP tx %s%%" % (air[0]["busy"], air[0].get("tx")) if air else ""))
     return miss("; ".join(out) if out else "no ≥2-min loss on %s; Tuya (re)joins in window: %d" % (", ".join(canaries), len(joins)))
 
 
