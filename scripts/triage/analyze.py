@@ -191,7 +191,7 @@ def parse_fence_lines(lines):
         srcmac = None
         if f.get("MAC") and len(f["MAC"]) >= 35:
             srcmac = mac_norm(f["MAC"][18:35])
-        rec = [round(e["t"], 3), fence, kind, f.get("SRC"), f.get("DST"), f.get("PROTO"), f.get("DPT"), srcmac]
+        rec = [round(e["t"], 3), fence, kind, f.get("SRC"), f.get("DST"), f.get("PROTO"), f.get("DPT"), srcmac, fam]
         (connlimit if fence == "route10.connlimit" else blocks).append(rec)
     return blocks, connlimit
 
@@ -1105,6 +1105,16 @@ def sanitize(f):
     for c in (f.get("clients") or {}).values():
         c["minutes"] = [m[:3] + [""] for m in c.get("minutes", [])]
     f = walk(f)
+
+    def pub4(ip):   # a LAN host's public destination says what it was doing: keep only the shape
+        if not ip or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", ip):
+            return ip
+        a, b = (int(x) for x in ip.split(".")[:2])
+        private = a == 10 or a == 127 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168) or (a == 100 and 64 <= b <= 127)
+        return ip if private else "203.0.113.%d" % (int(_h(ip)[:4], 16) % 254 + 1)
+    for rec in (f.get("connlimit") or []) + ((f.get("fence") or {}).get("blocks") or []):
+        if len(rec) > 4:
+            rec[3], rec[4] = pub4(rec[3]), pub4(rec[4])
     f["logs"]["warn_err"] = [[t, comp, sev, "<redacted>"] for t, comp, sev, _ in f["logs"]["warn_err"]]
     if f.get("client"):
         f["client"]["events"] = []

@@ -204,19 +204,28 @@ def _cgnat(f, cov):
     ⚠ connlimit is blind to churn-shaped hosts (the decoder .20, 2026-08-20): read top4 too."""
     cl = f.get("connlimit") or []
     ct = f.get("ct")
-    if cl:
+
+    def count(lines):
         srcs = {}
-        for x in cl:
+        for x in lines:
             srcs[x[3]] = srcs.get(x[3], 0) + 1
-        return hit("connlimit lines: %s" % ", ".join("%s ×%d" % kv for kv in srcs.items()))
+        return ", ".join("%s ×%d" % kv for kv in srcs.items())
+    # Only a v4 BLOCK (one host over 500) is pressure by itself: v6 has no CGNAT, and a WARN
+    # (over 300) is one busy host, not the table filling. 2026-11-22: one v4 warn from an iPhone
+    # while the WAN carried 590 v4 flows in total fired this as CONFIRMED; nothing was short.
+    # Records before 2026-11-22 carry no family field; read those as v4.
+    blocks4 = [x for x in cl if x[2] == "block" and (len(x) < 9 or x[8] != "v6")]
+    if blocks4:
+        return hit("connlimit v4 BLOCK lines: %s" % count(blocks4))
+    warned = (" (connlimit warn only: %s)" % count(cl)) if cl else ""
     if not ct:
-        return na("no conntrack samples")
+        return na("no conntrack samples" + warned)
     # Measured: the CGNAT starved at ~1400 WAN v4 flows; a BLOCK at 800 still caused an outage.
     # One host near 300 is .200's normal p2p level, not pressure (2026-11-18 first run).
     big = {ip: n for ip, n in ct["top4_max"].items() if n >= 300}
     if ct["wan4_max"] >= 800:
-        return hit("WAN v4 flows max %d (danger from ~800, starved at ~1400); hosts ≥300: %s" % (ct["wan4_max"], big))
-    return miss("WAN v4 flows max %d; hosts ≥300: %s" % (ct["wan4_max"], big or "none"))
+        return hit("WAN v4 flows max %d (danger from ~800, starved at ~1400); hosts ≥300: %s%s" % (ct["wan4_max"], big, warned))
+    return miss("WAN v4 flows max %d; hosts ≥300: %s%s" % (ct["wan4_max"], big or "none", warned))
 
 
 @rule("dns-path-down", "2026-08-10", "CONFIRMED", 60)

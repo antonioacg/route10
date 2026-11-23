@@ -1,0 +1,20 @@
+{
+ "hit": [
+  "tuya-join-outage",
+  "ap-deauth-storm"
+ ],
+ "not_hit": [
+  "cgnat-pressure",
+  "wan-down",
+  "mwan3-policy-drift",
+  "pon-layer-fault",
+  "upstream-of-onu",
+  "dns-path-down",
+  "mesh-down",
+  "bufferbloat",
+  "probe-broken",
+  "probe-target-mismatch",
+  "lan-fence-hits-client"
+ ],
+ "why": "2026-11-22 23:39Z, live, operator asked what was going on. WAN, PON, DNS clean; wired Mac 590/550 Mbit/s. A far Tuya bulb ('wlan0', 70:89:76 OUI, -82 dBm) cycled deauth/reassoc 16 times 23:12-23:30Z, and the vacuum (-43 dBm, next to the AP) lost the router's pings 23:21-23:23 and 23:25-23:30Z while still transmitting ~20 KB/min and receiving only the probe's echoes; the AP itself answered throughout. Must NOT fire: cgnat-pressure. One v4 connlimit WARN (an iPhone crossing 300 at 23:21:32Z) while WAN v4 peaked at 590 flows in total; nothing was blocked, and router-to-vacuum ICMP never crosses the CGNAT."
+}
